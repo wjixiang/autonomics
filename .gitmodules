@@ -1,0 +1,9 @@
+[submodule "agentik-core"]
+	path = agentik-core
+	url = git@github.com:wjixiang/agentik-core.git
+[submodule "agentik-types"]
+	path = agentik-types
+	url = git@github.com:wjixiang/agentik-types.git
+[submodule "agentik-sdk"]
+	path = agentik-sdk
+	url = git@github.com:wjixiang/agentik-sdk.git
