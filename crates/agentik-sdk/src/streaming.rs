@@ -736,10 +736,12 @@ impl MessageStream {
                 ContentBlock::ToolUse { input, .. },
                 ContentBlockDelta::InputJsonDelta { partial_json },
             ) => match input {
+                // Already accumulating as a string — just append.
                 serde_json::Value::String(buf) => buf.push_str(partial_json),
-                // Block was already finalized (shouldn't happen during a
-                // live stream); ignore subsequent partial deltas.
-                _ => {}
+                // First delta: the initial value from ContentBlockStart is
+                // `{}` (empty object) or similar — replace with a string
+                // buffer so subsequent deltas can append.
+                other => *other = serde_json::Value::String(partial_json.to_string()),
             },
             _ => {}
         }
