@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/agentik",
+  "crates/agentik-core",
+  "crates/agentik-sdk",
+  "crates/agentik-types",
+]
+
+# -------------------------------------------------------------------
+# Shared package metadata. Sub-crates can opt-in via `edition.workspace = true`
+# etc. when they choose to migrate. They are NOT required to migrate — this
+# workspace coexists with each member's existing Cargo.toml.
+# -------------------------------------------------------------------
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+# -------------------------------------------------------------------
+# Centralized version pins. The `agentik` umbrella uses
+# `dep = { workspace = true }` to inherit these.
+# Sub-crates continue to declare their own versions in their own
+# Cargo.toml; that's fine — workspace.dependencies is for *new* members
+# (the umbrella) and future cross-crate alignment.
+# -------------------------------------------------------------------
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+async-trait = "0.1"
+
+
+# Suppress unused-warnings for the public-API workspace.dependencies that
+# the umbrella doesn't directly import. Keep this list as a hint for
+# future members; do not delete entries just because a single member
+# doesn't use them.
+[workspace.lints.rust]
+unused_imports = "allow"
