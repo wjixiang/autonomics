@@ -7,7 +7,8 @@
 pub mod events;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use futures::Stream;
 use pin_project::pin_project;
 use tokio::sync::{broadcast, oneshot};
@@ -79,32 +80,32 @@ use self::events::{EventHandler, EventType};
 /// ```
 #[pin_project]
 pub struct MessageStream {
-    /// Current accumulated message snapshot
-    current_message: Arc<Mutex<Option<Message>>>,
-    
+    /// Current accumulated message snapshot (single writer: bg task; multiple readers)
+    current_message: Arc<RwLock<Option<Message>>>,
+
     /// Event handlers for different event types
     event_handlers: Arc<Mutex<HashMap<EventType, Vec<EventHandler>>>>,
-    
+
     /// Broadcast channel for distributing events to handlers
     event_sender: broadcast::Sender<MessageStreamEvent>,
-    
+
     /// Stream for events from the underlying HTTP stream
     #[pin]
     event_stream: BroadcastStream<MessageStreamEvent>,
-    
+
     /// Channel for signaling when the stream ends
     completion_sender: Option<oneshot::Sender<Result<Message>>>,
     completion_receiver: oneshot::Receiver<Result<Message>>,
-    
-    /// Whether the stream has ended
-    ended: Arc<Mutex<bool>>,
-    
-    /// Whether an error occurred
-    errored: Arc<Mutex<bool>>,
-    
-    /// Whether the stream was aborted by the user
-    aborted: Arc<Mutex<bool>>,
-    
+
+    /// Whether the stream has ended (one-way flag: false → true)
+    ended: Arc<AtomicBool>,
+
+    /// Whether an error occurred (one-way flag: false → true)
+    errored: Arc<AtomicBool>,
+
+    /// Whether the stream was aborted by the user (one-way flag: false → true)
+    aborted: Arc<AtomicBool>,
+
     /// Response metadata
     request_id: Option<String>,
 
@@ -128,11 +129,11 @@ impl MessageStream {
         let (event_sender, event_receiver) = broadcast::channel(events.len().max(1));
         let (completion_sender, completion_receiver) = oneshot::channel();
 
-        let current_message = Arc::new(Mutex::new(None));
+        let current_message = Arc::new(RwLock::new(None));
         let event_handlers = Arc::new(Mutex::new(HashMap::new()));
-        let ended = Arc::new(Mutex::new(false));
-        let errored = Arc::new(Mutex::new(false));
-        let aborted = Arc::new(Mutex::new(false));
+        let ended = Arc::new(AtomicBool::new(false));
+        let errored = Arc::new(AtomicBool::new(false));
+        let aborted = Arc::new(AtomicBool::new(false));
 
         let cm = current_message.clone();
         let handlers = event_handlers.clone();
@@ -154,7 +155,7 @@ impl MessageStream {
                     AnthropicError::StreamError("Stream ended without message".to_string())
                 }),
             );
-            *end.lock().unwrap() = true;
+            end.store(true, Ordering::Release);
         });
 
         Self {
@@ -231,11 +232,11 @@ impl MessageStream {
         let (event_sender, event_receiver) = broadcast::channel(config.buffer_size);
         let (completion_sender, completion_receiver) = oneshot::channel();
 
-        let current_message = Arc::new(Mutex::new(None));
+        let current_message = Arc::new(RwLock::new(None));
         let event_handlers = Arc::new(Mutex::new(HashMap::new()));
-        let ended = Arc::new(Mutex::new(false));
-        let errored = Arc::new(Mutex::new(false));
-        let aborted = Arc::new(Mutex::new(false));
+        let ended = Arc::new(AtomicBool::new(false));
+        let errored = Arc::new(AtomicBool::new(false));
+        let aborted = Arc::new(AtomicBool::new(false));
         let request_id = http_stream.request_id().map(|s| s.to_string());
 
         // Idle timeout (per chunk). Default 30s, matching StreamConfig.
@@ -264,7 +265,7 @@ impl MessageStream {
             let mut retries_used: u32 = 0;
 
             'outer: loop {
-                if *aborted_bg.lock().unwrap() {
+                if aborted_bg.load(Ordering::Acquire) {
                     break;
                 }
 
@@ -334,7 +335,7 @@ impl MessageStream {
 
                             // 4. Terminal event?
                             if matches!(event, crate::types::MessageStreamEvent::MessageStop) {
-                                *ended_bg.lock().unwrap() = true;
+                                ended_bg.store(true, Ordering::Release);
                                 let result = final_message.clone().ok_or_else(|| {
                                     crate::types::AnthropicError::StreamError(
                                         "Stream ended without message".to_string(),
@@ -392,7 +393,7 @@ impl MessageStream {
                             break 'outer;
                         }
                         Ok(None) => {
-                            *ended_bg.lock().unwrap() = true;
+                            ended_bg.store(true, Ordering::Release);
                             break 'outer;
                         }
                     }
@@ -410,7 +411,7 @@ impl MessageStream {
                     ))
                 });
             }
-            *ended_bg.lock().unwrap() = true;
+            ended_bg.store(true, Ordering::Release);
         });
         *bg_handle_clone.lock().unwrap() = Some(background_handle);
 
@@ -449,7 +450,7 @@ impl MessageStream {
     where
         F: Fn(&str, &str) + Send + Sync + 'static,
     {
-        self.on(EventType::Text, EventHandler::Text(Box::new(callback)))
+        self.on(EventType::Text, EventHandler::Text(std::sync::Arc::new(Box::new(callback))))
     }
     
     /// Register a callback for stream events.
@@ -474,7 +475,7 @@ impl MessageStream {
     where
         F: Fn(&MessageStreamEvent, &Message) + Send + Sync + 'static,
     {
-        self.on(EventType::StreamEvent, EventHandler::StreamEvent(Box::new(callback)))
+        self.on(EventType::StreamEvent, EventHandler::StreamEvent(std::sync::Arc::new(Box::new(callback))))
     }
     
     /// Register a callback for when a complete message is received.
@@ -492,7 +493,7 @@ impl MessageStream {
     where
         F: Fn(&Message) + Send + Sync + 'static,
     {
-        self.on(EventType::Message, EventHandler::Message(Box::new(callback)))
+        self.on(EventType::Message, EventHandler::Message(std::sync::Arc::new(Box::new(callback))))
     }
     
     /// Register a callback for when the final message is complete.
@@ -510,7 +511,7 @@ impl MessageStream {
     where
         F: Fn(&Message) + Send + Sync + 'static,
     {
-        self.on(EventType::FinalMessage, EventHandler::FinalMessage(Box::new(callback)))
+        self.on(EventType::FinalMessage, EventHandler::FinalMessage(std::sync::Arc::new(Box::new(callback))))
     }
     
     /// Register a callback for errors.
@@ -528,7 +529,7 @@ impl MessageStream {
     where
         F: Fn(&AnthropicError) + Send + Sync + 'static,
     {
-        self.on(EventType::Error, EventHandler::Error(Box::new(callback)))
+        self.on(EventType::Error, EventHandler::Error(std::sync::Arc::new(Box::new(callback))))
     }
     
     /// Register a callback for when the stream ends.
@@ -546,7 +547,7 @@ impl MessageStream {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.on(EventType::End, EventHandler::End(Box::new(callback)))
+        self.on(EventType::End, EventHandler::End(std::sync::Arc::new(Box::new(callback))))
     }
     
     /// Generic method to register event handlers.
@@ -603,22 +604,22 @@ impl MessageStream {
     ///
     /// Returns `None` if the stream hasn't started or no message has been received yet.
     pub fn current_message(&self) -> Option<Message> {
-        self.current_message.lock().unwrap().clone()
+        self.current_message.read().unwrap().clone()
     }
     
     /// Check if the stream has ended.
     pub fn ended(&self) -> bool {
-        *self.ended.lock().unwrap()
+        self.ended.load(Ordering::Acquire)
     }
     
     /// Check if an error occurred.
     pub fn errored(&self) -> bool {
-        *self.errored.lock().unwrap()
+        self.errored.load(Ordering::Acquire)
     }
     
     /// Check if the stream was aborted.
     pub fn aborted(&self) -> bool {
-        *self.aborted.lock().unwrap()
+        self.aborted.load(Ordering::Acquire)
     }
 
     /// Get the request ID.
@@ -630,7 +631,7 @@ impl MessageStream {
     ///
     /// Marks the stream as aborted and cancels the background task.
     pub fn abort(&self) {
-        *self.aborted.lock().unwrap() = true;
+        self.aborted.store(true, Ordering::Release);
         if let Some(handle) = self._background_task.lock().unwrap().take() {
             handle.abort();
         }
@@ -641,12 +642,12 @@ impl MessageStream {
     /// can run without `&self`.
     fn accumulate_event(
         event: &MessageStreamEvent,
-        current: &Mutex<Option<Message>>,
+        current: &RwLock<Option<Message>>,
         final_message: &mut Option<Message>,
     ) {
         // `MessageStart` is a full replace; everything else is incremental.
         if let MessageStreamEvent::MessageStart { message } = event {
-            *current.lock().unwrap() = Some(message.clone());
+            *current.write().unwrap() = Some(message.clone());
             *final_message = Some(message.clone());
             return;
         }
@@ -702,7 +703,7 @@ impl MessageStream {
             }
         }
 
-        if let Some(msg) = current.lock().unwrap().as_mut() {
+        if let Some(msg) = current.write().unwrap().as_mut() {
             apply_to(msg, event);
         }
         if let Some(msg) = final_message.as_mut() {
@@ -751,21 +752,51 @@ impl MessageStream {
     ///
     /// Takes the shared handler-table and current-message locks so it can
     /// run from the background task without `&self`.
+    ///
+    /// Clones the handler list and message snapshot before invoking any
+    /// callback, so the locks are released before user code runs. This
+    /// prevents lock poisoning if a callback panics.
     fn dispatch_event(
         event: &MessageStreamEvent,
         handlers: &Mutex<HashMap<EventType, Vec<EventHandler>>>,
-        current: &Mutex<Option<Message>>,
+        current: &RwLock<Option<Message>>,
     ) {
-        let handlers = handlers.lock().unwrap();
-        let current = current.lock().unwrap();
+        // Clone handler lists and message snapshot while holding the locks,
+        // then release both before invoking any callbacks.
+        let (stream_handlers, text_handlers, msg_handlers, end_handlers, final_handlers, current_snapshot) = {
+            let handlers_guard = handlers.lock().unwrap();
+            let current_snapshot = current.read().unwrap().clone();
+
+            let stream_handlers: Vec<EventHandler> = handlers_guard
+                .get(&EventType::StreamEvent)
+                .cloned()
+                .unwrap_or_default();
+            let text_handlers: Vec<EventHandler> = handlers_guard
+                .get(&EventType::Text)
+                .cloned()
+                .unwrap_or_default();
+            let msg_handlers: Vec<EventHandler> = handlers_guard
+                .get(&EventType::Message)
+                .cloned()
+                .unwrap_or_default();
+            let end_handlers: Vec<EventHandler> = handlers_guard
+                .get(&EventType::End)
+                .cloned()
+                .unwrap_or_default();
+            let final_handlers: Vec<EventHandler> = handlers_guard
+                .get(&EventType::FinalMessage)
+                .cloned()
+                .unwrap_or_default();
+
+            // Both locks released here.
+            (stream_handlers, text_handlers, msg_handlers, end_handlers, final_handlers, current_snapshot)
+        };
 
         // Every event fans out to raw stream-event subscribers.
-        if let Some(stream_handlers) = handlers.get(&EventType::StreamEvent) {
-            for handler in stream_handlers {
-                if let EventHandler::StreamEvent(cb) = handler {
-                    if let Some(msg) = current.as_ref() {
-                        cb(event, msg);
-                    }
+        for handler in &stream_handlers {
+            if let EventHandler::StreamEvent(cb) = handler {
+                if let Some(msg) = &current_snapshot {
+                    cb(event, msg);
                 }
             }
         }
@@ -773,42 +804,34 @@ impl MessageStream {
         match event {
             MessageStreamEvent::ContentBlockDelta { delta, .. } => {
                 if let ContentBlockDelta::TextDelta { text } = delta {
-                    if let Some(text_handlers) = handlers.get(&EventType::Text) {
-                        let snapshot = current
-                            .as_ref()
-                            .map(Self::accumulated_text)
-                            .unwrap_or_default();
-                        for handler in text_handlers {
-                            if let EventHandler::Text(cb) = handler {
-                                cb(text, &snapshot);
-                            }
+                    let snapshot = current_snapshot
+                        .as_ref()
+                        .map(Self::accumulated_text)
+                        .unwrap_or_default();
+                    for handler in &text_handlers {
+                        if let EventHandler::Text(cb) = handler {
+                            cb(text, &snapshot);
                         }
                     }
                 }
             }
             MessageStreamEvent::MessageStart { message } => {
-                if let Some(msg_handlers) = handlers.get(&EventType::Message) {
-                    for handler in msg_handlers {
-                        if let EventHandler::Message(cb) = handler {
-                            cb(message);
-                        }
+                for handler in &msg_handlers {
+                    if let EventHandler::Message(cb) = handler {
+                        cb(message);
                     }
                 }
             }
             MessageStreamEvent::MessageStop => {
-                if let Some(end_handlers) = handlers.get(&EventType::End) {
-                    for handler in end_handlers {
-                        if let EventHandler::End(cb) = handler {
-                            cb();
-                        }
+                for handler in &end_handlers {
+                    if let EventHandler::End(cb) = handler {
+                        cb();
                     }
                 }
-                if let Some(msg) = current.as_ref() {
-                    if let Some(final_handlers) = handlers.get(&EventType::FinalMessage) {
-                        for handler in final_handlers {
-                            if let EventHandler::FinalMessage(cb) = handler {
-                                cb(msg);
-                            }
+                if let Some(msg) = &current_snapshot {
+                    for handler in &final_handlers {
+                        if let EventHandler::FinalMessage(cb) = handler {
+                            cb(msg);
                         }
                     }
                 }
@@ -820,15 +843,19 @@ impl MessageStream {
     /// Mark the stream as errored and fire registered error handlers.
     fn fire_error(
         handlers: &Mutex<HashMap<EventType, Vec<EventHandler>>>,
-        errored: &Mutex<bool>,
+        errored: &AtomicBool,
         error: &AnthropicError,
     ) {
-        *errored.lock().unwrap() = true;
-        if let Some(error_handlers) = handlers.lock().unwrap().get(&EventType::Error) {
-            for handler in error_handlers {
-                if let EventHandler::Error(cb) = handler {
-                    cb(error);
-                }
+        errored.store(true, Ordering::Release);
+        // Clone error handlers before invoking to avoid holding the lock
+        // during callbacks (prevents poisoning on panic).
+        let error_handlers: Vec<EventHandler> = handlers.lock().unwrap()
+            .get(&EventType::Error)
+            .cloned()
+            .unwrap_or_default();
+        for handler in error_handlers {
+            if let EventHandler::Error(cb) = handler {
+                cb(error);
             }
         }
     }
@@ -849,43 +876,50 @@ impl MessageStream {
 
 impl Stream for MessageStream {
     type Item = Result<MessageStreamEvent>;
-    
+
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         use futures::Stream as FuturesStream;
 
-        let this = self.project();
+        let mut this = self.project();
 
-        // When the background SSE-processing task has finished (ended == true)
-        // and all buffered broadcast events have been drained, signal
-        // stream termination.  Without this check the BroadcastStream
-        // would return Pending forever because the `event_sender` stored
-        // in this struct keeps the broadcast channel open.
-        if *this.ended.lock().unwrap() {
-            return match FuturesStream::poll_next(this.event_stream, cx) {
+        let stream_ended = this.ended.load(Ordering::Acquire);
+
+        // Loop so that lagged events can be skipped without
+        // returning a fatal error to the consumer.
+        loop {
+            match FuturesStream::poll_next(this.event_stream.as_mut(), cx) {
                 std::task::Poll::Ready(Some(Ok(event))) => {
-                    std::task::Poll::Ready(Some(Ok(event)))
+                    // Got a real event -- always return it regardless
+                    // of the ended flag (buffered events must be drained).
+                    return std::task::Poll::Ready(Some(Ok(event)));
                 }
-                _ => std::task::Poll::Ready(None),
-            };
-        }
-
-        match FuturesStream::poll_next(this.event_stream, cx) {
-            std::task::Poll::Ready(Some(Ok(event))) => {
-                std::task::Poll::Ready(Some(Ok(event)))
+                std::task::Poll::Ready(Some(Err(_err))) => {
+                    // Broadcast channel lagged -- an event was dropped but
+                    // the stream is still alive.  Skip it and continue
+                    // polling for the next event.
+                    tracing::debug!("broadcast receiver lagged, skipping event");
+                    continue;
+                }
+                std::task::Poll::Ready(None) => {
+                    // Broadcast channel closed (all senders dropped).
+                    return std::task::Poll::Ready(None);
+                }
+                std::task::Poll::Pending => {
+                    if stream_ended {
+                        // Background task finished AND no more buffered
+                        // events.  The broadcast sender is still alive
+                        // (held by this struct), so BroadcastStream would
+                        // otherwise return Pending forever.  Synthesize
+                        // the terminal state.
+                        return std::task::Poll::Ready(None);
+                    }
+                    // Stream not ended yet -- register waker and wait.
+                    return std::task::Poll::Pending;
+                }
             }
-            std::task::Poll::Ready(Some(Err(err))) => {
-                tracing::warn!("broadcast channel lagged: {err}");
-                std::task::Poll::Ready(Some(Err(AnthropicError::StreamError(
-                    format!("Stream lagged: {}", err)
-                ))))
-            }
-            std::task::Poll::Ready(None) => {
-                std::task::Poll::Ready(None)
-            }
-            std::task::Poll::Pending => std::task::Poll::Pending,
         }
     }
 }
@@ -903,9 +937,9 @@ mod tests {
         let text_called = Arc::new(Mutex::new(false));
         let text_called_clone = text_called.clone();
 
-        let _handler = EventHandler::Text(Box::new(move |_delta, _snapshot| {
+        let _handler = EventHandler::Text(std::sync::Arc::new(Box::new(move |_delta, _snapshot| {
             *text_called_clone.lock().unwrap() = true;
-        }));
+        })));
 
         // Test event type equality
         assert_eq!(EventType::Text, EventType::Text);
@@ -1401,5 +1435,49 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
             }),
             request_id: None,
         }
+    }
+
+    /// Verify that poll_next drains all buffered events before returning None.
+    /// This is a regression test for a bug where the `_ => Ready(None)` arm
+    /// in poll_next's `ended` branch converted `Pending` into premature None,
+    /// losing events that were buffered in the broadcast channel.
+    #[tokio::test]
+    async fn poll_next_drains_buffered_events_before_returning_none() {
+        let mut stream = MessageStream::from_events(
+            vec![
+                MessageStreamEvent::MessageStart {
+                    message: sample_message("msg_drain", 0, vec![]),
+                },
+                MessageStreamEvent::ContentBlockStart {
+                    index: 0,
+                    content_block: ContentBlock::Text { text: String::new() },
+                },
+                MessageStreamEvent::ContentBlockDelta {
+                    index: 0,
+                    delta: ContentBlockDelta::TextDelta { text: "a".into() },
+                },
+                MessageStreamEvent::ContentBlockDelta {
+                    index: 0,
+                    delta: ContentBlockDelta::TextDelta { text: "b".into() },
+                },
+                MessageStreamEvent::MessageStop,
+            ],
+            sample_message(
+                "msg_drain",
+                2,
+                vec![ContentBlock::Text { text: "ab".into() }],
+            ),
+        );
+
+        use futures::StreamExt;
+        let mut count = 0u32;
+        while let Some(result) = stream.next().await {
+            assert!(result.is_ok(), "event should be Ok, got: {:?}", result);
+            count += 1;
+        }
+        assert_eq!(
+            count, 5,
+            "all events should be drained before stream ends"
+        );
     }
 }

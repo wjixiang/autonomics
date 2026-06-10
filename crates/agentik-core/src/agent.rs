@@ -382,8 +382,20 @@ impl Agent {
             let stream_event = match event {
                 Ok(e) => e,
                 Err(e) => {
-                    tracing::warn!("stream event error: {e}; breaking stream loop");
-                    break;
+                    // poll_next already skips lagged events, but handle
+                    // them defensively here as well (belt-and-suspenders).
+                    match &e {
+                        agentik_sdk::types::AnthropicError::StreamError(msg)
+                            if msg.starts_with("Stream lagged:") =>
+                        {
+                            tracing::debug!("skipping lagged event: {e}");
+                            continue;
+                        }
+                        _ => {
+                            tracing::warn!("stream event error: {e}; breaking stream loop");
+                            break;
+                        }
+                    }
                 }
             };
 

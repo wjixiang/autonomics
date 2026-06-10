@@ -36,30 +36,35 @@ type UnitHandler = Box<dyn Fn() + Send + Sync>;
 ///
 /// This enum encapsulates the different callback types that can be registered
 /// with MessageStream for handling various events during streaming.
+///
+/// Each variant wraps its callback in `Arc` so the handler list can be
+/// cheaply cloned and iterated *after* releasing the internal lock,
+/// preventing lock poisoning if a user callback panics.
+#[derive(Clone)]
 pub enum EventHandler {
     /// Handler for stream events - receives event and current message snapshot
-    StreamEvent(StreamEventHandler),
+    StreamEvent(std::sync::Arc<StreamEventHandler>),
 
     /// Handler for text deltas - receives delta text and current accumulated text
-    Text(TextHandler),
+    Text(std::sync::Arc<TextHandler>),
 
     /// Handler for complete messages
-    Message(MessageHandler),
+    Message(std::sync::Arc<MessageHandler>),
 
     /// Handler for the final message when stream completes
-    FinalMessage(MessageHandler),
+    FinalMessage(std::sync::Arc<MessageHandler>),
 
     /// Handler for errors
-    Error(ErrorHandler),
+    Error(std::sync::Arc<ErrorHandler>),
 
     /// Handler for stream end
-    End(UnitHandler),
-    
+    End(std::sync::Arc<UnitHandler>),
+
     /// Handler for connection established
-    Connect(Box<dyn Fn() + Send + Sync>),
-    
+    Connect(std::sync::Arc<Box<dyn Fn() + Send + Sync>>),
+
     /// Handler for stream abort
-    Abort(Box<dyn Fn(&AnthropicError) + Send + Sync>),
+    Abort(std::sync::Arc<Box<dyn Fn(&AnthropicError) + Send + Sync>>),
 }
 
 impl std::fmt::Debug for EventHandler {
@@ -101,7 +106,7 @@ mod tests {
 
     #[test]
     fn test_event_handler_debug() {
-        let handler = EventHandler::Text(Box::new(|_, _| {}));
+        let handler = EventHandler::Text(std::sync::Arc::new(Box::new(|_, _| {})));
         let debug_str = format!("{:?}", handler);
         assert!(debug_str.contains("Text"));
         assert!(debug_str.contains("<callback>"));
