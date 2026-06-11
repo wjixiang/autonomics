@@ -1,29 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/agentik",
-  "crates/agentik-core",
   "crates/agentik-sdk",
   "crates/agentik-types",
 ]
 
-# -------------------------------------------------------------------
-# Shared package metadata. Sub-crates can opt-in via `edition.workspace = true`
-# etc. when they choose to migrate. They are NOT required to migrate — this
-# workspace coexists with each member's existing Cargo.toml.
-# -------------------------------------------------------------------
 [workspace.package]
 edition = "2024"
 license = "MIT"
 rust-version = "1.85"
 
-# -------------------------------------------------------------------
-# Centralized version pins. The `agentik` umbrella uses
-# `dep = { workspace = true }` to inherit these.
-# Sub-crates continue to declare their own versions in their own
-# Cargo.toml; that's fine — workspace.dependencies is for *new* members
-# (the umbrella) and future cross-crate alignment.
-# -------------------------------------------------------------------
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

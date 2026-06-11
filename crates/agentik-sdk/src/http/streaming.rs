@@ -5,7 +5,7 @@
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use futures::Stream;
+use futures::{Stream, TryStreamExt};
 use pin_project::pin_project;
 use reqwest::Response;
 use serde_json;
@@ -97,9 +97,58 @@ impl HttpStreamClient {
         // Use eventsource-stream to parse SSE events
         use eventsource_stream::Eventsource;
         
+        // Wrap each byte chunk's error in a `Debug`-friendly log. reqwest
+        // wraps every body error as `Kind::Decode` with the message
+        // "error decoding response body", which is useless on its own —
+        // the real cause is in the source chain (h2 stream error,
+        // connection reset, transfer-encoding failure, etc.). Logging
+        // the whole chain here turns the cryptic upstream message into
+        // something actionable.
+        let byte_stream = byte_stream.inspect_err(|e| {
+            use std::error::Error as _;
+            use std::fmt::Write as _;
+            let mut chain = String::new();
+            let _ = write!(&mut chain, "{e}");
+            let mut src = e.source();
+            let mut depth = 0;
+            while let Some(s) = src {
+                let _ = write!(&mut chain, " :: caused_by[{depth}]: {s}");
+                src = s.source();
+                depth += 1;
+                if depth > 8 { break; }
+            }
+            tracing::warn!(
+                is_decode = e.is_decode(),
+                is_connect = e.is_connect(),
+                is_timeout = e.is_timeout(),
+                is_body = e.is_body(),
+                error = %chain,
+                "create_event_stream: raw byte_stream error before SSE parser wraps it"
+            );
+        });
+
         let sse_stream = byte_stream
             .eventsource()
             .map(|result| -> Result<Option<MessageStreamEvent>> {
+                // The eventsource-stream crate wraps every body error as
+                // `Transport error: ...` — losing the original reqwest
+                // error type and source chain. Unwrap it here so we can
+                // log the actual cause (connection reset, h2 protocol
+                // error, transfer-encoding failure, etc.).
+                if let Err(e) = &result {
+                    use std::fmt::Write as _;
+                    let mut chain = String::new();
+                    let _ = write!(&mut chain, "{e}");
+                    let mut src = std::error::Error::source(&e);
+                    let mut depth = 0;
+                    while let Some(s) = src {
+                        let _ = write!(&mut chain, " :: caused by[{depth}]: {s}");
+                        src = s.source();
+                        depth += 1;
+                        if depth > 8 { break; }
+                    }
+                    tracing::warn!(error = %chain, "create_event_stream: eventsource-stream error (with cause chain)");
+                }
                 match result {
                     Ok(event) => {
                         // Parse the SSE event data based on event type.
@@ -254,13 +303,24 @@ impl Stream for HttpStreamClient {
 
         match this.event_stream.poll_next(cx) {
             Poll::Ready(Some(Ok(event))) => {
-                if matches!(event, MessageStreamEvent::MessageStop) {
+                let is_stop = matches!(event, MessageStreamEvent::MessageStop);
+                tracing::trace!(
+                    event = ?event,
+                    is_stop,
+                    "HttpStreamClient: received SSE event"
+                );
+                if is_stop {
                     *this.ended = true;
+                    tracing::info!("HttpStreamClient: stream ended (MessageStop)");
                 }
                 Poll::Ready(Some(Ok(event)))
             }
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
+            Poll::Ready(Some(Err(e))) => {
+                tracing::warn!(error = %e, "HttpStreamClient: SSE error");
+                Poll::Ready(Some(Err(e)))
+            }
             Poll::Ready(None) => {
+                tracing::info!("HttpStreamClient: underlying SSE stream returned None (connection closed)");
                 *this.ended = true;
                 Poll::Ready(None)
             }
@@ -280,6 +340,14 @@ pub struct StreamRequestBuilder {
     headers: reqwest::header::HeaderMap,
     /// Stream configuration
     config: StreamConfig,
+    /// When true, replace the client's per-request `timeout` with
+    /// `Duration::MAX` for this stream. Streaming bodies are open-ended
+    /// (the server can trickle events indefinitely), so the global
+    /// request timeout — which reqwest computes from connection start
+    /// to the last body byte — eventually fires and aborts perfectly
+    /// healthy streams. Per-chunk idle timeouts in [`StreamConfig`]
+    /// still cover real stalls.
+    disable_request_timeout: bool,
 }
 
 impl StreamRequestBuilder {
@@ -290,7 +358,19 @@ impl StreamRequestBuilder {
             base_url,
             headers: reqwest::header::HeaderMap::new(),
             config: StreamConfig::default(),
+            // Streams are open-ended by design; rely on per-chunk idle
+            // timeouts (`StreamConfig::event_timeout`) instead of the
+            // client's overall request timeout.
+            disable_request_timeout: true,
         }
+    }
+
+    /// Override the default behaviour of disabling the per-request
+    /// timeout. Defaults to disabled for safety; tests or callers that
+    /// explicitly want a request-level deadline can re-enable it.
+    pub fn disable_request_timeout(mut self, disable: bool) -> Self {
+        self.disable_request_timeout = disable;
+        self
     }
 
     /// Add a header to the request.
@@ -317,7 +397,7 @@ impl StreamRequestBuilder {
         body: &T,
     ) -> Result<HttpStreamClient> {
         let url = format!("{}/{}", self.base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'));
-        
+
         let mut headers = self.headers;
         headers.insert(
             reqwest::header::ACCEPT,
@@ -327,15 +407,83 @@ impl StreamRequestBuilder {
             reqwest::header::CACHE_CONTROL,
             reqwest::header::HeaderValue::from_static("no-cache"),
         );
+        // SSE bodies must arrive as raw UTF-8 so eventsource-stream can
+        // split on \n\n delimiters. We consume `Response::bytes_stream()`
+        // directly (no automatic decompression), so we must ask the server
+        // to skip gzip/brotli — otherwise reqwest hands us compressed
+        // bytes and the parser fails with "error decoding response body".
+        headers.insert(
+            reqwest::header::ACCEPT_ENCODING,
+            reqwest::header::HeaderValue::from_static("identity"),
+        );
 
-        let response = self
+        tracing::info!(
+            url = %url,
+            accept = "text/event-stream",
+            accept_encoding = "identity",
+            disable_request_timeout = self.disable_request_timeout,
+            "post_stream: issuing HTTP request"
+        );
+
+        // SSE bodies are open-ended: events may trickle in over many
+        // minutes. reqwest's overall request timeout (default 600s in
+        // this client) eventually aborts perfectly healthy streams and
+        // surfaces the failure as "error decoding response body ::
+        // operation timed out". Disable the per-request timeout for
+        // streams; [`StreamConfig::event_timeout`] still guards against
+        // per-chunk stalls.
+        let mut request = self
             .client
             .post(&url)
             .headers(headers)
-            .json(body)
+            .json(body);
+        if self.disable_request_timeout {
+            request = request.timeout(std::time::Duration::from_secs(u64::MAX));
+        }
+
+        let response = request
             .send()
             .await
             .map_err(|e| AnthropicError::Connection { message: e.to_string() })?;
+
+        // Inspect the actual response headers BEFORE handing to the SSE
+        // parser. If the server ignored our Accept-Encoding: identity and
+        // still returned gzip/brotli, we'll see Content-Encoding here and
+        // can fail fast with an actionable error instead of a cryptic
+        // "error decoding response body" deep in the parser.
+        let content_encoding = response
+            .headers()
+            .get("content-encoding")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let transfer_encoding = response
+            .headers()
+            .get("transfer-encoding")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let status = response.status();
+        tracing::info!(
+            status = %status,
+            content_type = content_type.as_deref().unwrap_or("?"),
+            content_encoding = content_encoding.as_deref().unwrap_or("(none)"),
+            transfer_encoding = transfer_encoding.as_deref().unwrap_or("(none)"),
+            "post_stream: got response headers"
+        );
+        if let Some(enc) = &content_encoding {
+            if enc != "identity" && !enc.is_empty() {
+                tracing::error!(
+                    content_encoding = %enc,
+                    "post_stream: server returned a compressed body despite Accept-Encoding: identity. \
+                     bytes_stream() does not auto-decompress, so SSE parsing will fail. \
+                     The upstream proxy/gateway is overriding Accept-Encoding."
+                );
+            }
+        }
 
         HttpStreamClient::from_response(response, self.config).await
     }

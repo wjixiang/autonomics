@@ -22,9 +22,8 @@ fn create_custom_client() -> Option<Anthropic> {
     let base_url = std::env::var("CUSTOM_BASE_URL")
         .unwrap_or_else(|_| "https://your-custom-gateway.example.com/v1/anthropic".to_string());
 
-    let config = ClientConfig::new(token)
+    let config = ClientConfig::new(token, base_url)
         .with_auth_method(AuthMethod::Bearer)
-        .with_base_url(base_url)
         .with_timeout(Duration::from_secs(45));
 
     Anthropic::with_config(config).ok()
@@ -272,10 +271,12 @@ async fn test_bearer_token_authentication() {
             .expect("CUSTOM_BEARER_TOKEN should be available for this test");
 
         Anthropic::with_config(
-            ClientConfig::new(token)
-                .with_base_url(std::env::var("CUSTOM_BASE_URL").unwrap_or_else(|_| {
+            ClientConfig::new(
+                token,
+                std::env::var("CUSTOM_BASE_URL").unwrap_or_else(|_| {
                     "https://your-custom-gateway.example.com/v1/anthropic".to_string()
-                }))
+                }),
+            )
                 .with_auth_method(AuthMethod::Bearer)
                 .with_timeout(Duration::from_secs(45)),
         )

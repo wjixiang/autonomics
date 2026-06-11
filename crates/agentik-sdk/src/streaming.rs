@@ -330,6 +330,7 @@ impl MessageStream {
                         Ok(Some(Ok(event))) => {
                             if matches!(event, crate::types::MessageStreamEvent::MessageStart { .. }) {
                                 saw_message_start = true;
+                                tracing::info!("background task: saw MessageStart");
                             }
 
                             // 1. Accumulate into the running snapshot and the
@@ -346,6 +347,10 @@ impl MessageStream {
 
                             // 4. Terminal event?
                             if matches!(event, crate::types::MessageStreamEvent::MessageStop) {
+                                tracing::info!(
+                                    has_final_message = final_message.is_some(),
+                                    "background task: received MessageStop, sending completion"
+                                );
                                 ended_bg.store(true, Ordering::Release);
                                 ended_notify_bg.notify_one();
                                 let result = final_message.clone().ok_or_else(|| {
@@ -405,6 +410,11 @@ impl MessageStream {
                             break 'outer;
                         }
                         Ok(None) => {
+                            tracing::info!(
+                                saw_message_start,
+                                has_final_message = final_message.is_some(),
+                                "background task: HTTP stream ended (None) — no more SSE events"
+                            );
                             ended_bg.store(true, Ordering::Release);
                             ended_notify_bg.notify_one();
                             break 'outer;
@@ -418,17 +428,18 @@ impl MessageStream {
             // task has already accumulated the full message; we just need
             // to consume any remaining data from the HTTP response body
             // so that hyper/h2 doesn't cancel the stream on drop.
+            tracing::info!("background task: entering drain loop");
             loop {
                 tokio::select! {
                     _ = tokio::time::sleep(
                         std::time::Duration::from_secs(5),
                     ) => {
-                        tracing::debug!("HTTP body drain timed out after 5s");
+                        tracing::warn!("HTTP body drain timed out after 5s");
                         break;
                     }
                     result = http_stream.next() => {
                         if result.is_none() {
-                            // Stream fully consumed — no RST_STREAM.
+                            tracing::info!("background task: drain loop — stream returned None, fully consumed");
                             break;
                         }
                     }
@@ -438,14 +449,23 @@ impl MessageStream {
             // ended without a MessageStop (e.g. non-conforming server), so
             // that final_message() does not hang forever.
             if let Some(sender) = completion_sender.take() {
-                let _ = sender.send(if let Some(msg) = final_message {
+                let result = if let Some(msg) = final_message {
+                    tracing::info!(
+                        msg_id = %msg.id,
+                        "background task: fallback — sending accumulated message via completion channel"
+                    );
                     Ok(msg)
                 } else {
+                    tracing::warn!("background task: fallback — stream ended without any message");
                     Err(crate::types::AnthropicError::StreamError(
                         "Stream ended without message".to_string(),
                     ))
-                });
+                };
+                let _ = sender.send(result);
+            } else {
+                tracing::info!("background task: completion sender already consumed (MessageStop path)");
             }
+            tracing::info!("background task: exiting — setting ended=true and notifying");
             ended_bg.store(true, Ordering::Release);
             ended_notify_bg.notify_one();
         });
@@ -945,15 +965,12 @@ impl Stream for MessageStream {
                 }
                 std::task::Poll::Ready(None) => {
                     // Broadcast channel closed (all senders dropped).
+                    tracing::info!("MessageStream::poll_next: broadcast channel closed → returning None");
                     return std::task::Poll::Ready(None);
                 }
                 std::task::Poll::Pending => {
                     if stream_ended {
-                        // Background task finished AND no more buffered
-                        // events.  The broadcast sender is still alive
-                        // (held by this struct), so BroadcastStream would
-                        // otherwise return Pending forever.  Synthesize
-                        // the terminal state.
+                        tracing::info!("MessageStream::poll_next: ended flag set, broadcast Pending → returning None");
                         return std::task::Poll::Ready(None);
                     }
                     // Stream not ended yet.  The broadcast receiver's

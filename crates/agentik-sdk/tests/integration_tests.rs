@@ -3,14 +3,14 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn test_client_creation_with_api_key() {
-    let client = Anthropic::new("test-api-key").expect("Should create client");
+    let client = Anthropic::new("test-api-key", "https://api.anthropic.com").expect("Should create client");
     assert_eq!(client.config().api_key, "test-api-key");
     assert_eq!(client.config().base_url, "https://api.anthropic.com");
 }
 
 #[tokio::test]
 async fn test_client_creation_with_config() {
-    let config = ClientConfig::new("test-key")
+    let config = ClientConfig::new("test-key", "https://api.anthropic.com")
         .with_timeout(Duration::from_secs(30))
         .with_max_retries(3)
         .with_log_level(LogLevel::Debug)
@@ -24,7 +24,7 @@ async fn test_client_creation_with_config() {
 
 #[tokio::test]
 async fn test_config_validation() {
-    let config = ClientConfig::new("");
+    let config = ClientConfig::new("", "https://api.anthropic.com");
     let result = config.validate();
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("API key cannot be empty"));
@@ -32,7 +32,7 @@ async fn test_config_validation() {
 
 #[tokio::test]
 async fn test_config_with_invalid_url() {
-    let config = ClientConfig::new("test-key").with_base_url("invalid-url");
+    let config = ClientConfig::new("test-key", "https://api.anthropic.com").with_base_url("invalid-url");
     let result = config.validate();
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Base URL must start with http"));
@@ -40,7 +40,7 @@ async fn test_config_with_invalid_url() {
 
 #[tokio::test]
 async fn test_client_test_connection() {
-    let client = Anthropic::new("test-api-key").expect("Should create client");
+    let client = Anthropic::new("test-api-key", "https://api.anthropic.com").expect("Should create client");
     // This should pass validation since we have a valid config
     let result = client.test_connection().await;
     assert!(result.is_ok());
