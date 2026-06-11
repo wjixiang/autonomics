@@ -399,6 +399,28 @@ impl MessageStream {
                     }
                 }
             }
+
+            // Gracefully drain remaining HTTP body bytes to prevent
+            // sending RST_STREAM(CANCEL) to the server.  The background
+            // task has already accumulated the full message; we just need
+            // to consume any remaining data from the HTTP response body
+            // so that hyper/h2 doesn't cancel the stream on drop.
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(
+                        std::time::Duration::from_secs(5),
+                    ) => {
+                        tracing::debug!("HTTP body drain timed out after 5s");
+                        break;
+                    }
+                    result = http_stream.next() => {
+                        if result.is_none() {
+                            // Stream fully consumed — no RST_STREAM.
+                            break;
+                        }
+                    }
+                }
+            }
             // Fallback: deliver whatever was accumulated even if the stream
             // ended without a MessageStop (e.g. non-conforming server), so
             // that final_message() does not hang forever.
