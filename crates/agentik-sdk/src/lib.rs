@@ -7,14 +7,23 @@ pub mod provider;
 pub mod resources;
 pub mod streaming;
 pub mod tokens;
-pub mod utils;
-
 pub mod types {
     pub use agentik_types::*;
 }
 
 pub use agentik_types;
 
+pub use agentik_types::{
+    AnthropicError, BatchCreateParams, BatchError, BatchList, BatchListParams, BatchRequest,
+    BatchRequestBuilder, BatchRequestCounts, BatchResponse, BatchResponseBody, BatchResult,
+    BatchStatus, ContentBlock, ContentBlockDelta, ContentBlockParam, FileDownload, FileList,
+    FileListParams, FileObject, FileOrder, FilePurpose, FileStatus, FileUploadParams, ImageSource,
+    Message, MessageBatch, MessageContent, MessageCreateBuilder, MessageCreateParams, MessageDelta,
+    MessageDeltaUsage, MessageParam, MessageStreamEvent, Model, ModelList, ModelListParams,
+    ModelObject, RequestId, Result, Role, ServerTool, StopReason, StorageInfo, TextCitation, Tool,
+    ToolBuilder, ToolChoice, ToolResult, ToolResultContent, ToolUse, ToolValidationError,
+    UploadProgress, Usage, WebSearchParameters,
+};
 pub use client::Anthropic;
 pub use config::{ClientConfig, LogLevel};
 pub use files::{File, FileBuilder, FileConstraints, FileData, FileError, FileSource, to_file};
@@ -23,19 +32,6 @@ pub use http::{RetryCondition, RetryExecutor, RetryPolicy, RetryResult, api_retr
 pub use resources::{BatchesResource, FilesResource, MessagesResource, ModelsResource};
 pub use streaming::MessageStream;
 pub use tokens::{ModelPrice, ModelUsage, RequestUsage, TokenCounter, UsageStats, UsageSummary};
-pub use agentik_types::{
-    AnthropicError, BatchCreateParams, BatchError, BatchList, BatchListParams, BatchRequest,
-    BatchRequestBuilder, BatchRequestCounts, BatchResponse, BatchResponseBody, BatchResult,
-    BatchStatus, ContentBlock, ContentBlockDelta, ContentBlockParam,
-    FileDownload, FileList, FileListParams, FileObject,
-    FileOrder, FilePurpose, FileStatus, FileUploadParams, ImageSource, Message, MessageBatch,
-    MessageContent, MessageCreateBuilder, MessageCreateParams, MessageDelta, MessageDeltaUsage,
-    MessageParam, MessageStreamEvent, Model,
-    ModelList, ModelListParams, ModelObject,
-    RequestId, Result, Role, ServerTool, StopReason,
-    StorageInfo, TextCitation, Tool, ToolBuilder, ToolChoice, ToolResult, ToolResultContent,
-    ToolUse, ToolValidationError, UploadProgress, Usage, WebSearchParameters,
-};
 
 pub trait ContentBlockParamExt {
     fn image_file(

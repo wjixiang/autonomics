@@ -2,7 +2,6 @@ use crate::config::ClientConfig;
 use crate::http::HttpClient;
 use crate::resources::{BatchesResource, FilesResource, MessagesResource, ModelsResource};
 use crate::types::errors::Result;
-use crate::utils::init_logging;
 
 /// Main Anthropic API client
 pub struct Anthropic {
@@ -16,9 +15,6 @@ impl Anthropic {
         let config = ClientConfig::new(api_key, base_url);
         let http_client = HttpClient::new(config.clone())?;
 
-        // Initialize logging
-        init_logging(&config.log_level);
-
         Ok(Self {
             config,
             http_client,
@@ -28,9 +24,6 @@ impl Anthropic {
     /// Create a new Anthropic client with custom configuration
     pub fn with_config(config: ClientConfig) -> Result<Self> {
         let http_client = HttpClient::new(config.clone())?;
-
-        // Initialize logging
-        init_logging(&config.log_level);
 
         Ok(Self {
             config,

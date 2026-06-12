@@ -6,17 +6,16 @@
 
 pub mod events;
 
+use futures::Stream;
+use pin_project::pin_project;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use futures::Stream;
-use pin_project::pin_project;
 use tokio::sync::{broadcast, oneshot};
 use tokio_stream::wrappers::BroadcastStream;
 
 use crate::types::{
-    Message, MessageStreamEvent, ContentBlock, ContentBlockDelta, 
-    AnthropicError, Result
+    AnthropicError, ContentBlock, ContentBlockDelta, Message, MessageStreamEvent, Result,
 };
 
 use self::events::{EventHandler, EventType};
@@ -127,10 +126,7 @@ impl MessageStream {
     /// and `dispatch_event` helpers the production path uses), then delivers
     /// the accumulated final message through the oneshot completion channel.
     #[cfg(test)]
-    pub fn from_events(
-        events: Vec<MessageStreamEvent>,
-        final_message: Message,
-    ) -> Self {
+    pub fn from_events(events: Vec<MessageStreamEvent>, final_message: Message) -> Self {
         let (event_sender, event_receiver) = broadcast::channel(events.len().max(1));
         let (completion_sender, completion_receiver) = oneshot::channel();
 
@@ -157,11 +153,9 @@ impl MessageStream {
                 MessageStream::dispatch_event(event, &handlers, &cm);
                 let _ = tx.send(event.clone());
             }
-            let _ = completion_sender.send(
-                running_final.ok_or_else(|| {
-                    AnthropicError::StreamError("Stream ended without message".to_string())
-                }),
-            );
+            let _ = completion_sender.send(running_final.ok_or_else(|| {
+                AnthropicError::StreamError("Stream ended without message".to_string())
+            }));
             end.store(true, Ordering::Release);
             end_notify.notify_one();
         });
@@ -291,9 +285,7 @@ impl MessageStream {
                                 saw_message_start,
                                 "stream idle timeout: no event received"
                             );
-                            if !saw_message_start && retry_on_error
-                                && retries_used < max_retries
-                            {
+                            if !saw_message_start && retry_on_error && retries_used < max_retries {
                                 retries_used += 1;
                                 tracing::info!(
                                     retry = retries_used,
@@ -328,7 +320,10 @@ impl MessageStream {
                             break 'outer;
                         }
                         Ok(Some(Ok(event))) => {
-                            if matches!(event, crate::types::MessageStreamEvent::MessageStart { .. }) {
+                            if matches!(
+                                event,
+                                crate::types::MessageStreamEvent::MessageStart { .. }
+                            ) {
                                 saw_message_start = true;
                                 tracing::info!("background task: saw MessageStart");
                             }
@@ -463,7 +458,9 @@ impl MessageStream {
                 };
                 let _ = sender.send(result);
             } else {
-                tracing::info!("background task: completion sender already consumed (MessageStop path)");
+                tracing::info!(
+                    "background task: completion sender already consumed (MessageStop path)"
+                );
             }
             tracing::info!("background task: exiting — setting ended=true and notifying");
             ended_bg.store(true, Ordering::Release);
@@ -486,7 +483,7 @@ impl MessageStream {
             _background_task: bg_handle,
         })
     }
-    
+
     /// Register a callback for text delta events.
     ///
     /// The callback receives two parameters:
@@ -507,9 +504,12 @@ impl MessageStream {
     where
         F: Fn(&str, &str) + Send + Sync + 'static,
     {
-        self.on(EventType::Text, EventHandler::Text(std::sync::Arc::new(Box::new(callback))))
+        self.on(
+            EventType::Text,
+            EventHandler::Text(std::sync::Arc::new(Box::new(callback))),
+        )
     }
-    
+
     /// Register a callback for stream events.
     ///
     /// This provides access to all raw stream events and the current message snapshot.
@@ -532,9 +532,12 @@ impl MessageStream {
     where
         F: Fn(&MessageStreamEvent, &Message) + Send + Sync + 'static,
     {
-        self.on(EventType::StreamEvent, EventHandler::StreamEvent(std::sync::Arc::new(Box::new(callback))))
+        self.on(
+            EventType::StreamEvent,
+            EventHandler::StreamEvent(std::sync::Arc::new(Box::new(callback))),
+        )
     }
-    
+
     /// Register a callback for when a complete message is received.
     ///
     /// # Examples
@@ -550,9 +553,12 @@ impl MessageStream {
     where
         F: Fn(&Message) + Send + Sync + 'static,
     {
-        self.on(EventType::Message, EventHandler::Message(std::sync::Arc::new(Box::new(callback))))
+        self.on(
+            EventType::Message,
+            EventHandler::Message(std::sync::Arc::new(Box::new(callback))),
+        )
     }
-    
+
     /// Register a callback for when the final message is complete.
     ///
     /// # Examples
@@ -568,9 +574,12 @@ impl MessageStream {
     where
         F: Fn(&Message) + Send + Sync + 'static,
     {
-        self.on(EventType::FinalMessage, EventHandler::FinalMessage(std::sync::Arc::new(Box::new(callback))))
+        self.on(
+            EventType::FinalMessage,
+            EventHandler::FinalMessage(std::sync::Arc::new(Box::new(callback))),
+        )
     }
-    
+
     /// Register a callback for errors.
     ///
     /// # Examples
@@ -586,9 +595,12 @@ impl MessageStream {
     where
         F: Fn(&AnthropicError) + Send + Sync + 'static,
     {
-        self.on(EventType::Error, EventHandler::Error(std::sync::Arc::new(Box::new(callback))))
+        self.on(
+            EventType::Error,
+            EventHandler::Error(std::sync::Arc::new(Box::new(callback))),
+        )
     }
-    
+
     /// Register a callback for when the stream ends.
     ///
     /// # Examples
@@ -604,9 +616,12 @@ impl MessageStream {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.on(EventType::End, EventHandler::End(std::sync::Arc::new(Box::new(callback))))
+        self.on(
+            EventType::End,
+            EventHandler::End(std::sync::Arc::new(Box::new(callback))),
+        )
     }
-    
+
     /// Generic method to register event handlers.
     fn on(self, event_type: EventType, handler: EventHandler) -> Self {
         {
@@ -615,7 +630,7 @@ impl MessageStream {
         }
         self
     }
-    
+
     /// Wait for the stream to complete and return the final message.
     ///
     /// This method will block until the stream ends and return the accumulated message.
@@ -630,11 +645,15 @@ impl MessageStream {
     /// # }
     /// ```
     pub async fn final_message(self) -> Result<Message> {
-        let Self { completion_receiver, .. } = self;
-        completion_receiver.await
+        let Self {
+            completion_receiver,
+            ..
+        } = self;
+        completion_receiver
+            .await
             .map_err(|_| AnthropicError::StreamError("Stream ended unexpectedly".to_string()))?
     }
-    
+
     /// Wait for the stream to complete without returning the message.
     ///
     /// This is useful when you're processing events with callbacks and just need
@@ -651,29 +670,33 @@ impl MessageStream {
     /// # }
     /// ```
     pub async fn done(self) -> Result<()> {
-        let Self { completion_receiver, .. } = self;
-        completion_receiver.await
+        let Self {
+            completion_receiver,
+            ..
+        } = self;
+        completion_receiver
+            .await
             .map_err(|_| AnthropicError::StreamError("Stream ended unexpectedly".to_string()))?
             .map(|_| ())
     }
-    
+
     /// Get the current accumulated message snapshot.
     ///
     /// Returns `None` if the stream hasn't started or no message has been received yet.
     pub fn current_message(&self) -> Option<Message> {
         self.current_message.read().unwrap().clone()
     }
-    
+
     /// Check if the stream has ended.
     pub fn ended(&self) -> bool {
         self.ended.load(Ordering::Acquire)
     }
-    
+
     /// Check if an error occurred.
     pub fn errored(&self) -> bool {
         self.errored.load(Ordering::Acquire)
     }
-    
+
     /// Check if the stream was aborted.
     pub fn aborted(&self) -> bool {
         self.aborted.load(Ordering::Acquire)
@@ -683,7 +706,7 @@ impl MessageStream {
     pub fn request_id(&self) -> Option<&str> {
         self.request_id.as_deref()
     }
-    
+
     /// Abort the stream.
     ///
     /// Marks the stream as aborted and cancels the background task.
@@ -712,9 +735,14 @@ impl MessageStream {
         fn apply_to(msg: &mut Message, event: &MessageStreamEvent) {
             match event {
                 MessageStreamEvent::MessageStart { .. } => unreachable!(),
-                MessageStreamEvent::ContentBlockStart { content_block, index } => {
+                MessageStreamEvent::ContentBlockStart {
+                    content_block,
+                    index,
+                } => {
                     while msg.content.len() <= *index {
-                        msg.content.push(ContentBlock::Text { text: String::new() });
+                        msg.content.push(ContentBlock::Text {
+                            text: String::new(),
+                        });
                     }
                     msg.content[*index] = content_block.clone();
                 }
@@ -727,9 +755,7 @@ impl MessageStream {
                     // Finalize a streaming tool_use block: convert the
                     // accumulated partial-JSON string into a real Value
                     // so downstream consumers see structured input.
-                    if let Some(ContentBlock::ToolUse { input, .. }) =
-                        msg.content.get_mut(*index)
-                    {
+                    if let Some(ContentBlock::ToolUse { input, .. }) = msg.content.get_mut(*index) {
                         if let serde_json::Value::String(accumulated) = input {
                             *input = serde_json::from_str(accumulated).unwrap_or_else(|_| {
                                 serde_json::Value::String(std::mem::take(accumulated))
@@ -820,7 +846,14 @@ impl MessageStream {
     ) {
         // Clone handler lists and message snapshot while holding the locks,
         // then release both before invoking any callbacks.
-        let (stream_handlers, text_handlers, msg_handlers, end_handlers, final_handlers, current_snapshot) = {
+        let (
+            stream_handlers,
+            text_handlers,
+            msg_handlers,
+            end_handlers,
+            final_handlers,
+            current_snapshot,
+        ) = {
             let handlers_guard = handlers.lock().unwrap();
             let current_snapshot = current.read().unwrap().clone();
 
@@ -846,7 +879,14 @@ impl MessageStream {
                 .unwrap_or_default();
 
             // Both locks released here.
-            (stream_handlers, text_handlers, msg_handlers, end_handlers, final_handlers, current_snapshot)
+            (
+                stream_handlers,
+                text_handlers,
+                msg_handlers,
+                end_handlers,
+                final_handlers,
+                current_snapshot,
+            )
         };
 
         // Every event fans out to raw stream-event subscribers.
@@ -906,7 +946,9 @@ impl MessageStream {
         errored.store(true, Ordering::Release);
         // Clone error handlers before invoking to avoid holding the lock
         // during callbacks (prevents poisoning on panic).
-        let error_handlers: Vec<EventHandler> = handlers.lock().unwrap()
+        let error_handlers: Vec<EventHandler> = handlers
+            .lock()
+            .unwrap()
             .get(&EventType::Error)
             .cloned()
             .unwrap_or_default();
@@ -965,12 +1007,16 @@ impl Stream for MessageStream {
                 }
                 std::task::Poll::Ready(None) => {
                     // Broadcast channel closed (all senders dropped).
-                    tracing::info!("MessageStream::poll_next: broadcast channel closed → returning None");
+                    tracing::info!(
+                        "MessageStream::poll_next: broadcast channel closed → returning None"
+                    );
                     return std::task::Poll::Ready(None);
                 }
                 std::task::Poll::Pending => {
                     if stream_ended {
-                        tracing::info!("MessageStream::poll_next: ended flag set, broadcast Pending → returning None");
+                        tracing::info!(
+                            "MessageStream::poll_next: ended flag set, broadcast Pending → returning None"
+                        );
                         return std::task::Poll::Ready(None);
                     }
                     // Stream not ended yet.  The broadcast receiver's
@@ -1007,16 +1053,17 @@ mod tests {
 
     #[test]
     fn test_event_handlers() {
-        use std::sync::{Arc, Mutex};
         use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
 
         // Test creating a dummy response for testing
         let text_called = Arc::new(Mutex::new(false));
         let text_called_clone = text_called.clone();
 
-        let _handler = EventHandler::Text(std::sync::Arc::new(Box::new(move |_delta, _snapshot| {
-            *text_called_clone.lock().unwrap() = true;
-        })));
+        let _handler =
+            EventHandler::Text(std::sync::Arc::new(Box::new(move |_delta, _snapshot| {
+                *text_called_clone.lock().unwrap() = true;
+            })));
 
         // Test event type equality
         assert_eq!(EventType::Text, EventType::Text);
@@ -1166,7 +1213,9 @@ data: {\"type\":\"message_stop\"}\r\n\
             let config = reconnect_config.clone();
             async move {
                 let resp = client.get(&url2).send().await.map_err(|e| {
-                    crate::types::AnthropicError::Connection { message: e.to_string() }
+                    crate::types::AnthropicError::Connection {
+                        message: e.to_string(),
+                    }
                 })?;
                 crate::http::streaming::HttpStreamClient::from_response(resp, config).await
             }
@@ -1188,13 +1237,11 @@ data: {\"type\":\"message_stop\"}\r\n\
         // Bound the wall-clock duration so a regression that drops the
         // timeout still surfaces as a test failure (the paused clock
         // makes this fast).
-        let final_msg = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            stream.final_message(),
-        )
-        .await
-        .expect("final_message should resolve in bounded time")
-        .expect("final_message should be Ok after a successful reconnect");
+        let final_msg =
+            tokio::time::timeout(std::time::Duration::from_secs(30), stream.final_message())
+                .await
+                .expect("final_message should resolve in bounded time")
+                .expect("final_message should be Ok after a successful reconnect");
 
         assert_eq!(final_msg.id, "msg_x");
     }
@@ -1289,12 +1336,10 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
         });
 
         // Allow the idle timeout to elapse.
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            stream.final_message(),
-        )
-        .await
-        .expect("final_message resolves in bounded time");
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(30), stream.final_message())
+                .await
+                .expect("final_message resolves in bounded time");
 
         // After MessageStart, the stall must surface as an error rather
         // than trigger a silent retry.
@@ -1331,7 +1376,9 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
                 },
                 MessageStreamEvent::ContentBlockStart {
                     index: 0,
-                    content_block: ContentBlock::Text { text: String::new() },
+                    content_block: ContentBlock::Text {
+                        text: String::new(),
+                    },
                 },
                 MessageStreamEvent::ContentBlockDelta {
                     index: 0,
@@ -1339,7 +1386,9 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
                 },
                 MessageStreamEvent::ContentBlockDelta {
                     index: 0,
-                    delta: ContentBlockDelta::TextDelta { text: " there".into() },
+                    delta: ContentBlockDelta::TextDelta {
+                        text: " there".into(),
+                    },
                 },
                 MessageStreamEvent::ContentBlockStop { index: 0 },
                 MessageStreamEvent::MessageDelta {
@@ -1357,7 +1406,13 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
                 },
                 MessageStreamEvent::MessageStop,
             ],
-            sample_message("msg_1", 2, vec![ContentBlock::Text { text: "hi there".into() }]),
+            sample_message(
+                "msg_1",
+                2,
+                vec![ContentBlock::Text {
+                    text: "hi there".into(),
+                }],
+            ),
         );
 
         let td = text_deltas.clone();
@@ -1383,7 +1438,10 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
         // Hand the stream off to the background drain.
         let final_msg = stream.final_message().await.unwrap();
         assert_eq!(final_msg.id, "msg_1");
-        assert_eq!(final_msg.stop_reason, Some(crate::types::StopReason::EndTurn));
+        assert_eq!(
+            final_msg.stop_reason,
+            Some(crate::types::StopReason::EndTurn)
+        );
 
         // on_text: deltas accumulated, snapshot grew monotonically.
         assert_eq!(text_deltas.lock().unwrap().as_str(), "hi there");
@@ -1488,11 +1546,7 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
         }
     }
 
-    fn sample_message(
-        id: &str,
-        output_tokens: u64,
-        content: Vec<ContentBlock>,
-    ) -> Message {
+    fn sample_message(id: &str, output_tokens: u64, content: Vec<ContentBlock>) -> Message {
         use crate::types::Role;
         Message {
             id: id.to_string(),
@@ -1527,7 +1581,9 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
                 },
                 MessageStreamEvent::ContentBlockStart {
                     index: 0,
-                    content_block: ContentBlock::Text { text: String::new() },
+                    content_block: ContentBlock::Text {
+                        text: String::new(),
+                    },
                 },
                 MessageStreamEvent::ContentBlockDelta {
                     index: 0,
@@ -1552,9 +1608,7 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
             assert!(result.is_ok(), "event should be Ok, got: {:?}", result);
             count += 1;
         }
-        assert_eq!(
-            count, 5,
-            "all events should be drained before stream ends"
-        );
+        assert_eq!(count, 5, "all events should be drained before stream ends");
     }
 }
+

@@ -3,7 +3,7 @@
 //! This module defines the event types and handlers used by the MessageStream
 //! to manage different types of callbacks and event dispatching.
 
-use crate::types::{Message, MessageStreamEvent, AnthropicError};
+use crate::types::{AnthropicError, Message, MessageStreamEvent};
 
 /// Types of events that can be handled by MessageStream.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -98,7 +98,7 @@ mod tests {
         let mut map: HashMap<EventType, Vec<String>> = HashMap::new();
         map.insert(EventType::Text, vec!["handler1".to_string()]);
         map.insert(EventType::Error, vec!["handler2".to_string()]);
-        
+
         assert!(map.contains_key(&EventType::Text));
         assert!(map.contains_key(&EventType::Error));
         assert!(!map.contains_key(&EventType::Connect));
@@ -111,4 +111,5 @@ mod tests {
         assert!(debug_str.contains("Text"));
         assert!(debug_str.contains("<callback>"));
     }
-} 
+}
+
