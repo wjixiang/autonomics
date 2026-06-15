@@ -3,9 +3,7 @@ use serde::{Deserialize, Serialize};
 use agentik_sdk::types::ToolEffect;
 use agentik_sdk::types::tools::{ToolResult, ToolResultContent};
 
-use super::error::ToolError;
-use super::toolset::ToolRegistration;
-use super::ToolFunction;
+use crate::tools::{ToolError, ToolFunction, ToolRegistration};
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(name = "attempt_complete", description = "Signal that the ENTIRE user request is fulfilled. Only call this when every part of the request has been completed. Do NOT call this for intermediate steps.")]

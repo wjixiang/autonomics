@@ -4,7 +4,7 @@ use agentik_sdk::model::model_pool::ModelPoolError;
 use agentik_sdk::types::errors::AnthropicError;
 use agentik_sdk::types::tools::ToolUse;
 
-use crate::types::ToolError;
+use crate::tools::ToolError;
 
 use crate::memory::MemoryError;
 

@@ -22,14 +22,14 @@ use agentik_sdk::types::ToolCallResponseContent;
 use agentik_sdk::types::{AgentEvent, ToolCallResponse};
 
 use crate::prompt::system_prompt_builder;
-use crate::types::ToolEffect;
+use crate::tools::ToolEffect;
 
 use crate::{
     error::{AgentError, Retryable},
     lifecycle::AgentLifecycle,
     memory::Memory,
     storage::{AgentSnapshot, AgentSnapshotStorage},
-    toolset::{ToolRegistration, Toolset},
+    tools::{ToolRegistration, Toolset},
 };
 
 #[derive(Clone)]

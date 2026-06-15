@@ -73,14 +73,14 @@ mod tests {
         let result = tool
             .run(GlobInput {
                 pattern: "*.rs".to_string(),
-                path: Some("src/tools".to_string()),
+                path: Some("src/tools/builtins".to_string()),
             })
             .await
             .unwrap();
         match &result.content {
             agentik_sdk::types::ToolResultContent::Text(t) => {
-                assert!(t.contains("read_tool.rs"));
-                assert!(t.contains("bash_tool.rs"));
+                assert!(t.contains("read.rs"));
+                assert!(t.contains("bash.rs"));
             }
             other => panic!("expected text, got {other:?}"),
         }

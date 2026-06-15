@@ -156,7 +156,7 @@ mod tests {
         let result = tool
             .run(GrepInput {
                 pattern: "struct ReadTool".to_string(),
-                path: Some("src/tools".to_string()),
+                path: Some("src/tools/builtins".to_string()),
                 glob: Some("*.rs".to_string()),
                 output_mode: None,
             })
@@ -164,7 +164,7 @@ mod tests {
             .unwrap();
         match &result.content {
             agentik_sdk::types::ToolResultContent::Text(t) => {
-                assert!(t.contains("read_tool.rs"));
+                assert!(t.contains("read.rs"));
             }
             other => panic!("expected text, got {other:?}"),
         }
@@ -176,7 +176,7 @@ mod tests {
         let result = tool
             .run(GrepInput {
                 pattern: "pub struct ReadTool".to_string(),
-                path: Some("src/tools/read_tool.rs".to_string()),
+                path: Some("src/tools/builtins/read.rs".to_string()),
                 glob: None,
                 output_mode: Some("content".to_string()),
             })
@@ -193,9 +193,11 @@ mod tests {
     #[tokio::test]
     async fn test_grep_no_match() {
         let tool = GrepTool;
+        // Assemble from parts so the literal never appears in this source file.
+        let needle = format!("zz{}_nope", "absent_marker_q");
         let result = tool
             .run(GrepInput {
-                pattern: "this_string_definitely_does_not_exist_xyzzy".to_string(),
+                pattern: needle,
                 path: Some("src/tools".to_string()),
                 glob: None,
                 output_mode: None,

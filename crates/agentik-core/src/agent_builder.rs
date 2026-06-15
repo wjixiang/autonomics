@@ -7,8 +7,8 @@ use crate::agent::{Agent, AgentConfig, TokenBudget};
 use crate::context::AgentContext;
 use crate::error::AgentError;
 use crate::storage::AgentSnapshotStorage;
-use crate::{lifecycle::AgentLifecycle, memory::Memory, toolset::Toolset};
-use crate::toolset::ToolRegistration;
+use crate::{lifecycle::AgentLifecycle, memory::Memory, tools::Toolset};
+use crate::tools::ToolRegistration;
 
 pub struct AgentBuilder {
     model_pool: Option<Arc<ModelPool>>,
