@@ -42,6 +42,10 @@ struct ManagerEntry {
     status_rx: watch::Receiver<AgentLifecycleStatus>,
     /// Token for cooperatively cancelling this agent's task.
     cancel_token: CancellationToken,
+    /// Handle to the forwarder task. Each forwarder awaits its own agent task,
+    /// so awaiting this handle waits for *both* the agent task and the forwarder
+    /// to finish — used by [`shutdown`](ProcessManager::shutdown).
+    task_handle: tokio::task::JoinHandle<ProcessExitStatus>,
 }
 
 // ── ProcessManager ────────────────────────────────────────────
@@ -124,7 +128,7 @@ impl ProcessManager {
         // Spawn the forwarder task.
         let broadcast_tx = self.event_tx.clone();
         let status_rx_for_forwarder = status_tx.subscribe();
-        tokio::spawn(forward_agent_events(
+        let task_handle = tokio::spawn(forward_agent_events(
             agent_id,
             agent_event_rx,
             broadcast_tx,
@@ -141,6 +145,7 @@ impl ProcessManager {
                 cmd_tx,
                 status_rx,
                 cancel_token,
+                task_handle,
             },
         );
 
@@ -245,7 +250,7 @@ impl ProcessManager {
 
             // Spawn forwarder for the new agent.
             let status_rx = new_status_tx.subscribe();
-            tokio::spawn(forward_agent_events(
+            let forward_handle = tokio::spawn(forward_agent_events(
                 agent_id,
                 agent_event_rx,
                 broadcast_tx,
@@ -260,6 +265,7 @@ impl ProcessManager {
                 existing.status_rx = new_status_tx.subscribe();
                 existing.cancel_token = new_cancel;
                 existing.builder = builder;
+                existing.task_handle = forward_handle;
             }
         });
 
@@ -338,22 +344,45 @@ impl ProcessManager {
 
     /// Shut down all agents and consume the manager.
     ///
-    /// Cancels every running agent and returns a list of exit statuses.
+    /// Cancels every running agent, **awaits its forwarder task** (which in turn
+    /// awaits the agent task), and returns each agent's real exit status.
+    ///
+    /// Note: cancellation is cooperative. If an agent is currently blocked inside
+    /// a non-cancel-aware `start()`, it will only unwind at that call's next await
+    /// point; shutdown waits for as long as that takes.
     pub async fn shutdown(self) -> Vec<(Uuid, ProcessExitStatus)> {
-        // Cancel all tokens.
-        let guard = self.entries.write().await;
+        let mut guard = self.entries.write().await;
+
+        // Cancel every agent's task so they begin unwinding.
         for entry in guard.values() {
             entry.cancel_token.cancel();
         }
-        let ids: Vec<Uuid> = guard.keys().copied().collect();
 
-        // We cannot await the individual task handles here because they are
-        // owned by the agent-task / forwarder-task futures.  The cancellation
-        // tokens will cause those tasks to exit on their next poll.
-        // Return the agent IDs that were shut down.
-        ids.into_iter()
-            .map(|id| (id, ProcessExitStatus::Stopped))
-            .collect()
+        // Drain the forwarder handles. Each forwarder owns the agent task's
+        // JoinHandle, so awaiting a forwarder waits for both the agent task and
+        // the forwarder to finish.
+        let handles: Vec<(Uuid, tokio::task::JoinHandle<ProcessExitStatus>)> = guard
+            .drain()
+            .map(|(id, entry)| (id, entry.task_handle))
+            .collect();
+        drop(guard);
+
+        // Wait for every agent + forwarder to finish and collect real statuses.
+        let mut results = Vec::with_capacity(handles.len());
+        for (id, handle) in handles {
+            let status = match handle.await {
+                Ok(status) => status,
+                Err(e) if e.is_panic() => ProcessExitStatus::Panicked(
+                    e.into_panic()
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "unknown panic".to_string()),
+                ),
+                Err(_) => ProcessExitStatus::Cancelled,
+            };
+            results.push((id, status));
+        }
+        results
     }
 }
 
@@ -422,7 +451,7 @@ async fn forward_agent_events(
     broadcast_tx: broadcast::Sender<ProcessEvent>,
     mut status_rx: watch::Receiver<AgentLifecycleStatus>,
     mut task_handle: tokio::task::JoinHandle<ProcessExitStatus>,
-) {
+) -> ProcessExitStatus {
     let mut last_status = *status_rx.borrow();
 
     loop {
@@ -438,7 +467,7 @@ async fn forward_agent_events(
                     }
                     None => {
                         // Agent event channel closed — agent task likely exited.
-                        break;
+                        return ProcessExitStatus::Cancelled;
                     }
                 }
             }
@@ -469,9 +498,9 @@ async fn forward_agent_events(
                 };
                 let _ = broadcast_tx.send(ProcessEvent::ProcessExited {
                     agent_id,
-                    status: exit_status,
+                    status: exit_status.clone(),
                 });
-                break;
+                return exit_status;
             }
         }
     }

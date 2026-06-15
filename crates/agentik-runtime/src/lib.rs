@@ -7,3 +7,7 @@
 pub mod process;
 
 pub use process::{ProcessError, ProcessEvent, ProcessExitStatus, ProcessManager};
+
+// Re-export AgentEvent so downstream TUI crates can use it without
+// depending on agentik-sdk directly.
+pub use agentik_sdk::types::AgentEvent;
