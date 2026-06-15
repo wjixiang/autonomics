@@ -145,9 +145,9 @@ fn render_pool(state: &SettingsPanelState, theme: &dyn SettingsTheme, lines: &mu
                 theme.form_value_style()
             };
             let display_value = if *label == "Key" && !value.is_empty() {
-                SettingsPanelState::mask_api_key(value)
+                SettingsPanelState::mask_api_key(value.as_str())
             } else {
-                value.clone()
+                value.to_string()
             };
             lines.push(Line::from(vec![
                 label_span,

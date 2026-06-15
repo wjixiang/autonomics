@@ -89,7 +89,9 @@ pub use chat::paste::{
 
 pub mod settings;
 
-pub use settings::input::{SettingsKey, SettingsKeyCode, SettingsKeyModifiers};
+pub use settings::input::{
+    handle_settings_key, SettingsKey, SettingsKeyCode, SettingsKeyModifiers,
+};
 pub use settings::renderer::render_settings_panel;
 pub use settings::state::{
     NewProviderForm, SettingsAction, SettingsPane, SettingsPanelState,

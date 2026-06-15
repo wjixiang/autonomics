@@ -202,7 +202,7 @@ impl SettingsPanelState {
             .pool_entries
             .iter()
             .zip(self.pool_enabled.iter())
-            .filter(|(_, &enabled)| enabled)
+            .filter(|(_, enabled)| **enabled)
             .map(|(entry, _)| entry.clone())
             .collect();
         ModelConfig {

@@ -199,7 +199,7 @@ fn tool_input_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> 
 
             if let Some(default) = &f.default_tokens {
                 quote! {
-                    .parameters(#name, #type_str, #desc)
+                    .parameter(#name, #type_str, #desc)
                     .default(#name, serde_json::json!(#default))
                 }
             } else {

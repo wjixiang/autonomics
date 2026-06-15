@@ -185,13 +185,14 @@ fn handle_form_key(state: &mut SettingsPanelState, key: SettingsKey) -> Option<S
             }
         }
         SettingsKeyCode::Char(c) => {
-            let fields = form.fields_mut();
-            fields[form.field_index].push(c);
+            let idx = form.field_index;
+            form.fields_mut()[idx].push(c);
         }
         SettingsKeyCode::Backspace => {
+            let idx = form.field_index;
             let fields = form.fields_mut();
-            if form.field_index < fields.len() {
-                fields[form.field_index].pop();
+            if idx < fields.len() {
+                fields[idx].pop();
             }
         }
         _ => {}
