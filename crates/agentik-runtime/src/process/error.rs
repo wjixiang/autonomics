@@ -3,6 +3,9 @@ use uuid::Uuid;
 
 use agentik_core::error::AgentError;
 
+use crate::pool::PoolBuildError;
+use crate::registry::AgentKindError;
+
 /// Errors produced by the [`ProcessManager`](super::ProcessManager).
 #[derive(Debug, Error)]
 pub enum ProcessError {
@@ -33,4 +36,13 @@ pub enum ProcessError {
 
     #[error("manager already shut down")]
     Shutdown,
+
+    #[error("model pool not configured — call configure_pool first")]
+    PoolNotConfigured,
+
+    #[error("failed to build model pool: {0}")]
+    PoolBuild(#[from] PoolBuildError),
+
+    #[error("agent kind error: {0}")]
+    Kind(#[from] AgentKindError),
 }

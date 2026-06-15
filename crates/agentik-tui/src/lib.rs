@@ -80,3 +80,18 @@ pub use chat::mouse::{
 pub use chat::paste::{
     summarize_paste, PasteEntry, PASTE_SUMMARY_LEN_THRESHOLD, PASTE_SUMMARY_LINE_THRESHOLD,
 };
+
+// ── Settings panel ──────────────────────────────────────────
+//
+// Reusable settings panel for model configuration (providers + pool).
+// Uses only `agentik_runtime` types — the host drives it with
+// `handle_settings_key` and consumes `SettingsAction` values.
+
+pub mod settings;
+
+pub use settings::input::{SettingsKey, SettingsKeyCode, SettingsKeyModifiers};
+pub use settings::renderer::render_settings_panel;
+pub use settings::state::{
+    NewProviderForm, SettingsAction, SettingsPane, SettingsPanelState,
+};
+pub use settings::theme::{DefaultSettingsTheme, SettingsTheme};

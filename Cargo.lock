@@ -48,6 +48,9 @@ version = "0.1.0"
 dependencies = [
  "agentik-core",
  "agentik-sdk",
+ "async-trait",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",

@@ -5,6 +5,16 @@
 //! cancellation token; the manager aggregates all events into a single
 //! [`broadcast::Receiver<ProcessEvent>`](ProcessEvent) stream and exposes lifecycle
 //! commands (start / stop / restart).
+//!
+//! ## Architecture
+//!
+//! The manager owns a shared [`ModelPool`](agentik_sdk::model::model_pool::ModelPool)
+//! singleton (via [`PoolOwner`](crate::pool::PoolOwner)) and an
+//! [`AgentRegistry`](crate::registry::AgentRegistry).  The frontend spawns agents
+//! by registered kind name + declarative options; the runtime builds the concrete
+//! `Agent` internally using the kind's context/tools factories and the shared pool.
+//! This ensures the frontend never depends on `agentik-core` or `agentik-sdk` types
+//! directly — `agentik-runtime` is the sole interface boundary.
 
 pub mod command;
 pub mod error;
@@ -21,6 +31,9 @@ use agentik_core::agent::Agent;
 use agentik_core::agent_builder::AgentBuilder;
 use agentik_core::lifecycle::AgentLifecycleStatus;
 
+use crate::pool::{PoolBuildError, PoolOwner};
+use crate::registry::{AgentKindFactory, AgentKindError, AgentRegistry, AgentSpawnOpts};
+
 pub use error::ProcessError;
 pub use event::{ProcessEvent, ProcessExitStatus};
 
@@ -34,8 +47,11 @@ const EVENT_BROADCAST_CAPACITY: usize = 1024;
 // ── Per-agent registry entry ─────────────────────────────────
 
 struct ManagerEntry {
-    /// Builder (cloned at spawn time) for reconstructing the agent on restart.
-    builder: AgentBuilder,
+    /// The registered agent kind — used to rebuild context + tools on restart
+    /// and reconfigure (fixes the "restart drops tools" bug).
+    kind: Arc<dyn AgentKindFactory>,
+    /// Frontend-supplied spawn options (pure data, no core types).
+    spawn_opts: AgentSpawnOpts,
     /// Command sender — the manager sends lifecycle commands here.
     cmd_tx: mpsc::UnboundedSender<Command>,
     /// Receiver that mirrors the agent's current lifecycle status.
@@ -52,23 +68,39 @@ struct ManagerEntry {
 
 /// Multi-agent process manager.
 ///
-/// Maintains a registry of [`Agent`](crate::Agent) instances, each running in its own
+/// Maintains a registry of [`Agent`](agentik_core::Agent) instances, each running in its own
 /// tokio task.  The manager provides lifecycle commands and aggregates all agent events
 /// into a single observable stream.
+///
+/// Agents are spawned by registered **kind name** via [`spawn_by_kind`](Self::spawn_by_kind);
+/// the model pool is configured declaratively via [`configure_pool`](Self::configure_pool).
+/// The frontend never touches `AgentBuilder`, `ModelPool`, or any `agentik-core` type.
 ///
 /// # Example
 ///
 /// ```ignore
 /// let mut manager = ProcessManager::new();
-/// let id = manager.spawn(builder).await?;
+///
+/// // Configure the shared model pool.
+/// manager.configure_pool(&model_config).await?;
+///
+/// // Spawn an agent by registered kind.
+/// let id = manager.spawn_by_kind("coder", AgentSpawnOpts::default()).await?;
 /// manager.start(&id)?;
+///
+/// // Observe events.
 /// let mut events = manager.events();
 /// while let Ok(ev) = events.recv().await { /* … */ }
+///
 /// manager.shutdown().await;
 /// ```
 pub struct ProcessManager {
     entries: Arc<tokio::sync::RwLock<HashMap<Uuid, ManagerEntry>>>,
     event_tx: broadcast::Sender<ProcessEvent>,
+    /// Shared model-pool singleton.
+    pool: Arc<PoolOwner>,
+    /// Agent kind registry.
+    registry: Arc<AgentRegistry>,
 }
 
 impl Default for ProcessManager {
@@ -78,76 +110,163 @@ impl Default for ProcessManager {
 }
 
 impl ProcessManager {
-    /// Create a new, empty process manager.
+    /// Create a new, empty process manager with an empty pool and registry.
     pub fn new() -> Self {
         let (event_tx, _) = broadcast::channel(EVENT_BROADCAST_CAPACITY);
         Self {
             entries: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             event_tx,
+            pool: Arc::new(PoolOwner::new()),
+            registry: Arc::new(AgentRegistry::new()),
         }
     }
 
-    // ── Spawn ────────────────────────────────────────────────
+    /// Create a manager with a pre-populated registry and pool.
+    pub fn with_registry_and_pool(
+        registry: Arc<AgentRegistry>,
+        pool: Arc<PoolOwner>,
+    ) -> Self {
+        let (event_tx, _) = broadcast::channel(EVENT_BROADCAST_CAPACITY);
+        Self {
+            entries: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            event_tx,
+            pool,
+            registry,
+        }
+    }
 
-    /// Register and prepare a new agent process (not started yet).
+    /// Access the agent kind registry (e.g. for the host to register kinds).
+    pub fn registry(&self) -> &AgentRegistry {
+        &self.registry
+    }
+
+    // ── Pool configuration ───────────────────────────────────
+
+    /// Configure the shared model pool from declarative config.
     ///
-    /// The provided `AgentBuilder` is **cloned** internally so that the agent can be
-    /// rebuilt on restart.  Returns the agent's unique ID — call [`start`](Self::start)
-    /// to begin execution.
-    pub async fn spawn(&self, builder: AgentBuilder) -> Result<Uuid, ProcessError> {
-        // Build the agent once so we know the ID immediately.
-        let mut agent = builder
-            .clone()
-            .build()
+    /// Must succeed before any [`spawn_by_kind`](Self::spawn_by_kind) call.
+    pub async fn configure_pool(
+        &self,
+        cfg: &crate::model_config::ModelConfig,
+    ) -> Result<(), ProcessError> {
+        self.pool
+            .configure(cfg)
             .await
-            .map_err(|e| ProcessError::AgentFailed {
-                agent_id: Uuid::nil(),
-                source: e,
-            })?;
+            .map_err(ProcessError::PoolBuild)?;
+        Ok(())
+    }
+
+    /// Reconfigure the shared model pool and rebuild **all** running agents
+    /// onto the new pool.
+    ///
+    /// **Known limitation:** rebuilding creates fresh agents (new `Memory`),
+    /// so conversation history is lost.  This matches dendrite's
+    /// `rebuild_all_agents` behaviour.  Preserving memory across a pool swap
+    /// requires core support and is left as a future improvement.
+    ///
+    /// Returns the number of agents that were rebuilt.
+    pub async fn reconfigure_pool(
+        &self,
+        cfg: &crate::model_config::ModelConfig,
+    ) -> Result<usize, ProcessError> {
+        self.pool
+            .reconfigure(cfg)
+            .await
+            .map_err(ProcessError::PoolBuild)?;
+
+        // Collect entries to rebuild (id, kind, opts).
+        let to_rebuild: Vec<(Uuid, Arc<dyn AgentKindFactory>, AgentSpawnOpts)> = {
+            let entries = self.entries.read().await;
+            entries
+                .iter()
+                .map(|(id, e)| (*id, e.kind.clone(), e.spawn_opts.clone()))
+                .collect()
+        };
+
+        let mut rebuilt = 0usize;
+        for (id, kind, opts) in to_rebuild {
+            if let Err(e) = self.rebuild_agent(&id, kind, opts).await {
+                let _ = self.event_tx.send(ProcessEvent::ProcessExited {
+                    agent_id: id,
+                    status: ProcessExitStatus::Error(format!("rebuild failed: {e}")),
+                });
+            } else {
+                rebuilt += 1;
+            }
+        }
+        Ok(rebuilt)
+    }
+
+    /// Return the model names in the current pool (empty if unconfigured).
+    pub async fn pool_model_names(&self) -> Vec<String> {
+        self.pool.model_names().await
+    }
+
+    // ── Spawn by kind ────────────────────────────────────────
+
+    /// Spawn a new agent by registered kind name.
+    ///
+    /// The runtime looks up the [`AgentKindFactory`] for `kind`, calls
+    /// [`build_context`](AgentKindFactory::build_context) and
+    /// [`build_tools`](AgentKindFactory::build_tools), combines them with the
+    /// shared model pool and the given `opts`, and builds an `Agent` internally.
+    ///
+    /// Returns the agent's unique ID — call [`start`](Self::start) to begin execution.
+    pub async fn spawn_by_kind(
+        &self,
+        kind: &str,
+        opts: AgentSpawnOpts,
+    ) -> Result<Uuid, ProcessError> {
+        let factory = self
+            .registry
+            .get(kind)
+            .ok_or_else(|| ProcessError::Kind(AgentKindError::NotFound(kind.to_string())))?;
+
+        let pool = self
+            .pool
+            .current()
+            .await
+            .ok_or(ProcessError::PoolNotConfigured)?;
+
+        // Build context + tools via the factory.
+        let ctx = factory
+            .build_context()
+            .await
+            .map_err(|e| ProcessError::Kind(e))?;
+        let tools = factory.build_tools();
+
+        // Build the agent internally (never exposed to the frontend).
+        let mut builder = AgentBuilder::new()
+            .with_model_pool(pool)
+            .with_context(ctx)
+            .with_tools(tools);
+
+        // Apply prompts — frontend override wins, fall back to kind default.
+        let identity = opts
+            .system_prompt_identity
+            .as_deref()
+            .or_else(|| factory.default_identity());
+        if let Some(ident) = identity {
+            builder = builder.with_system_prompt_identity(ident);
+        }
+        if let Some(section) = &opts.system_prompt_section {
+            builder = builder.with_system_prompt_section(section.clone());
+        }
+
+        let mut agent = builder.build().await.map_err(|e| ProcessError::AgentFailed {
+            agent_id: Uuid::nil(),
+            source: e,
+        })?;
 
         let agent_id = agent.id();
 
-        // Per-agent channels.
-        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        let (status_tx, status_rx) = watch::channel(AgentLifecycleStatus::IDLE);
-        let cancel_token = CancellationToken::new();
-        let (agent_event_tx, agent_event_rx) = mpsc::unbounded_channel();
+        // Optional initial message.
+        if let Some(msg) = opts.initial_message.clone() {
+            let _ = agent.inject_message(msg);
+        }
 
-        // Wire the agent's observation channel.
-        agent.event_tx = Some(agent_event_tx);
-
-        // Spawn the agent task.
-        let task_handle = tokio::spawn(run_agent_task(
-            agent_id,
-            agent,
-            cancel_token.clone(),
-            cmd_rx,
-            status_tx.clone(),
-        ));
-
-        // Spawn the forwarder task.
-        let broadcast_tx = self.event_tx.clone();
-        let status_rx_for_forwarder = status_tx.subscribe();
-        let task_handle = tokio::spawn(forward_agent_events(
-            agent_id,
-            agent_event_rx,
-            broadcast_tx,
-            status_rx_for_forwarder,
-            task_handle,
-        ));
-
-        // Store the entry.
-        let mut entries = self.entries.write().await;
-        entries.insert(
-            agent_id,
-            ManagerEntry {
-                builder,
-                cmd_tx,
-                status_rx,
-                cancel_token,
-                task_handle,
-            },
-        );
+        // Register the entry and spawn tasks.
+        self.insert_agent(agent_id, agent, factory, opts).await;
 
         Ok(agent_id)
     }
@@ -185,10 +304,15 @@ impl ProcessManager {
             .map_err(|_| ProcessError::ChannelClosed(*agent_id))
     }
 
-    /// Restart an agent: cancel → rebuild from the stored builder → start again.
+    /// Restart an agent: cancel → rebuild from the stored kind factory → start again.
+    ///
+    /// Unlike the old builder-based restart, this calls the factory's
+    /// [`build_tools`](AgentKindFactory::build_tools) and
+    /// [`build_context`](AgentKindFactory::build_context) fresh, so
+    /// custom tools are preserved across restart.
     ///
     /// This spawns a background task that waits for the old agent to exit, then
-    /// rebuilds and re-spawns it.
+    /// rebuilds and re-registers.
     pub fn restart(&self, agent_id: &Uuid) -> Result<(), ProcessError> {
         let entries = self
             .entries
@@ -206,25 +330,55 @@ impl ProcessManager {
             .send(Command::Restart)
             .map_err(|_| ProcessError::ChannelClosed(*agent_id))?;
 
-        // Spawn a background restarter that waits for the old task, rebuilds,
-        // and re-registers.
-        let builder = entry.builder.clone();
+        // Capture what we need for the background rebuild.
+        let kind = entry.kind.clone();
+        let opts = entry.spawn_opts.clone();
         let broadcast_tx = self.event_tx.clone();
         let agent_id = *agent_id;
-        // We need write access to the entries map, so clone a new cmd channel pair.
-        let (new_cmd_tx, new_cmd_rx) = mpsc::unbounded_channel();
-        let (new_status_tx, _) = watch::channel(AgentLifecycleStatus::IDLE);
-
-        // We capture the manager's entries lock implicitly by spawning a task
-        // that will later acquire it.
         let entries_lock = self.entries.clone();
+        let pool = self.pool.clone();
 
         tokio::spawn(async move {
             // Give the old task a moment to notice cancellation.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            // Rebuild the agent.
-            let mut agent = match builder.clone().build().await {
+            // Rebuild the agent using the kind factory + current pool.
+            let Some(pool_arc) = pool.current().await else {
+                let _ = broadcast_tx.send(ProcessEvent::ProcessExited {
+                    agent_id,
+                    status: ProcessExitStatus::Error("pool not configured".to_string()),
+                });
+                return;
+            };
+
+            let ctx = match kind.build_context().await {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = broadcast_tx.send(ProcessEvent::ProcessExited {
+                        agent_id,
+                        status: ProcessExitStatus::Error(format!("context build failed: {e}")),
+                    });
+                    return;
+                }
+            };
+            let tools = kind.build_tools();
+
+            let mut builder = AgentBuilder::new()
+                .with_model_pool(pool_arc)
+                .with_context(ctx)
+                .with_tools(tools);
+            let identity = opts
+                .system_prompt_identity
+                .as_deref()
+                .or_else(|| kind.default_identity());
+            if let Some(ident) = identity {
+                builder = builder.with_system_prompt_identity(ident);
+            }
+            if let Some(section) = &opts.system_prompt_section {
+                builder = builder.with_system_prompt_section(section.clone());
+            }
+
+            let agent = match builder.build().await {
                 Ok(a) => a,
                 Err(e) => {
                     let _ = broadcast_tx.send(ProcessEvent::ProcessExited {
@@ -235,36 +389,38 @@ impl ProcessManager {
                 }
             };
 
-            // Wire event channel.
+            // Wire event channel and spawn tasks.
+            let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+            let (status_tx, _) = watch::channel(AgentLifecycleStatus::IDLE);
+            let cancel_token = CancellationToken::new();
             let (agent_event_tx, agent_event_rx) = mpsc::unbounded_channel();
+
+            let mut agent = agent;
             agent.event_tx = Some(agent_event_tx);
 
-            let new_cancel = CancellationToken::new();
-            let task_handle = tokio::spawn(run_agent_task(
+            let forward_task = tokio::spawn(run_agent_task(
                 agent_id,
                 agent,
-                new_cancel.clone(),
-                new_cmd_rx,
-                new_status_tx.clone(),
+                cancel_token.clone(),
+                cmd_rx,
+                status_tx.clone(),
             ));
 
-            // Spawn forwarder for the new agent.
-            let status_rx = new_status_tx.subscribe();
+            let status_rx = status_tx.subscribe();
             let forward_handle = tokio::spawn(forward_agent_events(
                 agent_id,
                 agent_event_rx,
                 broadcast_tx,
                 status_rx,
-                task_handle,
+                forward_task,
             ));
 
             // Update the registry entry.
             let mut entries = entries_lock.write().await;
             if let Some(existing) = entries.get_mut(&agent_id) {
-                existing.cmd_tx = new_cmd_tx;
-                existing.status_rx = new_status_tx.subscribe();
-                existing.cancel_token = new_cancel;
-                existing.builder = builder;
+                existing.cmd_tx = cmd_tx;
+                existing.status_rx = status_tx.subscribe();
+                existing.cancel_token = cancel_token;
                 existing.task_handle = forward_handle;
             }
         });
@@ -383,6 +539,147 @@ impl ProcessManager {
             results.push((id, status));
         }
         results
+    }
+
+    // ── Internal helpers ─────────────────────────────────────
+
+    /// Insert a pre-built agent into the entry map and spawn its tasks.
+    async fn insert_agent(
+        &self,
+        agent_id: Uuid,
+        mut agent: Agent,
+        kind: Arc<dyn AgentKindFactory>,
+        opts: AgentSpawnOpts,
+    ) {
+        // Per-agent channels.
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let (status_tx, status_rx) = watch::channel(AgentLifecycleStatus::IDLE);
+        let cancel_token = CancellationToken::new();
+        let (agent_event_tx, agent_event_rx) = mpsc::unbounded_channel();
+
+        // Wire the agent's observation channel.
+        agent.event_tx = Some(agent_event_tx);
+
+        // Spawn the agent task.
+        let agent_task = tokio::spawn(run_agent_task(
+            agent_id,
+            agent,
+            cancel_token.clone(),
+            cmd_rx,
+            status_tx.clone(),
+        ));
+
+        // Spawn the forwarder task.
+        let broadcast_tx = self.event_tx.clone();
+        let status_rx_for_forwarder = status_tx.subscribe();
+        let forward_handle = tokio::spawn(forward_agent_events(
+            agent_id,
+            agent_event_rx,
+            broadcast_tx,
+            status_rx_for_forwarder,
+            agent_task,
+        ));
+
+        // Store the entry.
+        let mut entries = self.entries.write().await;
+        entries.insert(
+            agent_id,
+            ManagerEntry {
+                kind,
+                spawn_opts: opts,
+                cmd_tx,
+                status_rx,
+                cancel_token,
+                task_handle: forward_handle,
+            },
+        );
+    }
+
+    /// Rebuild a single agent in-place (cancel → rebuild → re-register).
+    /// Used by `reconfigure_pool`.
+    async fn rebuild_agent(
+        &self,
+        agent_id: &Uuid,
+        kind: Arc<dyn AgentKindFactory>,
+        opts: AgentSpawnOpts,
+    ) -> Result<(), ProcessError> {
+        // Cancel the existing agent.
+        {
+            let entries = self.entries.read().await;
+            let entry = entries.get(agent_id).ok_or(ProcessError::NotFound(*agent_id))?;
+            entry.cancel_token.cancel();
+            let _ = entry.cmd_tx.send(Command::Restart);
+        }
+
+        // Wait briefly for the old task to exit.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Rebuild.
+        let pool = self
+            .pool
+            .current()
+            .await
+            .ok_or(ProcessError::PoolNotConfigured)?;
+        let ctx = kind.build_context().await.map_err(ProcessError::Kind)?;
+        let tools = kind.build_tools();
+
+        let mut builder = AgentBuilder::new()
+            .with_model_pool(pool)
+            .with_context(ctx)
+            .with_tools(tools);
+        let identity = opts
+            .system_prompt_identity
+            .as_deref()
+            .or_else(|| kind.default_identity());
+        if let Some(ident) = identity {
+            builder = builder.with_system_prompt_identity(ident);
+        }
+        if let Some(section) = &opts.system_prompt_section {
+            builder = builder.with_system_prompt_section(section.clone());
+        }
+
+        let mut agent = builder.build().await.map_err(|e| ProcessError::AgentFailed {
+            agent_id: *agent_id,
+            source: e,
+        })?;
+
+        // New channels and tasks.
+        let (new_cmd_tx, new_cmd_rx) = mpsc::unbounded_channel();
+        let (new_status_tx, _) = watch::channel(AgentLifecycleStatus::IDLE);
+        let new_cancel = CancellationToken::new();
+        let (agent_event_tx, agent_event_rx) = mpsc::unbounded_channel();
+        agent.event_tx = Some(agent_event_tx);
+
+        let agent_task = tokio::spawn(run_agent_task(
+            *agent_id,
+            agent,
+            new_cancel.clone(),
+            new_cmd_rx,
+            new_status_tx.clone(),
+        ));
+
+        let broadcast_tx = self.event_tx.clone();
+        let status_rx = new_status_tx.subscribe();
+        let forward_handle = tokio::spawn(forward_agent_events(
+            *agent_id,
+            agent_event_rx,
+            broadcast_tx,
+            status_rx,
+            agent_task,
+        ));
+
+        // Update the entry.
+        let mut entries = self.entries.write().await;
+        if let Some(existing) = entries.get_mut(agent_id) {
+            existing.kind = kind;
+            existing.spawn_opts = opts;
+            existing.cmd_tx = new_cmd_tx;
+            existing.status_rx = new_status_tx.subscribe();
+            existing.cancel_token = new_cancel;
+            existing.task_handle = forward_handle;
+        }
+
+        Ok(())
     }
 }
 
