@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-use crate::tools::{ToolError, ToolFunction};
+use agentik_core::tools::{ToolError, ToolFunction};
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(

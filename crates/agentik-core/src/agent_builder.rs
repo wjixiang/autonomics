@@ -8,7 +8,9 @@ use crate::context::AgentContext;
 use crate::error::AgentError;
 use crate::storage::AgentSnapshotStorage;
 use crate::{lifecycle::AgentLifecycle, memory::Memory, tools::Toolset};
-use crate::tools::ToolRegistration;
+use crate::tools::{SkillActivationState, ToolRegistration};
+
+use agentik_skill_client::SkillRegistryClient;
 
 pub struct AgentBuilder {
     model_pool: Option<Arc<ModelPool>>,
@@ -19,6 +21,8 @@ pub struct AgentBuilder {
     system_prompt_section: Option<String>,
     system_prompt_identity: Option<String>,
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentUiEvent>>,
+    skill_client: Option<Arc<tokio::sync::Mutex<SkillRegistryClient>>>,
+    skill_activation_state: Option<SkillActivationState>,
 }
 
 impl Clone for AgentBuilder {
@@ -32,6 +36,8 @@ impl Clone for AgentBuilder {
             system_prompt_section: self.system_prompt_section.clone(),
             system_prompt_identity: self.system_prompt_identity.clone(),
             event_tx: self.event_tx.clone(),
+            skill_client: self.skill_client.clone(),
+            skill_activation_state: self.skill_activation_state.clone(),
         }
     }
 }
@@ -47,6 +53,8 @@ impl AgentBuilder {
             system_prompt_section: None,
             system_prompt_identity: None,
             event_tx: None,
+            skill_client: None,
+            skill_activation_state: None,
         }
     }
 
@@ -97,6 +105,22 @@ impl AgentBuilder {
         self
     }
 
+    /// Connect to a skill registry and register the `activate_skill` tool.
+    ///
+    /// When set, the agent gains an `activate_skill` tool that calls the
+    /// remote registry to fetch skill definitions and activate them.
+    pub fn with_skill_client(
+        mut self,
+        client: Arc<tokio::sync::Mutex<SkillRegistryClient>>,
+    ) -> Self {
+        let activation_state = SkillActivationState::default();
+        self.tools
+            .push(crate::tools::skill_registration(client.clone(), activation_state.clone()));
+        self.skill_client = Some(client);
+        self.skill_activation_state = Some(activation_state);
+        self
+    }
+
     pub async fn build(self) -> Result<Agent, AgentError> {
         let model_pool = self
             .model_pool
@@ -124,6 +148,8 @@ impl AgentBuilder {
             system_prompt_identity: self.system_prompt_identity,
             event_tx: self.event_tx,
             current_model_name: None,
+            active_skill: None,
+            skill_activation_state: self.skill_activation_state,
         })
     }
 }

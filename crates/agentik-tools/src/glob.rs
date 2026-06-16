@@ -2,7 +2,7 @@ use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::tools::{ToolError, ToolFunction};
+use agentik_core::tools::{ToolError, ToolFunction};
 
 const MAX_RESULTS: usize = 100;
 
@@ -73,14 +73,13 @@ mod tests {
         let result = tool
             .run(GlobInput {
                 pattern: "*.rs".to_string(),
-                path: Some("src/tools/builtins".to_string()),
+                path: Some("src".to_string()),
             })
             .await
             .unwrap();
         match &result.content {
             agentik_sdk::types::ToolResultContent::Text(t) => {
-                assert!(t.contains("read.rs"));
-                assert!(t.contains("bash.rs"));
+                assert!(t.contains("lib.rs"));
             }
             other => panic!("expected text, got {other:?}"),
         }

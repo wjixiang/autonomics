@@ -1,0 +1,65 @@
+# @grpc-proto ../../agentik-skill-proto/proto/skill_registry.proto
+
+### List all skills
+
+GRPC localhost:50051 agentik.skill.v1.SkillRegistryService/ListSkills
+Content-Type: application/json
+
+{
+  "user_invocable_only": false,
+  "model_invocable_only": false
+}
+
+### Get skill by name
+
+GRPC localhost:50051 agentik.skill.v1.SkillRegistryService/GetSkill
+Content-Type: application/json
+
+{
+  "name": "commit"
+}
+
+### Get skill by alias
+
+GRPC localhost:50051 agentik.skill.v1.SkillRegistryService/GetSkill
+Content-Type: application/json
+
+{
+  "name": "ci"
+}
+
+### Get nonexistent skill
+
+GRPC localhost:50051 agentik.skill.v1.SkillRegistryService/GetSkill
+Content-Type: application/json
+
+{
+  "name": "nonexistent"
+}
+
+### List only user-invocable skills
+
+GRPC localhost:50051 agentik.skill.v1.SkillRegistryService/ListSkills
+Content-Type: application/json
+
+{
+  "user_invocable_only": true,
+  "model_invocable_only": false
+}
+
+### Reload a skill
+
+GRPC localhost:50051 agentik.skill.v1.SkillRegistryService/ReloadSkill
+Content-Type: application/json
+
+{
+  "name": "commit"
+}
+
+### Watch skill changes (server-streaming)
+
+GRPC localhost:50051 agentik.skill.v1.SkillRegistryService/WatchSkills
+Content-Type: application/json
+
+{
+}

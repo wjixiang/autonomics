@@ -29,8 +29,9 @@ use crate::{
     lifecycle::AgentLifecycle,
     memory::Memory,
     storage::{AgentSnapshot, AgentSnapshotStorage},
-    tools::{ToolRegistration, Toolset},
+    tools::{SkillActivationState, ToolRegistration, Toolset},
 };
+use agentik_skill::Skill;
 
 #[derive(Clone)]
 pub struct AgentConfig {
@@ -64,6 +65,10 @@ pub struct Agent {
     pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentUiEvent>>,
     /// Currently selected model name. If None, falls back to round-robin.
     pub(crate) current_model_name: Option<String>,
+    /// Currently active skill. When set, toolset.execute filters to allowed_tools.
+    pub(crate) active_skill: Option<Skill>,
+    /// Shared state for skill activation (SkillToolImpl writes, handle_effect reads).
+    pub(crate) skill_activation_state: Option<SkillActivationState>,
 }
 
 impl Agent {
@@ -265,7 +270,8 @@ impl Agent {
             });
         }
 
-        let tool_results = self.toolset.execute(&toolcalls).await?;
+        let allowed = self.active_skill.as_ref().and_then(|s| s.allowed_tools());
+        let tool_results = self.toolset.execute(&toolcalls, allowed.as_deref()).await?;
         tracing::debug!(?tool_results, "tool execution results");
 
         for tr in &tool_results {
@@ -325,6 +331,14 @@ impl Agent {
 
     /// Apply agent-level effects declared by tool results (e.g. lifecycle transitions).
     async fn handle_effect(&mut self, tool_results: &[ToolCallResponse]) {
+        // Check for pending skill activation from SkillToolImpl.
+        if let Some(ref state) = self.skill_activation_state {
+            if let Some(skill) = state.take().await {
+                tracing::info!(skill_name = %skill.metadata.name, "skill activated");
+                self.active_skill = Some(skill);
+            }
+        }
+
         let effects: Vec<ToolEffect> = tool_results
             .iter()
             .flat_map(|ts| ts.effects.clone())
@@ -336,6 +350,9 @@ impl Agent {
             }
             ToolEffect::Abort => {
                 self.lifecycle.set_aborted();
+            }
+            ToolEffect::ActivateSkill { .. } => {
+                // Handled via skill_activation_state above; no-op here.
             }
         });
     }

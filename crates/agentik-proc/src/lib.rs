@@ -2,7 +2,7 @@ use std::default;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Expr, ExprLit, Fields, Lit, Meta, parse_macro_input};
+use syn::{Data, DeriveInput, Expr, ExprLit, Fields, Lit, Meta, Type, TypePath, parse_macro_input};
 
 /// 解析 `#[tool(name = "...", description = "...")]` 属性，
 /// 返回 (name, description)。
@@ -53,20 +53,29 @@ struct FieldInfo {
     default_tokens: Option<proc_macro2::TokenStream>,
 }
 
-/// 从 Rust 类型映射到 JSON Schema 类型字符串
-fn rust_type_to_schema(ty: &syn::Type) -> String {
-    let type_str = quote!(#ty).to_string();
-
-    // Option<T> → 取内部 T 的类型
-    if type_str.starts_with("Option <") {
-        if let Some(inner) = type_str
-            .strip_prefix("Option <")
-            .and_then(|s| s.strip_suffix(">"))
-        {
-            return rust_type_to_schema_str(inner.trim());
+/// 判断类型是否为 `Option<T>`，若是则返回内部 T；否则返回 None。
+fn extract_option_inner(ty: &Type) -> Option<&Type> {
+    if let Type::Path(TypePath { path, .. }) = ty {
+        let seg = path.segments.last()?;
+        if seg.ident == "Option" {
+            if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
+                    return Some(inner);
+                }
+            }
         }
     }
+    None
+}
 
+/// 从 Rust 类型映射到 JSON Schema 类型字符串
+fn rust_type_to_schema(ty: &syn::Type) -> String {
+    // Option<T> → 取内部 T 的类型
+    if let Some(inner) = extract_option_inner(ty) {
+        return rust_type_to_schema(inner);
+    }
+
+    let type_str = quote!(#ty).to_string();
     rust_type_to_schema_str(&type_str)
 }
 
@@ -142,11 +151,8 @@ fn parse_fields(input: &DeriveInput) -> syn::Result<Vec<FieldInfo>> {
             None => (false, None),
         };
 
-        // Option<T> → 不是 required
-        // has_default 为 true 不是required
-        let is_required = !quote!(#field.ty).to_string().starts_with("Option <")
-            && !quote!(#field.ty).to_string().starts_with("Option<")
-            && !has_default;
+        // Option<T> 或有默认值 → 不是 required
+        let is_required = extract_option_inner(&field.ty).is_none() && !has_default;
 
         infos.push(FieldInfo {
             name,

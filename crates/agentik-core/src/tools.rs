@@ -1,8 +1,10 @@
-//! Tool framework (trait, registry, executor) and built-in tools.
+//! Tool framework (trait, registry, executor) and built-in lifecycle tools.
 //!
 //! - The *framework* modules (`function`, `registry`, `toolset`,
-//!   `executor`, `error`) define how tools are declared and dispatched.
-//! - [`builtins`] holds the concrete built-in tool implementations.
+//!   `executor`, `error`, `truncation`) define how tools are declared and dispatched.
+//! - [`builtins`] holds the lifecycle tool implementations (attempt_complete, abort_task).
+//! - Primitive tools (bash, read, write, edit, glob, grep, webfetch)
+//!   live in the separate `agentik-tools` crate.
 
 pub mod builtins;
 pub mod error;
@@ -23,11 +25,10 @@ pub use agentik_sdk::types::{
     ToolValidationError,
 };
 
-// Re-export the built-in tools and registration helpers at the `tools`
-// facade so callers can do `use agentik_core::tools::{BashTool, ...}`.
+// Re-export lifecycle tools at the `tools` facade so callers can do
+// `use agentik_core::tools::{AttemptCompleteTool, ...}`.
 pub use builtins::{
-    AbortTaskInput, AbortTaskTool, AttemptCompleteInput, AttemptCompleteTool, BashInput, BashTool,
-    EditInput, EditTool, GlobInput, GlobTool, GrepInput, GrepTool, ReadInput, ReadTool,
-    WebFetchInput, WebFetchTool, WriteInput, WriteTool, default_toolset,
-    lifecycle_registrations, primitive_registrations,
+    AbortTaskInput, AbortTaskTool, AttemptCompleteInput, AttemptCompleteTool,
+    lifecycle_registrations,
+    SkillActivationState, skill_registration,
 };

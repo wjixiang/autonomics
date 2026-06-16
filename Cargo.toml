@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/agentik-sdk", "crates/agentik-types", "crates/agentik-core", "crates/agentik-proc", "crates/agentik-runtime", "crates/agentik-tui"]
+members = ["crates/agentik-sdk", "crates/agentik-types", "crates/agentik-core", "crates/agentik-proc", "crates/agentik-runtime", "crates/agentik-tui", "crates/agentik-app", "crates/agentik-tools", "crates/agentik-skill", "crates/agentik-skill-proto", "crates/agentik-skill-server", "crates/agentik-skill-client"]
 
 [workspace.package]
 edition = "2024"
@@ -11,7 +11,7 @@ rust-version = "1.85"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 async-trait = "0.1"

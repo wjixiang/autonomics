@@ -1,52 +1,14 @@
-//! Built-in primitive tools: shell + filesystem operations.
+//! Built-in lifecycle tools: attempt_complete, abort_task.
 //!
-//! This module groups the concrete tool implementations, keeping them
-//! separate from the tools *framework* (trait, registry, executor) which
-//! lives in the parent [`crate::tools`] module.
+//! These are the always-injected tools that the agent framework requires
+//! for task signaling. Primitive tools (bash, read, write, etc.) live in
+//! the `agentik-tools` crate.
 
-pub mod bash;
-pub mod edit;
-pub mod glob;
-pub mod grep;
 pub mod lifecycle;
-pub mod read;
-pub mod webfetch;
-pub mod write;
+pub mod skill;
 
-pub use bash::{BashInput, BashTool};
-pub use edit::{EditInput, EditTool};
-pub use glob::{GlobInput, GlobTool};
-pub use grep::{GrepInput, GrepTool};
 pub use lifecycle::{
     AbortTaskInput, AbortTaskTool, AttemptCompleteInput, AttemptCompleteTool,
     lifecycle_registrations,
 };
-pub use read::{ReadInput, ReadTool};
-pub use webfetch::{WebFetchInput, WebFetchTool};
-pub use write::{WriteInput, WriteTool};
-
-use super::{ToolRegistration, Toolset};
-
-/// The foundational primitive tools: bash, read, write, edit, glob, grep,
-/// webfetch. Wire these into an agent's toolset for basic filesystem,
-/// command, and web-fetch capability.
-pub fn primitive_registrations() -> Vec<ToolRegistration> {
-    vec![
-        ToolRegistration::from(BashTool),
-        ToolRegistration::from(ReadTool),
-        ToolRegistration::from(WriteTool),
-        ToolRegistration::from(EditTool),
-        ToolRegistration::from(GlobTool),
-        ToolRegistration::from(GrepTool),
-        ToolRegistration::from(WebFetchTool),
-    ]
-}
-
-/// Convenience: a fresh `Toolset` pre-loaded with the primitive tools
-/// and the lifecycle (attempt_complete / abort_task) tools.
-pub fn default_toolset() -> Toolset {
-    let mut toolset = Toolset::new();
-    let _ = toolset.register_all(primitive_registrations());
-    let _ = toolset.register_all(lifecycle_registrations());
-    toolset
-}
+pub use skill::{SkillActivationState, skill_registration};

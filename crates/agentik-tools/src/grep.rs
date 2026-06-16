@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::tools::{ToolError, ToolFunction};
+use agentik_core::tools::{ToolError, ToolFunction};
 
 const MAX_LINES: usize = 250;
 
@@ -156,7 +156,7 @@ mod tests {
         let result = tool
             .run(GrepInput {
                 pattern: "struct ReadTool".to_string(),
-                path: Some("src/tools/builtins".to_string()),
+                path: Some("src".to_string()),
                 glob: Some("*.rs".to_string()),
                 output_mode: None,
             })
@@ -176,7 +176,7 @@ mod tests {
         let result = tool
             .run(GrepInput {
                 pattern: "pub struct ReadTool".to_string(),
-                path: Some("src/tools/builtins/read.rs".to_string()),
+                path: Some("src/read.rs".to_string()),
                 glob: None,
                 output_mode: Some("content".to_string()),
             })
@@ -198,7 +198,7 @@ mod tests {
         let result = tool
             .run(GrepInput {
                 pattern: needle,
-                path: Some("src/tools".to_string()),
+                path: Some("src".to_string()),
                 glob: None,
                 output_mode: None,
             })

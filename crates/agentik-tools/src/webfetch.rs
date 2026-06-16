@@ -5,7 +5,7 @@ use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::tools::{ToolError, ToolFunction};
+use agentik_core::tools::{ToolError, ToolFunction};
 
 /// Per-request fetch timeout. The framework ceiling (`timeout_seconds`) is set
 /// above this so a legitimate slow fetch is never pre-empted by the wrapper.

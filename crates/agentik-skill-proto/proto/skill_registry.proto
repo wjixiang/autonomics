@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package agentik.skill.v1;
+
+// ── Messages ──────────────────────────────────────────────
+
+message SkillMetadata {
+  string name = 1;
+  string description = 2;
+  repeated string aliases = 3;
+  optional string when_to_use = 4;
+  optional string argument_hint = 5;
+  bool user_invocable = 6;
+  bool model_invocable = 7;
+}
+
+message SkillPolicy {
+  repeated string allowed_tools = 1;
+}
+
+message ReferenceFile {
+  string name = 1;
+  string content = 2;
+}
+
+message SkillMessage {
+  SkillMetadata metadata = 1;
+  SkillPolicy policy = 2;
+  string body = 3;
+  repeated ReferenceFile references = 4;
+  repeated string activation_paths = 5;
+}
+
+message GetSkillRequest {
+  string name = 1;
+}
+
+message GetSkillResponse {
+  oneof result {
+    SkillMessage skill = 1;
+    string error = 2;
+  }
+}
+
+message ListSkillsRequest {
+  bool user_invocable_only = 1;
+  bool model_invocable_only = 2;
+}
+
+message ListSkillsResponse {
+  repeated SkillMessage skills = 1;
+}
+
+message ReloadSkillRequest {
+  string name = 1;
+}
+
+message ReloadSkillResponse {
+  oneof result {
+    SkillMessage skill = 1;
+    string not_changed = 2;
+    string error = 3;
+  }
+}
+
+message WatchSkillsRequest {}
+
+message SkillChangeEvent {
+  enum ChangeType {
+    CHANGE_TYPE_UNSPECIFIED = 0;
+    ADDED = 1;
+    MODIFIED = 2;
+    REMOVED = 3;
+  }
+  ChangeType change_type = 1;
+  string skill_name = 2;
+  SkillMessage skill = 3;
+}
+
+// ── Service ───────────────────────────────────────────────
+
+service SkillRegistryService {
+  rpc GetSkill(GetSkillRequest) returns (GetSkillResponse);
+  rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
+  rpc ReloadSkill(ReloadSkillRequest) returns (ReloadSkillResponse);
+  rpc WatchSkills(WatchSkillsRequest) returns (stream SkillChangeEvent);
+}

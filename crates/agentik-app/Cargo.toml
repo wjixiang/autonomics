@@ -8,6 +8,7 @@ description = "Host binary wiring agentik-runtime + agentik-tui."
 
 [dependencies]
 agentik-core = { path = "../agentik-core" }
+agentik-tools = { path = "../agentik-tools" }
 agentik-runtime = { path = "../agentik-runtime" }
 agentik-tui = { path = "../agentik-tui" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

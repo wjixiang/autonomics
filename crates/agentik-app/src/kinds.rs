@@ -35,7 +35,7 @@ impl AgentKindFactory for GenericCoderKind {
     }
 
     fn build_tools(&self) -> Vec<ToolRegistration> {
-        agentik_core::tools::primitive_registrations()
+        agentik_tools::primitive_registrations()
     }
 
     fn default_identity(&self) -> Option<&str> {

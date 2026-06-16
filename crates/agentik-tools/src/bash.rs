@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::tools::{ToolError, ToolFunction};
-use crate::tools::truncation::{TruncationConfig, truncate_tool_output};
+use agentik_core::tools::{ToolError, ToolFunction};
+use agentik_core::tools::truncation::{TruncationConfig, truncate_tool_output};
 
 /// Hard ceiling enforced by the framework wrapper. The real per-command
 /// timeout comes from `BashInput::timeout` and is enforced inside `run()`,

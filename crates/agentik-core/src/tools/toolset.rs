@@ -82,9 +82,25 @@ impl Toolset {
         self.tools.contains_key(name)
     }
 
-    pub async fn execute(&self, toolcalls: &[ToolUse]) -> Result<Vec<ToolCallResponse>, ToolError> {
+    pub async fn execute(
+        &self,
+        toolcalls: &[ToolUse],
+        allowed_tools: Option<&[String]>,
+    ) -> Result<Vec<ToolCallResponse>, ToolError> {
         let mut results = Vec::with_capacity(toolcalls.len());
         for tc in toolcalls {
+            // 当 allowed_tools 存在时，跳过不在白名单内的工具
+            if let Some(allowed) = allowed_tools {
+                if !allowed.contains(&tc.name) {
+                    let response = ToolResult::error(
+                        tc.id.clone(),
+                        format!("tool '{}' is not available in current skill context", tc.name),
+                    );
+                    results.push(response.into_call_response(vec![]));
+                    continue;
+                }
+            }
+
             let Some(registration) = self.tools.get(&tc.name) else {
                 continue;
             };
@@ -213,7 +229,7 @@ mod tests {
             input: json!({ "reason": "test" }),
         };
 
-        let results = toolset.execute(&[tool_call]).await.unwrap();
+        let results = toolset.execute(&[tool_call], None).await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool_use_id, "tc1");
         assert!(results[0].effects.is_empty());
@@ -236,7 +252,7 @@ mod tests {
             input: json!({ "reason": "task done" }),
         };
 
-        let results = toolset.execute(&[tool_call]).await.unwrap();
+        let results = toolset.execute(&[tool_call], None).await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].effects, vec![ToolEffect::AttemptComplete]);
     }
