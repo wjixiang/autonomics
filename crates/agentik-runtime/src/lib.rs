@@ -13,7 +13,7 @@
 //! - [`AgentManager`] for lifecycle control (start / stop / restart /
 //!   reconfigure-pool) and event observation.
 
-pub mod control;
+pub mod http;
 pub mod kinds;
 pub mod model_config;
 pub mod pool;

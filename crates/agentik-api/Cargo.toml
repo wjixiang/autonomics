@@ -11,6 +11,13 @@ agentik-types = { path = "../agentik-types" }
 uuid = { version = "1.12", features = ["v4", "serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Optional: derive `utoipa::ToSchema` for the wire types so the control plane
+# (`agentik-runtime`) can render them in its OpenAPI / Swagger doc. Off by
+# default — this crate stays a pure-serde contract otherwise.
+utoipa = { version = "5", features = ["uuid"], optional = true }
+
+[features]
+schema = ["dep:utoipa", "agentik-types/schema"]
 
 [lints]
 workspace = true

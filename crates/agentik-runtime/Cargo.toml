@@ -8,8 +8,8 @@ description = "Multi-agent process runtime for agentik."
 
 [dependencies]
 agentik-core = { path = "../agentik-core" }
-agentik-api = { path = "../agentik-api" }
-agentik-control-proto = { path = "../agentik-control-proto" }
+agentik-types = { path = "../agentik-types" }
+agentik-api = { path = "../agentik-api", features = ["schema"] }
 agentik-control-client = { path = "../agentik-control-client" }
 agentik-skill = { path = "../agentik-skill" }
 agentik-skill-client = { path = "../agentik-skill-client" }
@@ -19,7 +19,10 @@ agentik-sdk = { path = "../agentik-sdk" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
-tonic = "0.13"
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
+utoipa = { version = "5", features = ["axum_extras", "uuid"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
 uuid = { version = "1.12", features = ["v4"] }
 thiserror = "2"
 serde = { workspace = true }

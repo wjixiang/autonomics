@@ -26,6 +26,7 @@ pub use discovery::{agentik_dir, daemon_json_path, read_daemon_info, state_dir, 
 /// (Historically defined in `agentik_core::lifecycle`; moved here so it can
 /// cross the control-plane boundary without linking core.)
 #[derive(Debug, PartialEq, Eq, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 #[serde(rename_all = "UPPERCASE")]
 pub enum AgentLifecycleStatus {
     IDLE,
@@ -41,10 +42,16 @@ pub enum AgentLifecycleStatus {
 /// lifecycle-state-change and process-exit events that only the manager can
 /// produce.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum ProcessEvent {
     /// An agent-level event, tagged with the source agent's ID.
     Agent {
         agent_id: Uuid,
+        /// The agent-level event. Represented as free-form JSON in the schema
+        /// to avoid pulling the full `AgentEvent` → `Message` type tree into
+        /// the doc; consumers should consult the `AgentEvent` enum in
+        /// `agentik-types` for the exact variants.
+        #[cfg_attr(feature = "schema", schema(value_type = serde_json::Value))]
         event: AgentUiEvent,
     },
 
@@ -63,6 +70,7 @@ pub enum ProcessEvent {
 
 /// Describes how an agent process exited.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum ProcessExitStatus {
     /// `agent.start()` returned `Ok(())`.
     Completed,
@@ -82,6 +90,7 @@ pub enum ProcessExitStatus {
 ///
 /// Contains only serialisable plain data — no `agentik-core` types.
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct AgentSpawnOpts {
     /// Override the system-prompt identity line.
     pub system_prompt_identity: Option<String>,
@@ -97,6 +106,7 @@ pub struct AgentSpawnOpts {
 
 /// A single provider entry, persisted by the frontend / host.
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct ProviderConfig {
     /// Stable unique id; referenced by [`PoolEntry::provider_id`].
     pub id: String,
@@ -118,6 +128,7 @@ pub struct ProviderConfig {
 /// A single model entry in the pool. References a [`ProviderConfig`] by its
 /// stable [`ProviderConfig::id`].
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct PoolEntry {
     pub provider_id: String,
     pub model: String,
@@ -125,6 +136,7 @@ pub struct PoolEntry {
 
 /// Top-level model configuration passed by the frontend.
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone, Debug)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct ModelConfig {
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
@@ -152,6 +164,7 @@ impl ModelConfig {
 
 /// A reference file attached to a skill (mirrors `agentik_skill::ReferenceFile`).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct SkillReferenceWire {
     pub name: String,
     pub content: String,
@@ -159,6 +172,7 @@ pub struct SkillReferenceWire {
 
 /// A skill, serialised for the control plane (mirrors `agentik_skill::Skill`).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct SkillWire {
     /// Dotted hierarchical path, e.g. `"root.commit"`.
     pub dotpath: String,
@@ -184,15 +198,22 @@ pub struct SkillWire {
 
 /// A node in the skill tree (mirrors `agentik_skill::SkillTreeNode`).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct SkillTreeNodeWire {
     pub skill: SkillWire,
     pub dotpath: String,
+    /// Child nodes. On the wire this is `Vec<SkillTreeNodeWire>` (arbitrary
+    /// depth). In the OpenAPI schema it is rendered as free-form JSON, because
+    /// `utoipa` cannot express the direct `Vec<Self>` recursion without
+    /// infinite expansion; each array element is a `SkillTreeNodeWire`.
+    #[cfg_attr(feature = "schema", schema(value_type = Vec<serde_json::Value>))]
     #[serde(default)]
     pub children: Vec<SkillTreeNodeWire>,
 }
 
 /// A skill change notification streamed from the store.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 #[serde(rename_all = "UPPERCASE")]
 pub enum SkillChangeWire {
     Added,
@@ -211,6 +232,7 @@ impl SkillChangeWire {
 
 /// A skill change event with the affected skill name.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct SkillChangeNotificationWire {
     pub change_type: SkillChangeWire,
     pub skill_name: String,

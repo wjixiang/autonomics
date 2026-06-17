@@ -17,10 +17,14 @@ reqwest = { version = "0.13", features = [
   "stream",
   "multipart",
 ], optional = true }
+# Optional: derive `utoipa::ToSchema` for wire types that surface in the
+# control-plane OpenAPI doc. Off by default so this crate stays lightweight.
+utoipa = { version = "5", optional = true }
 
 [features]
 default = ["http"]
 http = ["dep:reqwest"]
+schema = ["dep:utoipa"]
 
 [dev-dependencies]
 serde_json = "1.0"

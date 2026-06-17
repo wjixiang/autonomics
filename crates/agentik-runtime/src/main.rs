@@ -13,10 +13,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use agentik_api::{self as api, ContentBlock};
 use agentik_control_client::ControlClient;
-use agentik_runtime::{control::AgentControlGrpcService, kinds, Runtime, RuntimeConfig};
+use agentik_runtime::{Runtime, RuntimeConfig, http, kinds};
 use clap::{Parser, Subcommand};
 use tokio::net::TcpListener;
-use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
@@ -142,8 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_new(&cli.log)
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_new(&cli.log).unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -200,18 +198,15 @@ async fn serve(
     let pm = runtime.process_manager().clone();
     let store = runtime.skill_store();
 
-    // ── Control-plane gRPC server ──
+    // ── Control-plane HTTP (REST + SSE) server ──
     let shutdown = CancellationToken::new();
     let control_listener = TcpListener::bind("127.0.0.1:0").await?;
     let control_addr = control_listener.local_addr()?;
-    let svc = AgentControlGrpcService::new(pm, store, skill_client, shutdown.clone());
+    let state = http::HttpState::new(pm, store, skill_client, shutdown.clone());
+    let app = http::router(state);
     tokio::spawn(async move {
-        if let Err(e) = tonic::transport::Server::builder()
-            .add_service(svc.into_server())
-            .serve_with_incoming(TcpListenerStream::new(control_listener))
-            .await
-        {
-            tracing::error!(error = %e, "control server error");
+        if let Err(e) = axum::serve(control_listener, app).await {
+            tracing::error!(error = %e, "control HTTP server error");
         }
     });
 
@@ -229,6 +224,7 @@ async fn serve(
 
     println!("agentik-runtime daemon");
     println!("  control: http://{control_addr}");
+    println!("  docs   : http://{control_addr}/docs");
     if let Some(sa) = skill_addr {
         println!("  skills : http://{sa}");
     }
@@ -301,7 +297,10 @@ async fn agent(action: AgentAction) -> Result<(), Box<dyn std::error::Error>> {
                 initial_message: message.map(|t| vec![ContentBlock::Text { text: t }]),
                 ..Default::default()
             };
-            let id = client.spawn_agent(&kind, &opts).await.map_err(|e| format!("{e}"))?;
+            let id = client
+                .spawn_agent(&kind, &opts)
+                .await
+                .map_err(|e| format!("{e}"))?;
             client.start_agent(id).await.map_err(|e| format!("{e}"))?;
             println!("spawned + started {kind} agent: {id}");
         }
@@ -394,7 +393,10 @@ fn print_event(event: &agentik_api::ProcessEvent) {
             AgentEvent::LlmResponse(s) => println!("[llm] {s}"),
             AgentEvent::Thinking(s) => println!("[think] {s}"),
             AgentEvent::ToolCall { name, input } => {
-                println!("[tool] {name} {}", serde_json::to_string(input).unwrap_or_default());
+                println!(
+                    "[tool] {name} {}",
+                    serde_json::to_string(input).unwrap_or_default()
+                );
             }
             AgentEvent::ToolResult { ok, content } => {
                 println!("[result ok={ok}] {content}");
@@ -449,14 +451,16 @@ async fn skill(action: SkillAction) -> Result<(), Box<dyn std::error::Error>> {
                 None => println!("skill '{name}' not found"),
             }
         }
-        SkillAction::Tree => {
-            match client.get_skill_tree().await.map_err(|e| format!("{e}"))? {
-                Some(root) => print_skill_tree(&root, 0),
-                None => println!("(skill tree is empty)"),
-            }
-        }
+        SkillAction::Tree => match client.get_skill_tree().await.map_err(|e| format!("{e}"))? {
+            Some(root) => print_skill_tree(&root, 0),
+            None => println!("(skill tree is empty)"),
+        },
         SkillAction::Reload { name } => {
-            match client.reload_skill(&name).await.map_err(|e| format!("{e}"))? {
+            match client
+                .reload_skill(&name)
+                .await
+                .map_err(|e| format!("{e}"))?
+            {
                 Some(_) => println!("reloaded '{name}'"),
                 None => println!("'{name}' unchanged or not found"),
             }
@@ -466,7 +470,10 @@ async fn skill(action: SkillAction) -> Result<(), Box<dyn std::error::Error>> {
                 .import_skills(&dir.display().to_string())
                 .await
                 .map_err(|e| format!("{e}"))?;
-            println!("imported {n} skill(s) from {} (coder kind refreshed)", dir.display());
+            println!(
+                "imported {n} skill(s) from {} (coder kind refreshed)",
+                dir.display()
+            );
         }
         SkillAction::Export { dir } => {
             let n = client
