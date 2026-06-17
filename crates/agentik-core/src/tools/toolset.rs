@@ -4,21 +4,22 @@ use tokio::time::timeout;
 
 use super::DynToolFunction;
 use super::error::ToolError;
-use agentik_sdk::types::Tool as SdkTool;
+use agentik_sdk::types::ToolDefinition;
 use agentik_sdk::types::ToolCallResponse;
 use agentik_sdk::types::ToolEffect;
 use agentik_sdk::types::tools::{ToolResult, ToolUse};
 
+#[derive(Clone)]
 pub struct ToolRegistration {
-    pub definition: SdkTool,
-    pub implementation: Box<dyn DynToolFunction>,
+    pub definition: ToolDefinition,
+    pub implementation: std::sync::Arc<dyn DynToolFunction>,
     pub effects: Vec<ToolEffect>,
 }
 
 impl ToolRegistration {
     pub fn new(
-        definition: SdkTool,
-        implementation: Box<dyn DynToolFunction>,
+        definition: ToolDefinition,
+        implementation: std::sync::Arc<dyn DynToolFunction>,
         effects: Vec<ToolEffect>,
     ) -> Self {
         Self {
@@ -37,7 +38,7 @@ impl<T: super::ToolFunction + 'static> From<T> for ToolRegistration {
             definition,
             // T: ToolFunction implies T: DynToolFunction via the blanket impl,
             // so this coercion is automatic.
-            implementation: Box::new(tool),
+            implementation: std::sync::Arc::new(tool),
             effects,
         }
     }
@@ -147,7 +148,7 @@ impl Toolset {
         Ok(results)
     }
 
-    pub fn tools(&self) -> Vec<SdkTool> {
+    pub fn tools(&self) -> Vec<ToolDefinition> {
         self.tools.values().map(|r| r.definition.clone()).collect()
     }
 }
@@ -199,7 +200,7 @@ mod tests {
                 .parameter("reason", "string", "reason")
                 .required("reason")
                 .build(),
-            implementation: Box::new(MockTool::new("mock result")),
+            implementation: std::sync::Arc::new(MockTool::new("mock result")),
             effects,
         }
     }

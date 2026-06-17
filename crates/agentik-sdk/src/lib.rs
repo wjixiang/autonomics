@@ -20,8 +20,8 @@ pub use agentik_types::{
     FileListParams, FileObject, FileOrder, FilePurpose, FileStatus, FileUploadParams, ImageSource,
     Message, MessageBatch, MessageContent, MessageCreateBuilder, MessageCreateParams, MessageDelta,
     MessageDeltaUsage, MessageParam, MessageStreamEvent, Model, ModelList, ModelListParams,
-    ModelObject, RequestId, Result, Role, ServerTool, StopReason, StorageInfo, TextCitation, Tool,
-    ToolBuilder, ToolChoice, ToolResult, ToolResultContent, ToolUse, ToolValidationError,
+    ModelObject, RequestId, Result, Role, ServerTool, StopReason, StorageInfo, TextCitation,
+    ToolBuilder, ToolChoice, ToolDefinition, ToolResult, ToolResultContent, ToolUse, ToolValidationError,
     UploadProgress, Usage, WebSearchParameters,
 };
 pub use client::Anthropic;

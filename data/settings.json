@@ -1,0 +1,24 @@
+{
+  "providers": [
+    {
+      "id": "prov-18b69253390fdd3c",
+      "display_name": "mimo1",
+      "provider_type": "mimo",
+      "api_key": "tp-cqfq34sbghgh77l5b34z6fn9hz2h3bo407pxwthgo7bqw2mg",
+      "base_url": "https://token-plan-cn.xiaomimimo.com/anthropic"
+    },
+    {
+      "id": "prov-18b6928a3756c36d",
+      "display_name": "sensenova1",
+      "provider_type": "sensenova",
+      "api_key": "sk-Y9EP98aF1OzfXxp1cGpGzbEs2HpR5JIH",
+      "base_url": ""
+    }
+  ],
+  "pool": [
+    {
+      "provider_id": "prov-18b69253390fdd3c",
+      "model": "mimo-v2.5-pro"
+    }
+  ]
+}

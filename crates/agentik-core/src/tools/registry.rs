@@ -7,7 +7,7 @@ use tokio::time::timeout;
 
 use super::DynToolFunction;
 use super::error::{ToolError, ToolOperationResult};
-use agentik_sdk::types::{Tool, ToolResult, ToolUse};
+use agentik_sdk::types::{ToolDefinition, ToolResult, ToolUse};
 
 /// Registry for managing tool definitions and their implementations.
 ///
@@ -21,8 +21,7 @@ pub struct ToolRegistry {
 /// Internal structure for storing tool information.
 struct ToolEntry {
     /// The tool definition with schema.
-    definition: Tool,
-    /// The tool implementation (type-erased via [`DynToolFunction`]).
+    definition: ToolDefinition,
     implementation: Box<dyn DynToolFunction>,
 }
 
@@ -75,7 +74,7 @@ impl ToolRegistry {
     pub fn register(
         &mut self,
         name: impl Into<String>,
-        definition: Tool,
+        definition: ToolDefinition,
         implementation: Box<dyn DynToolFunction>,
     ) -> ToolOperationResult<()> {
         let tool_name = name.into();
@@ -100,7 +99,7 @@ impl ToolRegistry {
     /// Get tool definitions for all registered tools.
     ///
     /// Returns a vector of tool definitions that can be sent to Claude.
-    pub fn get_tool_definitions(&self) -> Vec<Tool> {
+    pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
         self.tools
             .values()
             .map(|entry| entry.definition.clone())
@@ -114,7 +113,7 @@ impl ToolRegistry {
     ///
     /// # Returns
     /// Vector of tool definitions for the specified tools.
-    pub fn get_specific_tools<I>(&self, names: I) -> Vec<Tool>
+    pub fn get_specific_tools<I>(&self, names: I) -> Vec<ToolDefinition>
     where
         I: IntoIterator,
         I::Item: AsRef<str>,
@@ -241,7 +240,7 @@ impl ToolRegistry {
     }
 
     /// Get a tool definition by name.
-    pub fn get_tool_definition(&self, name: &str) -> Option<&Tool> {
+    pub fn get_tool_definition(&self, name: &str) -> Option<&ToolDefinition> {
         self.tools.get(name).map(|entry| &entry.definition)
     }
 }

@@ -29,9 +29,7 @@ pub use model_config::{ModelConfig, PoolEntry, ProviderConfig};
 pub use pool::{PoolBuildError, PoolOwner};
 
 // Agent registry and spawn options.
-pub use registry::{
-    AgentKindError, AgentKindFactory, AgentRegistry, AgentSpawnOpts,
-};
+pub use registry::{AgentBlueprint, AgentBlueprintError, AgentRegistry, AgentSpawnOpts};
 
 // Provider factory helpers (for hosts that need to refresh model lists).
 pub use provider_factory::{
@@ -42,4 +40,7 @@ pub use provider_factory::{
 // Re-export pure-data types from agentik-sdk so the frontend doesn't
 // need to depend on agentik-sdk directly.
 pub use agentik_sdk::types::{AgentEvent, AgentUiEvent};
+
+// Re-export skill registry client for hosts that need runtime skill activation.
+pub use agentik_skill_client::SkillRegistryClient;
 

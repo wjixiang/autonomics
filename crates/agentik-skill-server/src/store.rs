@@ -40,4 +40,7 @@ pub trait SkillStore: Send + Sync {
 
     /// Return the directories being watched (for diagnostics).
     async fn watch_dirs(&self) -> Vec<PathBuf>;
+
+    /// Get the root skill with auto-generated children summary in its body.
+    async fn get_root_skill(&self) -> SkillStoreResult<Skill>;
 }

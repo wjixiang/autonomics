@@ -11,6 +11,7 @@ pub mod error;
 pub mod executor;
 pub mod function;
 pub mod registry;
+pub mod tool_provider;
 pub mod toolset;
 pub mod truncation;
 
@@ -18,10 +19,11 @@ pub use error::{ToolError, ToolOperationResult};
 pub use executor::{ToolExecutionConfig, ToolExecutionConfigBuilder, ToolExecutor};
 pub use function::{DynToolFunction, ToolFunction};
 pub use registry::{SharedToolRegistry, ToolRegistry};
+pub use tool_provider::ToolProviderRegistry;
 pub use toolset::{ToolRegistration, Toolset};
 
 pub use agentik_sdk::types::{
-    Tool, ToolBuilder, ToolChoice, ToolEffect, ToolResult, ToolResultContent, ToolUse,
+    ToolDefinition, ToolBuilder, ToolChoice, ToolEffect, ToolResult, ToolResultContent, ToolUse,
     ToolValidationError,
 };
 

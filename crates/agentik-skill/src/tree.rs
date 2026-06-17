@@ -112,7 +112,10 @@ impl SkillTree {
 
         let mut current = root;
         for part in &parts[1..] {
-            current = current.children.iter().find(|c| c.dotpath.ends_with(part))?;
+            current = current
+                .children
+                .iter()
+                .find(|c| c.dotpath.ends_with(part))?;
         }
         Some(current)
     }
@@ -145,6 +148,28 @@ impl SkillTree {
         }
         summary
     }
+
+    /// Collect the union of all `allowed_tools` across every skill in the tree.
+    ///
+    /// This determines the full set of tools available to an Agent bound to this
+    /// skill tree. The result is used to build a `Toolset` via `ToolProviderRegistry`.
+    pub fn collect_all_allowed_tools(&self) -> std::collections::BTreeSet<String> {
+        let mut tools = std::collections::BTreeSet::new();
+        collect_allowed_from_node(&self.root, &mut tools);
+        tools
+    }
+}
+
+/// Recursively collect all `allowed_tools` from the tree into a single set.
+fn collect_allowed_from_node(node: &Option<SkillTreeNode>, tools: &mut std::collections::BTreeSet<String>) {
+    if let Some(node) = node {
+        for t in &node.skill.policy.allowed_tools {
+            tools.insert(t.clone());
+        }
+        for child in &node.children {
+            collect_allowed_from_node(&Some(child.clone()), tools);
+        }
+    }
 }
 
 /// Recursively attach children to a node from the `by_parent` map.
@@ -152,7 +177,7 @@ fn build_children(node: &mut SkillTreeNode, by_parent: &HashMap<String, Vec<(Str
     if let Some(children) = by_parent.get(&node.dotpath) {
         for (dotpath, skill) in children {
             let mut child_node = SkillTreeNode {
-                skill,
+                skill: skill.clone(),
                 dotpath: dotpath.clone(),
                 children: Vec::new(),
             };
@@ -271,5 +296,31 @@ mod tests {
         assert!(summary.contains("## Available Sub-Skills"));
         assert!(summary.contains("root.commit"));
         assert!(summary.contains("When the user asks to commit."));
+    }
+
+    #[test]
+    fn test_collect_all_allowed_tools() {
+        let base = PathBuf::from("/skills");
+        let mut root_skill = make_skill("root", "/skills/root");
+        root_skill.policy.allowed_tools.insert("activate_skill".to_string());
+        root_skill.policy.allowed_tools.insert("attempt_complete".to_string());
+
+        let mut commit_skill = make_skill("commit", "/skills/root/commit");
+        commit_skill.policy.allowed_tools.insert("bash".to_string());
+        commit_skill.policy.allowed_tools.insert("read".to_string());
+
+        let mut review_skill = make_skill("review", "/skills/root/review");
+        review_skill.policy.allowed_tools.insert("bash".to_string());
+        review_skill.policy.allowed_tools.insert("grep".to_string());
+
+        let tree = SkillTree::build(vec![root_skill, commit_skill, review_skill], &base);
+        let tools = tree.collect_all_allowed_tools();
+
+        // Union: activate_skill, attempt_complete, bash, read, grep
+        assert_eq!(tools.len(), 5);
+        assert!(tools.contains("activate_skill"));
+        assert!(tools.contains("bash"));
+        assert!(tools.contains("grep"));
+        assert!(!tools.contains("webfetch")); // not declared
     }
 }

@@ -36,8 +36,6 @@ pub use tools::{
     ToolInput,
 };
 
-pub type Tool = ToolDefinition;
-
 pub use agent_events::{AgentEvent, AgentUiEvent, ContentBlockKind};
 
 pub use batches::{

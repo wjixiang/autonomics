@@ -223,7 +223,7 @@ fn tool_input_impl(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> 
     // 生成最终的 impl
     Ok(quote! {
         impl ::agentik_sdk::types::ToolInput for #struct_name {
-            fn definition() -> ::agentik_sdk::types::Tool {
+            fn definition() -> ::agentik_sdk::types::ToolDefinition {
                 ::agentik_sdk::types::ToolBuilder::new(#tool_name, #tool_desc)
                     #(#parameters)*
                     #(.required(#requireds))*

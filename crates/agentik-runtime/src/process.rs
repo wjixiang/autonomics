@@ -28,11 +28,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use agentik_core::agent::Agent;
-use agentik_core::agent_builder::AgentBuilder;
 use agentik_core::lifecycle::AgentLifecycleStatus;
 
 use crate::pool::{PoolBuildError, PoolOwner};
-use crate::registry::{AgentKindFactory, AgentKindError, AgentRegistry, AgentSpawnOpts};
+use crate::registry::{AgentBlueprint, AgentBlueprintError, AgentRegistry, AgentSpawnOpts};
 
 pub use error::ProcessError;
 pub use event::{ProcessEvent, ProcessExitStatus};
@@ -47,9 +46,8 @@ const EVENT_BROADCAST_CAPACITY: usize = 1024;
 // ── Per-agent registry entry ─────────────────────────────────
 
 struct ManagerEntry {
-    /// The registered agent kind — used to rebuild context + tools on restart
-    /// and reconfigure (fixes the "restart drops tools" bug).
-    kind: Arc<dyn AgentKindFactory>,
+    /// The registered agent kind — used to rebuild agents on restart.
+    kind: Arc<AgentBlueprint>,
     /// Frontend-supplied spawn options (pure data, no core types).
     spawn_opts: AgentSpawnOpts,
     /// Command sender — the manager sends lifecycle commands here.
@@ -94,6 +92,7 @@ struct ManagerEntry {
 ///
 /// manager.shutdown().await;
 /// ```
+#[derive(Clone)]
 pub struct ProcessManager {
     entries: Arc<tokio::sync::RwLock<HashMap<Uuid, ManagerEntry>>>,
     event_tx: broadcast::Sender<ProcessEvent>,
@@ -175,7 +174,7 @@ impl ProcessManager {
             .map_err(ProcessError::PoolBuild)?;
 
         // Collect entries to rebuild (id, kind, opts).
-        let to_rebuild: Vec<(Uuid, Arc<dyn AgentKindFactory>, AgentSpawnOpts)> = {
+        let to_rebuild: Vec<(Uuid, Arc<AgentBlueprint>, AgentSpawnOpts)> = {
             let entries = self.entries.read().await;
             entries
                 .iter()
@@ -206,10 +205,9 @@ impl ProcessManager {
 
     /// Spawn a new agent by registered kind name.
     ///
-    /// The runtime looks up the [`AgentKindFactory`] for `kind`, calls
-    /// [`build_context`](AgentKindFactory::build_context) and
-    /// [`build_tools`](AgentKindFactory::build_tools), combines them with the
-    /// shared model pool and the given `opts`, and builds an `Agent` internally.
+    /// The runtime looks up the [`AgentBlueprint`] for `kind`, calls
+    /// [`build_agent`](AgentBlueprint::build_agent) with the shared model pool,
+    /// and applies any frontend-supplied overrides from `opts`.
     ///
     /// Returns the agent's unique ID — call [`start`](Self::start) to begin execution.
     pub async fn spawn_by_kind(
@@ -217,10 +215,10 @@ impl ProcessManager {
         kind: &str,
         opts: AgentSpawnOpts,
     ) -> Result<Uuid, ProcessError> {
-        let factory = self
+        let kind_entry = self
             .registry
             .get(kind)
-            .ok_or_else(|| ProcessError::Kind(AgentKindError::NotFound(kind.to_string())))?;
+            .ok_or_else(|| ProcessError::Kind(AgentBlueprintError::NotFound(kind.to_string())))?;
 
         let pool = self
             .pool
@@ -228,35 +226,16 @@ impl ProcessManager {
             .await
             .ok_or(ProcessError::PoolNotConfigured)?;
 
-        // Build context + tools via the factory.
-        let ctx = factory
-            .build_context()
-            .await
-            .map_err(|e| ProcessError::Kind(e))?;
-        let tools = factory.build_tools();
+        // Build the agent via AgentBlueprint (skill tree + tool provider + context).
+        let mut agent = kind_entry.build_agent(pool).await.map_err(|e| ProcessError::Kind(e))?;
 
-        // Build the agent internally (never exposed to the frontend).
-        let mut builder = AgentBuilder::new()
-            .with_model_pool(pool)
-            .with_context(ctx)
-            .with_tools(tools);
-
-        // Apply prompts — frontend override wins, fall back to kind default.
-        let identity = opts
-            .system_prompt_identity
-            .as_deref()
-            .or_else(|| factory.default_identity());
-        if let Some(ident) = identity {
-            builder = builder.with_system_prompt_identity(ident);
+        // Apply prompt overrides — frontend wins.
+        if let Some(ident) = &opts.system_prompt_identity {
+            agent.set_system_prompt_identity(ident.clone());
         }
         if let Some(section) = &opts.system_prompt_section {
-            builder = builder.with_system_prompt_section(section.clone());
+            agent.set_system_prompt_section(section.clone());
         }
-
-        let mut agent = builder.build().await.map_err(|e| ProcessError::AgentFailed {
-            agent_id: Uuid::nil(),
-            source: e,
-        })?;
 
         let agent_id = agent.id();
 
@@ -266,7 +245,7 @@ impl ProcessManager {
         }
 
         // Register the entry and spawn tasks.
-        self.insert_agent(agent_id, agent, factory, opts).await;
+        self.insert_agent(agent_id, agent, kind_entry, opts).await;
 
         Ok(agent_id)
     }
@@ -304,12 +283,10 @@ impl ProcessManager {
             .map_err(|_| ProcessError::ChannelClosed(*agent_id))
     }
 
-    /// Restart an agent: cancel → rebuild from the stored kind factory → start again.
+    /// Restart an agent: cancel → rebuild from the stored kind → start again.
     ///
-    /// Unlike the old builder-based restart, this calls the factory's
-    /// [`build_tools`](AgentKindFactory::build_tools) and
-    /// [`build_context`](AgentKindFactory::build_context) fresh, so
-    /// custom tools are preserved across restart.
+    /// Calls [`AgentBlueprint::build_agent`] fresh, so skill tree + tools are
+    /// preserved across restart.
     ///
     /// This spawns a background task that waits for the old agent to exit, then
     /// rebuilds and re-registers.
@@ -342,7 +319,7 @@ impl ProcessManager {
             // Give the old task a moment to notice cancellation.
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-            // Rebuild the agent using the kind factory + current pool.
+            // Rebuild the agent using the kind + current pool.
             let Some(pool_arc) = pool.current().await else {
                 let _ = broadcast_tx.send(ProcessEvent::ProcessExited {
                     agent_id,
@@ -351,34 +328,7 @@ impl ProcessManager {
                 return;
             };
 
-            let ctx = match kind.build_context().await {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = broadcast_tx.send(ProcessEvent::ProcessExited {
-                        agent_id,
-                        status: ProcessExitStatus::Error(format!("context build failed: {e}")),
-                    });
-                    return;
-                }
-            };
-            let tools = kind.build_tools();
-
-            let mut builder = AgentBuilder::new()
-                .with_model_pool(pool_arc)
-                .with_context(ctx)
-                .with_tools(tools);
-            let identity = opts
-                .system_prompt_identity
-                .as_deref()
-                .or_else(|| kind.default_identity());
-            if let Some(ident) = identity {
-                builder = builder.with_system_prompt_identity(ident);
-            }
-            if let Some(section) = &opts.system_prompt_section {
-                builder = builder.with_system_prompt_section(section.clone());
-            }
-
-            let agent = match builder.build().await {
+            let mut agent = match kind.build_agent(pool_arc).await {
                 Ok(a) => a,
                 Err(e) => {
                     let _ = broadcast_tx.send(ProcessEvent::ProcessExited {
@@ -389,13 +339,20 @@ impl ProcessManager {
                 }
             };
 
+            // Apply prompt overrides.
+            if let Some(ident) = &opts.system_prompt_identity {
+                agent.set_system_prompt_identity(ident.clone());
+            }
+            if let Some(section) = &opts.system_prompt_section {
+                agent.set_system_prompt_section(section.clone());
+            }
+
             // Wire event channel and spawn tasks.
             let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
             let (status_tx, _) = watch::channel(AgentLifecycleStatus::IDLE);
             let cancel_token = CancellationToken::new();
             let (agent_event_tx, agent_event_rx) = mpsc::unbounded_channel();
 
-            let mut agent = agent;
             agent.event_tx = Some(agent_event_tx);
 
             let forward_task = tokio::spawn(run_agent_task(
@@ -548,7 +505,7 @@ impl ProcessManager {
         &self,
         agent_id: Uuid,
         mut agent: Agent,
-        kind: Arc<dyn AgentKindFactory>,
+        kind: Arc<AgentBlueprint>,
         opts: AgentSpawnOpts,
     ) {
         // Per-agent channels.
@@ -600,7 +557,7 @@ impl ProcessManager {
     async fn rebuild_agent(
         &self,
         agent_id: &Uuid,
-        kind: Arc<dyn AgentKindFactory>,
+        kind: Arc<AgentBlueprint>,
         opts: AgentSpawnOpts,
     ) -> Result<(), ProcessError> {
         // Cancel the existing agent.
@@ -614,34 +571,22 @@ impl ProcessManager {
         // Wait briefly for the old task to exit.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        // Rebuild.
+        // Rebuild via AgentBlueprint.
         let pool = self
             .pool
             .current()
             .await
             .ok_or(ProcessError::PoolNotConfigured)?;
-        let ctx = kind.build_context().await.map_err(ProcessError::Kind)?;
-        let tools = kind.build_tools();
 
-        let mut builder = AgentBuilder::new()
-            .with_model_pool(pool)
-            .with_context(ctx)
-            .with_tools(tools);
-        let identity = opts
-            .system_prompt_identity
-            .as_deref()
-            .or_else(|| kind.default_identity());
-        if let Some(ident) = identity {
-            builder = builder.with_system_prompt_identity(ident);
+        let mut agent = kind.build_agent(pool).await.map_err(ProcessError::Kind)?;
+
+        // Apply prompt overrides.
+        if let Some(ident) = &opts.system_prompt_identity {
+            agent.set_system_prompt_identity(ident.clone());
         }
         if let Some(section) = &opts.system_prompt_section {
-            builder = builder.with_system_prompt_section(section.clone());
+            agent.set_system_prompt_section(section.clone());
         }
-
-        let mut agent = builder.build().await.map_err(|e| ProcessError::AgentFailed {
-            agent_id: *agent_id,
-            source: e,
-        })?;
 
         // New channels and tasks.
         let (new_cmd_tx, new_cmd_rx) = mpsc::unbounded_channel();

@@ -1,7 +1,7 @@
 use agentik_sdk::model::Model;
 use agentik_sdk::types::errors::AnthropicError;
 use agentik_sdk::types::messages::{ContentBlock, Message};
-use agentik_sdk::types::{Role, Tool};
+use agentik_sdk::types::{Role, ToolDefinition};
 use crate::message_ext::AgentMessageExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -426,7 +426,7 @@ impl Memory {
 
         let mut messages: Vec<Message> = vec![];
         messages.push(Message::system(prompt_text));
-        let response = model.request(messages, &Vec::<Tool>::new()).await?;
+        let response = model.request(messages, &Vec::<ToolDefinition>::new()).await?;
 
         // Step 4: Extract the summary text from the LLM response
         let raw_summary: String = response

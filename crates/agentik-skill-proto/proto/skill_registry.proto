@@ -77,6 +77,15 @@ message SkillChangeEvent {
   SkillMessage skill = 3;
 }
 
+message GetSkillTreeRequest {}
+
+message GetSkillTreeResponse {
+  oneof result {
+    SkillMessage root = 1;
+    string error = 2;
+  }
+}
+
 // ── Service ───────────────────────────────────────────────
 
 service SkillRegistryService {
@@ -84,4 +93,5 @@ service SkillRegistryService {
   rpc ListSkills(ListSkillsRequest) returns (ListSkillsResponse);
   rpc ReloadSkill(ReloadSkillRequest) returns (ReloadSkillResponse);
   rpc WatchSkills(WatchSkillsRequest) returns (stream SkillChangeEvent);
+  rpc GetSkillTree(GetSkillTreeRequest) returns (GetSkillTreeResponse);
 }

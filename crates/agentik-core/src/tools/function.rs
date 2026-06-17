@@ -3,7 +3,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::error::ToolError;
-use agentik_sdk::types::{Tool, ToolEffect, ToolInput, ToolResult};
+use agentik_sdk::types::{ToolDefinition, ToolEffect, ToolInput, ToolResult};
 
 /// A tool that the agent can invoke.
 ///
@@ -85,7 +85,7 @@ pub trait ToolFunction: Send + Sync {
         30
     }
 
-    fn definition(&self) -> Tool {
+    fn definition(&self) -> ToolDefinition {
         Self::Input::definition()
     }
 
@@ -113,7 +113,7 @@ pub trait DynToolFunction: Send + Sync {
 
     fn timeout_seconds(&self) -> u64;
 
-    fn definition(&self) -> Tool;
+    fn definition(&self) -> ToolDefinition;
 
     fn effects(&self) -> Vec<ToolEffect>;
 }
@@ -132,7 +132,7 @@ impl<T: ToolFunction + ?Sized> DynToolFunction for T {
         ToolFunction::timeout_seconds(self)
     }
 
-    fn definition(&self) -> Tool {
+    fn definition(&self) -> ToolDefinition {
         ToolFunction::definition(self)
     }
 

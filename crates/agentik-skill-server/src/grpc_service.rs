@@ -3,10 +3,12 @@ use std::sync::Arc;
 use agentik_skill::Skill;
 use agentik_skill_proto::skill_registry::{
     get_skill_response::Result as GetResult,
+    get_skill_tree_response::Result as TreeResult,
     reload_skill_response::Result as ReloadResult,
     skill_change_event::ChangeType as ProtoChangeType,
     skill_registry_service_server::SkillRegistryServiceServer,
-    GetSkillResponse, ListSkillsRequest, ListSkillsResponse, ReloadSkillResponse,
+    GetSkillResponse, GetSkillTreeRequest, GetSkillTreeResponse,
+    ListSkillsRequest, ListSkillsResponse, ReloadSkillResponse,
     SkillChangeEvent, SkillMessage as ProtoSkill, SkillMetadata as ProtoMetadata,
     SkillPolicy as ProtoPolicy, ReferenceFile as ProtoRef,
 };
@@ -111,6 +113,20 @@ impl SkillRegistryService for SkillRegistryGrpcService {
         });
 
         Ok(Response::new(Box::pin(stream)))
+    }
+
+    async fn get_skill_tree(
+        &self,
+        _request: Request<GetSkillTreeRequest>,
+    ) -> Result<Response<GetSkillTreeResponse>, Status> {
+        match self.registry.get_root_skill().await {
+            Ok(root) => Ok(Response::new(GetSkillTreeResponse {
+                result: Some(TreeResult::Root(skill_to_proto(&root))),
+            })),
+            Err(e) => Ok(Response::new(GetSkillTreeResponse {
+                result: Some(TreeResult::Error(e.to_string())),
+            })),
+        }
     }
 }
 

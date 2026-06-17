@@ -2,9 +2,7 @@ pub mod agent;
 pub mod agent_builder;
 pub mod context;
 pub use agent::Agent;
-pub use context::{
-    AgentContext, ContextChanges, ContextSnapshot, InMemoryAgentContext, serialize_snapshot,
-};
+pub use context::ContextProvider;
 pub mod error;
 pub mod lifecycle;
 pub mod memory;

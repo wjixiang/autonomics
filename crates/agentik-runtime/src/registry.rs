@@ -1,24 +1,23 @@
-//! Agent registry — named agent "kinds" that bundle context, tools, and prompts.
+//! Agent registry — named agent "kinds" that bundle skill trees and tools.
 //!
-//! A **host binary** (which may depend on `agentik-core`) implements
-//! [`AgentKindFactory`] and registers concrete kinds via [`AgentRegistry`].
-//! The frontend (e.g. `agentik-tui`) only ever references kinds by name and
-//! never sees `AgentContext`, `ToolRegistration`, or any `agentik-core` type.
+//! A **host binary** (which depends on `agentik-core`) constructs an [`AgentBlueprint`]
+//! that bundles a skill tree and tool provider, then registers
+//! it via [`AgentRegistry`]. The runtime calls [`AgentBlueprint::build_agent`] internally
+//! when spawning or rebuilding an agent.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use agentik_sdk::types::messages::ContentBlock;
 
-// Re-exported from core so the host can use them, but the frontend-facing
-// API surface (AgentSpawnOpts) only contains pure data.
-use agentik_core::context::AgentContext;
-use agentik_core::tools::ToolRegistration;
+use agentik_skill::SkillTree;
+use agentik_core::tools::ToolProviderRegistry;
+use agentik_skill_client::SkillRegistryClient;
 
 // ── Error ───────────────────────────────────────────────────────
 
 #[derive(Debug, thiserror::Error)]
-pub enum AgentKindError {
+pub enum AgentBlueprintError {
     #[error("agent kind '{0}' not registered")]
     NotFound(String),
     #[error("kind '{kind}' failed to build: {reason}")]
@@ -32,8 +31,7 @@ pub enum AgentKindError {
 /// Contains only serialisable plain data — no `agentik-core` types.
 #[derive(Default, Clone, Debug)]
 pub struct AgentSpawnOpts {
-    /// Override the system-prompt identity line
-    /// (e.g. "You are a biomedical research assistant.").
+    /// Override the system-prompt identity line.
     pub system_prompt_identity: Option<String>,
 
     /// Override the system-prompt section (task-specific instructions).
@@ -43,34 +41,139 @@ pub struct AgentSpawnOpts {
     pub initial_message: Option<Vec<ContentBlock>>,
 }
 
-// ── Factory trait ───────────────────────────────────────────────
+// ── AgentBlueprint ────────────────────────────────────────────────────
 
-/// A named kind of agent.  Implemented by host code that depends on
-/// `agentik-core`; the runtime calls these methods internally when
-/// building or rebuilding an agent.
+/// A named kind of agent that bundles a skill tree and tool provider.
 ///
-/// Using a trait object (rather than closures or an enum) keeps business
-/// logic out of the runtime while giving a uniform, re-invokable rebuild
-/// surface — which is what fixes the "restart drops tools" bug (the
-/// factory's `build_tools` is called fresh on every rebuild).
-#[async_trait::async_trait]
-pub trait AgentKindFactory: Send + Sync {
-    /// Unique machine name (e.g. `"compose"`, `"knowledge"`).
-    fn name(&self) -> &str;
+/// This is the unified construction layer that binds Agent + Toolset + SkillTree.
+/// When `build_agent()` is called, it:
+///
+/// 1. Collects the full tool universe from the skill tree's `allowed_tools` union
+/// 2. Builds a `Toolset` from the tool provider (only the tools the tree needs)
+/// 3. Registers the `activate_skill` tool if a skill client is provided
+/// 4. Initializes the agent with the root skill active
+///
+/// Example:
+/// ```ignore
+/// let kind = AgentBlueprint::new(
+///     "coder",
+///     "Generic Coder",
+///     load_skill_tree_from_dirs(&["./skills"])?,
+///     default_tool_provider(),
+/// )
+/// .with_identity("You are a helpful coding assistant.")
+/// .with_skill_client(skill_client);
+///
+/// let agent = kind.build_agent(model_pool).await?;
+/// ```
+pub struct AgentBlueprint {
+    pub name: String,
+    pub display_name: String,
+    pub skill_tree: SkillTree,
+    pub tool_provider: ToolProviderRegistry,
+    pub default_identity: Option<String>,
+    /// Optional skill registry client for runtime skill activation.
+    /// When set, `build_agent()` registers the `activate_skill` tool.
+    pub skill_client: Option<Arc<tokio::sync::Mutex<SkillRegistryClient>>>,
+}
 
-    /// Human-readable label for UI display.
-    fn display_name(&self) -> &str;
+impl AgentBlueprint {
+    /// Create a new agent kind.
+    ///
+    /// # Arguments
+    /// * `name` — Machine-readable identifier (e.g. "coder")
+    /// * `display_name` — Human-readable label for UI
+    /// * `skill_tree` — The skill tree loaded from disk
+    /// * `tool_provider` — Global tool provider for resolving tool names to implementations
+    pub fn new(
+        name: impl Into<String>,
+        display_name: impl Into<String>,
+        skill_tree: SkillTree,
+        tool_provider: ToolProviderRegistry,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            display_name: display_name.into(),
+            skill_tree,
+            tool_provider,
+            default_identity: None,
+            skill_client: None,
+        }
+    }
 
-    /// Build a fresh per-agent context.  Called on every spawn / rebuild.
-    async fn build_context(&self) -> Result<Arc<dyn AgentContext>, AgentKindError>;
+    /// Set a default prompt identity for this kind.
+    pub fn with_identity(mut self, identity: impl Into<String>) -> Self {
+        self.default_identity = Some(identity.into());
+        self
+    }
 
-    /// Build the tool set for this kind.  Called fresh on every spawn /
-    /// rebuild so restart and reconfigure don't silently drop tools.
-    fn build_tools(&self) -> Vec<ToolRegistration>;
+    /// Set a skill registry client for runtime `activate_skill` support.
+    pub fn with_skill_client(
+        mut self,
+        client: Arc<tokio::sync::Mutex<SkillRegistryClient>>,
+    ) -> Self {
+        self.skill_client = Some(client);
+        self
+    }
 
-    /// Optional default prompt identity if the frontend doesn't override.
-    fn default_identity(&self) -> Option<&str> {
-        None
+    /// Build a complete Agent from this kind's skill tree + tool provider.
+    ///
+    /// The toolset is derived from the skill tree's `allowed_tools` union,
+    /// the root skill is activated, and the root skill's body becomes the
+    /// system prompt section.
+    pub async fn build_agent(
+        &self,
+        model_pool: Arc<agentik_core::model::model_pool::ModelPool>,
+    ) -> Result<agentik_core::Agent, AgentBlueprintError> {
+        use agentik_core::agent_builder::AgentBuilder;
+
+        // 1. Collect tool universe from skill tree
+        let tool_names: Vec<String> = self
+            .skill_tree
+            .collect_all_allowed_tools()
+            .into_iter()
+            .collect();
+
+        // 2. Build toolset from tool provider (includes lifecycle tools)
+        let mut toolset = self
+            .tool_provider
+            .build_toolset(&tool_names, true);
+
+        // 3. Register activate_skill tool if a skill client is available
+        let skill_activation_state = if let Some(client) = &self.skill_client {
+            let state = agentik_core::tools::SkillActivationState::default();
+            let skill_reg = agentik_core::tools::skill_registration(client.clone(), state.clone());
+            if let Err(e) = toolset.register(skill_reg) {
+                tracing::warn!(error = %e, "failed to register activate_skill tool");
+            }
+            Some(state)
+        } else {
+            None
+        };
+
+        // 4. Initialize skill path with root skill
+        let skill_path = self
+            .skill_tree
+            .root
+            .as_ref()
+            .map(|node| vec![node.skill.clone()])
+            .unwrap_or_default();
+
+        // 5. Build agent via builder (prebuilt toolset + skill path skip auto-registration)
+        let mut builder = AgentBuilder::new()
+            .with_model_pool(model_pool)
+            .with_toolset(toolset)
+            .with_skill_path(skill_path)
+            .with_skill_activation_state(skill_activation_state);
+
+        if let Some(identity) = &self.default_identity {
+            builder = builder.with_system_prompt_identity(identity.clone());
+        }
+
+        builder.build().await.map_err(|e| AgentBlueprintError::BuildFailed {
+            kind: self.name.clone(),
+            reason: e.to_string(),
+        })
     }
 }
 
@@ -78,12 +181,12 @@ pub trait AgentKindFactory: Send + Sync {
 
 /// Thread-safe registry of named agent kinds.
 ///
-/// The host registers [`AgentKindFactory`] implementations at startup.
+/// The host registers [`AgentBlueprint`] instances at startup.
 /// The runtime looks up kinds by name when the frontend calls
 /// [`spawn_by_kind`](crate::ProcessManager::spawn_by_kind).
 #[derive(Default)]
 pub struct AgentRegistry {
-    kinds: std::sync::RwLock<HashMap<String, Arc<dyn AgentKindFactory>>>,
+    kinds: std::sync::RwLock<HashMap<String, Arc<AgentBlueprint>>>,
 }
 
 impl AgentRegistry {
@@ -93,9 +196,9 @@ impl AgentRegistry {
     }
 
     /// Register an agent kind.  Replaces any existing kind with the same name.
-    pub fn register(&self, factory: Arc<dyn AgentKindFactory>) {
-        let name = factory.name().to_string();
-        self.kinds.write().unwrap().insert(name, factory);
+    pub fn register(&self, kind: Arc<AgentBlueprint>) {
+        let name = kind.name.clone();
+        self.kinds.write().unwrap().insert(name, kind);
     }
 
     /// Remove a registered kind by name.
@@ -109,7 +212,8 @@ impl AgentRegistry {
     }
 
     /// Look up a kind by name.
-    pub fn get(&self, name: &str) -> Option<Arc<dyn AgentKindFactory>> {
+    pub fn get(&self, name: &str) -> Option<Arc<AgentBlueprint>> {
         self.kinds.read().unwrap().get(name).cloned()
     }
 }
+

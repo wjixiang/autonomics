@@ -8,6 +8,9 @@ allowed_tools:
   - bash
   - read
   - glob
+  - activate_skill
+  - attempt_complete
+  - abort_task
 user_invocable: true
 model_invocable: true
 ---

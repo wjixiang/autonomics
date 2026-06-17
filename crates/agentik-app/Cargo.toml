@@ -8,6 +8,8 @@ description = "Host binary wiring agentik-runtime + agentik-tui."
 
 [dependencies]
 agentik-core = { path = "../agentik-core" }
+agentik-sdk = { path = "../agentik-sdk" }
+agentik-skill = { path = "../agentik-skill" }
 agentik-tools = { path = "../agentik-tools" }
 agentik-runtime = { path = "../agentik-runtime" }
 agentik-tui = { path = "../agentik-tui" }
@@ -19,6 +21,7 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = { workspace = true }
+uuid = "1"
 
 [lints]
 workspace = true

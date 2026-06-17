@@ -208,8 +208,9 @@ pub fn load_skill_tree_from_dirs(dirs: &[PathBuf]) -> crate::tree::SkillTree {
     let mut tree = crate::tree::SkillTree::build(skills, &base_dir);
 
     // Append auto-generated children list to root body.
+    // Compute summary before mutating to satisfy borrow checker.
+    let children_summary = tree.children_summary();
     if let Some(ref mut root) = tree.root {
-        let children_summary = tree.children_summary();
         if !children_summary.is_empty() {
             root.skill.body.push_str(&children_summary);
         }

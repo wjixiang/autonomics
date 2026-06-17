@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use agentik_skill::{load_skills_from_dirs, reload_skill, Skill};
+use agentik_skill::{load_skill_tree_from_dirs, load_skills_recursive, reload_skill, Skill, SkillTree};
 use async_trait::async_trait;
 use tokio::sync::{broadcast, RwLock};
 
@@ -31,20 +31,25 @@ pub struct FilesystemSkillStore {
     /// name/alias -> Skill
     skills: Arc<RwLock<HashMap<String, Skill>>>,
     change_tx: broadcast::Sender<SkillChangeNotification>,
+    /// Skill tree built from directory structure.
+    tree: Arc<RwLock<SkillTree>>,
 }
 
 impl FilesystemSkillStore {
     /// Create a new filesystem store and load all skills from `skill_dirs`.
     pub async fn new(skill_dirs: Vec<PathBuf>) -> SkillStoreResult<Self> {
-        let skills = load_skills_from_dirs(&skill_dirs);
-
+        // Index ALL skills (flat or nested) into the lookup map.
+        let all_skills = load_skills_recursive(&skill_dirs);
         let mut map = HashMap::new();
-        for skill in &skills {
+        for skill in &all_skills {
             map.insert(skill.metadata.name.clone(), skill.clone());
             for alias in &skill.metadata.aliases {
                 map.insert(alias.clone(), skill.clone());
             }
         }
+
+        // Build the tree for GetSkillTree RPC (only keeps tree-structured skills).
+        let tree = load_skill_tree_from_dirs(&skill_dirs);
 
         let (change_tx, _) = broadcast::channel(64);
 
@@ -52,6 +57,7 @@ impl FilesystemSkillStore {
             skill_dirs,
             skills: Arc::new(RwLock::new(map)),
             change_tx,
+            tree: Arc::new(RwLock::new(tree)),
         })
     }
 
@@ -138,6 +144,16 @@ impl SkillStore for FilesystemSkillStore {
 
     async fn watch_dirs(&self) -> Vec<PathBuf> {
         self.skill_dirs.clone()
+    }
+
+    async fn get_root_skill(&self) -> SkillStoreResult<Skill> {
+        let tree = self.tree.read().await;
+        tree.root
+            .as_ref()
+            .map(|node| node.skill.clone())
+            .ok_or(SkillStoreError::NotFound {
+                name: "root".to_string(),
+            })
     }
 }
 

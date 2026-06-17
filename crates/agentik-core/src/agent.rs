@@ -9,7 +9,7 @@
 
 use std::{sync::Arc, time::Duration, time::UNIX_EPOCH};
 
-use crate::context::{AgentContext, serialize_snapshot};
+use crate::context::ContextProvider;
 use crate::message_ext::AgentMessageExt;
 use agentik_sdk::model::model_pool::ModelPool;
 use agentik_sdk::types::messages::{ContentBlock, Message, Role};
@@ -57,16 +57,17 @@ pub struct Agent {
     pub(crate) config: AgentConfig,
     pub(crate) storage: Option<Arc<dyn AgentSnapshotStorage>>,
     pub(crate) token_budget: TokenBudget,
-    pub(crate) ctx: Arc<dyn AgentContext>,
-    pub(crate) last_context_version: u64,
+    pub(crate) context_provider: Option<Arc<dyn ContextProvider>>,
     pub(crate) system_prompt_section: Option<String>,
     pub(crate) system_prompt_identity: Option<String>,
     /// Optional event channel for streaming progress to external observers.
     pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentUiEvent>>,
     /// Currently selected model name. If None, falls back to round-robin.
     pub(crate) current_model_name: Option<String>,
-    /// Currently active skill. When set, toolset.execute filters to allowed_tools.
-    pub(crate) active_skill: Option<Skill>,
+    /// Skill activation path. Last element is the currently active (leaf) skill.
+    /// Empty means no skill tree loaded (backward compatible).
+    /// [root] means root skill active. [root, child] means child is active.
+    pub(crate) active_skill_path: Vec<Skill>,
     /// Shared state for skill activation (SkillToolImpl writes, handle_effect reads).
     pub(crate) skill_activation_state: Option<SkillActivationState>,
 }
@@ -100,6 +101,11 @@ impl Agent {
         self.id
     }
 
+    /// Wire an event channel for external observation (e.g. TUI, tests).
+    pub fn set_event_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentUiEvent>) {
+        self.event_tx = Some(tx);
+    }
+
     /// Register a single tool.
     pub fn register_tool(&mut self, registration: ToolRegistration) -> Result<(), AgentError> {
         self.toolset
@@ -117,6 +123,16 @@ impl Agent {
             .register_all(registrations)
             .map_err(AgentError::Tool)?;
         Ok(())
+    }
+
+    /// Override the system prompt identity line.
+    pub fn set_system_prompt_identity(&mut self, identity: impl Into<String>) {
+        self.system_prompt_identity = Some(identity.into());
+    }
+
+    /// Override the system prompt section.
+    pub fn set_system_prompt_section(&mut self, section: impl Into<String>) {
+        self.system_prompt_section = Some(section.into());
     }
 
     pub async fn snapshot(&self) -> AgentSnapshot {
@@ -158,9 +174,6 @@ impl Agent {
         self.send_event(agentik_sdk::types::AgentUiEvent::LlmResponse(
             "🤖 Agent started".to_string(),
         ));
-
-        // Initial context injection
-        self.inject_context_if_changed().await;
 
         let mut iteration = 0;
         let mut consecutive_retries = 0;
@@ -223,8 +236,8 @@ impl Agent {
                 .unwrap();
         }
 
-        // Context injection at loop boundary (before building context for LLM)
-        self.inject_context_if_changed().await;
+        // Poll context provider for dynamic injection
+        self.poll_context_provider().await;
 
         let context = self.build_context().await?;
         self.send_event(agentik_sdk::types::AgentUiEvent::Requesting);
@@ -270,7 +283,10 @@ impl Agent {
             });
         }
 
-        let allowed = self.active_skill.as_ref().and_then(|s| s.allowed_tools());
+        let allowed = self
+            .active_skill_path
+            .last()
+            .and_then(|s| s.allowed_tools());
         let tool_results = self.toolset.execute(&toolcalls, allowed.as_deref()).await?;
         tracing::debug!(?tool_results, "tool execution results");
 
@@ -309,22 +325,15 @@ impl Agent {
 
         self.handle_effect(&tool_results).await;
 
-        // Context injection after tool execution (captures any writes that happened
-        // during tool execution, e.g. state changes triggered by mutation tools)
-        self.inject_context_if_changed().await;
-
         Ok(())
     }
 
-    /// Check the context store for a version change. If detected, serialize
-    /// the snapshot into a User message and append to memory.
-    async fn inject_context_if_changed(&mut self) {
-        let snapshot = self.ctx.read().await;
-        if snapshot.version > self.last_context_version {
-            self.last_context_version = snapshot.version;
-            if !snapshot.data.is_empty() {
-                let msg = serialize_snapshot(&snapshot);
-                let _ = self.memory.remember(Message::user(msg));
+    /// Poll the optional context provider for dynamic data.
+    /// If it returns Some(text), inject as a user message.
+    async fn poll_context_provider(&mut self) {
+        if let Some(provider) = &self.context_provider {
+            if let Some(text) = provider.poll().await {
+                let _ = self.memory.remember(Message::user(text));
             }
         }
     }
@@ -333,9 +342,30 @@ impl Agent {
     async fn handle_effect(&mut self, tool_results: &[ToolCallResponse]) {
         // Check for pending skill activation from SkillToolImpl.
         if let Some(ref state) = self.skill_activation_state {
-            if let Some(skill) = state.take().await {
-                tracing::info!(skill_name = %skill.metadata.name, "skill activated");
-                self.active_skill = Some(skill);
+            if let Some(new_skill) = state.take().await {
+                tracing::info!(skill_name = %new_skill.metadata.name, "skill activated");
+
+                // Determine if the new skill is a child of the current leaf.
+                let current_dotpath = self
+                    .active_skill_path
+                    .last()
+                    .map(|s| s.metadata.name.as_str());
+                let is_child = new_skill
+                    .metadata
+                    .aliases
+                    .iter()
+                    .any(|a| current_dotpath == Some(a.as_str()));
+
+                if is_child && current_dotpath.is_some() {
+                    // Progressive disclosure: push onto path.
+                    self.active_skill_path.push(new_skill);
+                } else {
+                    // Skill switch or first activation: rebuild path from root.
+                    self.active_skill_path.retain(|s| {
+                        s.metadata.name == "root" || s.metadata.aliases.contains(&"root".to_string())
+                    });
+                    self.active_skill_path.push(new_skill);
+                }
             }
         }
 
@@ -413,8 +443,26 @@ impl Agent {
             return Err(AgentError::CompactionRebuild);
         }
 
+        // Progressive tool disclosure: filter tool definitions sent to the LLM
+        // based on the current skill's allowed_tools. The LLM only sees tools
+        // that the active skill permits.
+        let all_tools = self.toolset.tools();
+        let visible_tools: Vec<_> = match self.active_skill_path.last() {
+            Some(skill) => {
+                let allowed = skill.allowed_tools();
+                match allowed {
+                    Some(names) => all_tools
+                        .into_iter()
+                        .filter(|t| names.contains(&t.name))
+                        .collect(),
+                    None => all_tools,
+                }
+            }
+            None => all_tools,
+        };
+
         let mut stream = model
-            .request_stream(context, self.toolset.tools().as_ref())
+            .request_stream(context, visible_tools.as_ref())
             .await?;
 
         while let Some(event) = stream.next().await {
@@ -442,6 +490,7 @@ impl Agent {
                 self.send_event(agent_event);
             }
         }
+        tracing::info!("stream loop exited, awaiting final_message");
         // NB: do NOT emit `AgentEvent::Done` here. `Done` is a
         // lifecycle signal that the TUI uses to flip its `agent_running`
         // flag and re-enable the input field. Emitting it after every
@@ -455,7 +504,18 @@ impl Agent {
         // (See also `AgentEvent::from_stream_event` for
         // `MessageStop`, which returns `None` for the same reason.)
 
-        let response = stream.final_message().await?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            stream.final_message(),
+        )
+        .await
+        .map_err(|e| AgentError::WorkflowFailed {
+            iteration: 0,
+            error: Box::new(AgentError::MissingConfig(format!(
+                "final_message() timed out: {e}"
+            ))),
+        })?
+        ?;
 
         tracing::debug!(?response, "LLM response");
 
@@ -546,7 +606,6 @@ impl TokenBudget {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{AgentContext, ContextChanges, ContextSnapshot};
     use crate::testing::dummy_model_info;
     use agentik_sdk::model::Model;
     use agentik_sdk::model::model_info::ModelInfo;
@@ -554,21 +613,6 @@ mod tests {
     use agentik_sdk::types::AgentEvent;
     use agentik_sdk::types::messages::{ContentBlock, Message, Role};
     use agentik_sdk::types::shared::Usage;
-
-    // ── Mock AgentContext ──────────────────────────────────────
-
-    struct MockCtx;
-
-    #[async_trait::async_trait]
-    impl AgentContext for MockCtx {
-        async fn read(&self) -> ContextSnapshot {
-            ContextSnapshot::default()
-        }
-
-        async fn write(&self, _changes: ContextChanges) -> Result<(), String> {
-            Ok(())
-        }
-    }
 
     // ── Helpers ────────────────────────────────────────────────
 
@@ -609,7 +653,6 @@ mod tests {
 
         let mut agent = Agent::builder()
             .with_model_pool(Arc::new(model_pool))
-            .with_context(Arc::new(MockCtx))
             .with_config(AgentConfig {
                 max_iterations: 5,
                 max_retries: 0,

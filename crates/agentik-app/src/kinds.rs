@@ -1,44 +1,37 @@
 //! Agent kind registrations for the host binary.
 //!
-//! Each struct here implements [`agentik_runtime::AgentKindFactory`]
-//! and is registered into the runtime registry at startup.
+//! Each function here returns a fully constructed [`AgentBlueprint`] that bundles
+//! a skill tree and tool provider.
 
 use std::sync::Arc;
 
-use agentik_core::context::AgentContext;
-use agentik_core::tools::{ToolRegistration, Toolset};
-use agentik_runtime::registry::{AgentKindError, AgentKindFactory};
+use agentik_runtime::registry::AgentBlueprint;
 
 /// A generic "coder" agent kind that uses the built-in core tools
-/// (bash, read, write, edit, glob, grep, webfetch) and an in-memory
-/// context store.
-pub struct GenericCoderKind;
+/// (bash, read, write, edit, glob, grep, webfetch).
+pub fn coder_kind() -> Arc<AgentBlueprint> {
+    let mut tool_provider = agentik_core::tools::ToolProviderRegistry::new();
 
-impl GenericCoderKind {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-#[async_trait::async_trait]
-impl AgentKindFactory for GenericCoderKind {
-    fn name(&self) -> &str {
-        "coder"
+    // Register all primitive tools from agentik-tools.
+    for reg in agentik_tools::primitive_registrations() {
+        tool_provider.register(reg);
     }
 
-    fn display_name(&self) -> &str {
-        "Generic Coder"
-    }
+    // Build a skill tree from the `skills/` directory on disk.
+    let skill_tree = agentik_skill::load_skill_tree_from_dirs(
+        &[std::path::PathBuf::from("skills")],
+    );
 
-    async fn build_context(&self) -> Result<Arc<dyn AgentContext>, AgentKindError> {
-        Ok(Arc::new(agentik_core::context::InMemoryAgentContext::new()))
-    }
-
-    fn build_tools(&self) -> Vec<ToolRegistration> {
-        agentik_tools::primitive_registrations()
-    }
-
-    fn default_identity(&self) -> Option<&str> {
-        Some("You are a helpful coding assistant. You can read, write, and edit files, run shell commands, and fetch web content.")
-    }
+    Arc::new(
+        AgentBlueprint::new(
+            "coder",
+            "Generic Coder",
+            skill_tree,
+            tool_provider,
+        )
+        .with_identity(
+            "You are a helpful coding assistant. You can read, write, and edit files, \
+             run shell commands, and fetch web content.",
+        ),
+    )
 }

@@ -49,4 +49,9 @@ impl SkillRegistry {
     pub async fn reload_skill(&self, name: &str) -> SkillStoreResult<Option<Skill>> {
         self.store.reload(name).await
     }
+
+    /// Get the root skill (with auto-generated children summary in body).
+    pub async fn get_root_skill(&self) -> SkillStoreResult<Skill> {
+        self.store.get_root_skill().await
+    }
 }

@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use agentik_skill::Skill;
 use agentik_skill_proto::skill_registry::{
-    skill_registry_service_client::SkillRegistryServiceClient, GetSkillRequest, ListSkillsRequest,
-    ReloadSkillRequest,
+    skill_registry_service_client::SkillRegistryServiceClient, GetSkillRequest, GetSkillTreeRequest,
+    ListSkillsRequest, ReloadSkillRequest,
 };
 use tonic::transport::Endpoint;
 
@@ -104,6 +104,29 @@ impl SkillRegistryClient {
                 msg,
             )) => Err(SkillClientError::Status(tonic::Status::internal(msg))),
             None => Ok(None),
+        }
+    }
+
+    /// Get the root skill (with auto-generated children summary in body).
+    pub async fn get_skill_tree(&mut self) -> Result<Skill, SkillClientError> {
+        let response = self
+            .inner
+            .get_skill_tree(GetSkillTreeRequest {})
+            .await?
+            .into_inner();
+
+        match response.result {
+            Some(
+                agentik_skill_proto::skill_registry::get_skill_tree_response::Result::Root(
+                    proto,
+                ),
+            ) => proto_to_skill(&proto),
+            Some(agentik_skill_proto::skill_registry::get_skill_tree_response::Result::Error(
+                msg,
+            )) => Err(SkillClientError::Status(tonic::Status::internal(msg))),
+            None => Err(SkillClientError::NotFound {
+                name: "root".to_string(),
+            }),
         }
     }
 }

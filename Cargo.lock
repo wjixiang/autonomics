@@ -14,6 +14,8 @@ version = "0.1.0"
 dependencies = [
  "agentik-core",
  "agentik-runtime",
+ "agentik-sdk",
+ "agentik-skill",
  "agentik-tools",
  "agentik-tui",
  "async-trait",
@@ -24,6 +26,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -64,12 +67,15 @@ version = "0.1.0"
 dependencies = [
  "agentik-core",
  "agentik-sdk",
+ "agentik-skill",
+ "agentik-skill-client",
  "async-trait",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tracing",
  "uuid",
 ]
 

@@ -99,10 +99,12 @@ pub struct MessageStream {
     /// Whether the stream has ended (one-way flag: false → true)
     ended: Arc<AtomicBool>,
 
-    /// Notification primitive: background task fires this after setting
-    /// `ended = true` so that a parked consumer (whose broadcast receiver
-    /// returned Pending) gets woken up and can observe the flag.
-    ended_notify: Arc<tokio::sync::Notify>,
+    /// Watch channel for stream-end signalling.  The background task
+    /// `store(true)` on the sender when it finishes.  Unlike `Notify`,
+    /// `watch::Receiver::changed()` is *sticky*: if the value changed
+    /// since the last observation the future resolves immediately, so a
+    /// late consumer that missed the change still wakes up.
+    ended_watch: tokio::sync::watch::Receiver<bool>,
 
     /// Whether an error occurred (one-way flag: false → true)
     errored: Arc<AtomicBool>,
@@ -133,14 +135,13 @@ impl MessageStream {
         let current_message = Arc::new(RwLock::new(None));
         let event_handlers = Arc::new(Mutex::new(HashMap::new()));
         let ended = Arc::new(AtomicBool::new(false));
-        let ended_notify = Arc::new(tokio::sync::Notify::new());
+        let (ended_watch_tx, ended_watch_rx) = tokio::sync::watch::channel(false);
         let errored = Arc::new(AtomicBool::new(false));
         let aborted = Arc::new(AtomicBool::new(false));
 
         let cm = current_message.clone();
         let handlers = event_handlers.clone();
         let end = ended.clone();
-        let end_notify = ended_notify.clone();
         let tx = event_sender.clone();
 
         tokio::spawn(async move {
@@ -157,7 +158,7 @@ impl MessageStream {
                 AnthropicError::StreamError("Stream ended without message".to_string())
             }));
             end.store(true, Ordering::Release);
-            end_notify.notify_one();
+            let _ = ended_watch_tx.send(true);
         });
 
         Self {
@@ -168,7 +169,7 @@ impl MessageStream {
             completion_sender: None,
             completion_receiver,
             ended,
-            ended_notify,
+            ended_watch: ended_watch_rx,
             errored,
             aborted,
             request_id: None,
@@ -238,7 +239,7 @@ impl MessageStream {
         let current_message = Arc::new(RwLock::new(None));
         let event_handlers = Arc::new(Mutex::new(HashMap::new()));
         let ended = Arc::new(AtomicBool::new(false));
-        let ended_notify = Arc::new(tokio::sync::Notify::new());
+        let (ended_watch_tx, ended_watch_rx) = tokio::sync::watch::channel(false);
         let errored = Arc::new(AtomicBool::new(false));
         let aborted = Arc::new(AtomicBool::new(false));
         let request_id = http_stream.request_id().map(|s| s.to_string());
@@ -252,7 +253,6 @@ impl MessageStream {
         let current_message_bg = current_message.clone();
         let event_handlers_bg = event_handlers.clone();
         let ended_bg = ended.clone();
-        let ended_notify_bg = ended_notify.clone();
         let errored_bg = errored.clone();
         let aborted_bg = aborted.clone();
         let event_sender_bg = event_sender.clone();
@@ -347,7 +347,7 @@ impl MessageStream {
                                     "background task: received MessageStop, sending completion"
                                 );
                                 ended_bg.store(true, Ordering::Release);
-                                ended_notify_bg.notify_one();
+                                let _ = ended_watch_tx.send(true);
                                 let result = final_message.clone().ok_or_else(|| {
                                     crate::types::AnthropicError::StreamError(
                                         "Stream ended without message".to_string(),
@@ -411,7 +411,7 @@ impl MessageStream {
                                 "background task: HTTP stream ended (None) — no more SSE events"
                             );
                             ended_bg.store(true, Ordering::Release);
-                            ended_notify_bg.notify_one();
+                            let _ = ended_watch_tx.send(true);
                             break 'outer;
                         }
                     }
@@ -464,7 +464,7 @@ impl MessageStream {
             }
             tracing::info!("background task: exiting — setting ended=true and notifying");
             ended_bg.store(true, Ordering::Release);
-            ended_notify_bg.notify_one();
+            let _ = ended_watch_tx.send(true);
         });
         *bg_handle_clone.lock().unwrap() = Some(background_handle);
 
@@ -476,7 +476,7 @@ impl MessageStream {
             completion_sender: None, // Already consumed by the task
             completion_receiver,
             ended,
-            ended_notify,
+            ended_watch: ended_watch_rx,
             errored,
             aborted,
             request_id,
@@ -1022,20 +1022,27 @@ impl Stream for MessageStream {
                     // Stream not ended yet.  The broadcast receiver's
                     // waker is already registered (inside BroadcastStream
                     // poll_next), but the sender is kept alive by this
-                    // struct so it will never emit Ready(None).  We also
-                    // poll the ended_notify so the background task can
-                    // wake us when it finishes — closing the race where
-                    // the consumer parks just before ended is set.
-                    let mut notified = std::pin::pin!(this.ended_notify.notified());
-                    match notified.as_mut().poll(cx) {
-                        std::task::Poll::Ready(()) => {
-                            // Notify was fired — background task done.
+                    // struct so it will never emit Ready(None).  We poll
+                    // the watch receiver — unlike Notify, `changed()` is
+                    // *sticky*: if the sender wrote `true` between our
+                    // last observation and this poll it resolves immediately,
+                    // closing the race where the consumer parks just before
+                    // the background task finishes.
+                    let mut changed = std::pin::pin!(this.ended_watch.changed());
+                    match changed.as_mut().poll(cx) {
+                        std::task::Poll::Ready(Ok(())) => {
+                            // Watch value changed — background task done.
+                            // Re-check the ended AtomicBool (set by the same
+                            // background task that wrote to the watch sender).
                             if this.ended.load(Ordering::Acquire) {
                                 return std::task::Poll::Ready(None);
                             }
-                            // Spurious or not-yet-visible; return
-                            // Pending and let the next wake-up retry.
+                            // Spurious — stay pending.
                             return std::task::Poll::Pending;
+                        }
+                        std::task::Poll::Ready(Err(_)) => {
+                            // Watch sender dropped — treat as ended.
+                            return std::task::Poll::Ready(None);
                         }
                         std::task::Poll::Pending => {
                             return std::task::Poll::Pending;
@@ -1611,4 +1618,3 @@ data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":
         assert_eq!(count, 5, "all events should be drained before stream ends");
     }
 }
-

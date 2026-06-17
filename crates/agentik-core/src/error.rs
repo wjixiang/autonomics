@@ -58,7 +58,7 @@ pub enum AgentError {
     MemoryError(#[from] MemoryError),
 
     #[error("Unknown tool requested:  {0:?}. Existed tools: {1:?}")]
-    UnknownTool(Vec<ToolUse>, Vec<agentik_sdk::types::Tool>),
+    UnknownTool(Vec<ToolUse>, Vec<agentik_sdk::types::ToolDefinition>),
 
     #[error("Tool error: {0}")]
     Tool(#[from] ToolError),
