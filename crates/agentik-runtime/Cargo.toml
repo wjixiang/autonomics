@@ -10,8 +10,10 @@ description = "Multi-agent process runtime for agentik."
 agentik-core = { path = "../agentik-core" }
 agentik-skill = { path = "../agentik-skill" }
 agentik-skill-client = { path = "../agentik-skill-client" }
+agentik-skill-server = { path = "../agentik-skill-server" }
 agentik-sdk = { path = "../agentik-sdk" }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net"] }
+tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 uuid = { version = "1.12", features = ["v4"] }
 thiserror = "2"
@@ -22,3 +24,6 @@ tracing = "0.1"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,3 +1,3 @@
 pub mod client;
 
-pub use client::SkillRegistryClient;
+pub use client::{SkillClientError, SkillRegistryClient};

@@ -15,7 +15,7 @@ use agentik_skill_proto::skill_registry::{
 use agentik_skill_proto::skill_registry::skill_registry_service_server::SkillRegistryService;
 use tonic::{Request, Response, Status};
 
-use crate::fs_store::{SkillChangeNotification, SkillChangeType};
+use crate::sqlite_store::{SkillChangeNotification, SkillChangeType};
 use crate::registry::SkillRegistry;
 
 pub struct SkillRegistryGrpcService {

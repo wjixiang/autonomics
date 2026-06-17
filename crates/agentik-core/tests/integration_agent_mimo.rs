@@ -1,6 +1,7 @@
 /// Minimal smoke test — verifies the SDK can parse a mimo SSE stream at all.
 /// Run: MIMO_API_KEY=sk-xxx cargo test -p agentik-core --test integration_agent_mimo -- --nocapture
 #[tokio::test]
+#[ignore]
 async fn test_sdk_mimo_stream_smoke() {
     use agentik_core::message_ext::AgentMessageExt;
     use agentik_sdk::Message;

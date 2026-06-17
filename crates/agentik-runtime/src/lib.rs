@@ -3,6 +3,8 @@
 //! This crate is the **sole interface** between the agentik project and the
 //! frontend (`agentik-tui`).  It exposes:
 //!
+//! - A unified [`Runtime`] portal that owns the embedded skill server
+//!   and the agent [`ProcessManager`].
 //! - A shared [`ModelPool`] singleton via [`PoolOwner`](pool::PoolOwner),
 //!   configured from declarative [`ModelConfig`] types.
 //! - An [`AgentRegistry`] of named agent kinds (registered by host code),
@@ -16,6 +18,7 @@ pub mod pool;
 pub mod process;
 pub mod provider_factory;
 pub mod registry;
+pub mod runtime;
 
 // ── Re-exports — frontend-facing surface ─────────────────────
 
@@ -43,4 +46,7 @@ pub use agentik_sdk::types::{AgentEvent, AgentUiEvent};
 
 // Re-export skill registry client for hosts that need runtime skill activation.
 pub use agentik_skill_client::SkillRegistryClient;
+
+// Unified runtime portal (skill server + process manager).
+pub use runtime::{Runtime, RuntimeConfig, RuntimeError};
 

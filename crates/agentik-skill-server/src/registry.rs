@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use agentik_skill::Skill;
 
-use crate::fs_store::SkillChangeNotification;
+use crate::sqlite_store::SkillChangeNotification;
 use crate::store::{SkillStore, SkillStoreResult};
 
 /// In-process skill registry.

@@ -4,13 +4,16 @@ use agentik_core::{
     agent::{Agent, AgentConfig},
     message_ext::AgentMessageExt,
 };
+use agentik_sdk::Message;
 use agentik_sdk::provider::mimo::MODEL_MIMO_V2_5;
 use agentik_sdk::{
     model::model_pool::ModelPool,
-    provider::{LlmProvider, mimo::{MimoEndpoint, MimoProvider, TokenPlanRegion}},
+    provider::{
+        LlmProvider,
+        mimo::{MimoEndpoint, MimoProvider, TokenPlanRegion},
+    },
     types::AgentEvent,
 };
-use agentik_sdk::Message;
 
 fn build_mimo_model_pool() -> ModelPool {
     let api_key = std::env::var("MIMO_API_KEY").expect("MIMO_API_KEY not set");
@@ -29,6 +32,7 @@ fn build_mimo_model_pool() -> ModelPool {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_agent_basic_workflow_with_mimo() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
 
@@ -38,7 +42,10 @@ async fn test_agent_basic_workflow_with_mimo() {
         .with_system_prompt_section(
             "You are a helpful assistant. Keep responses very short (one sentence).",
         )
-        .with_config(AgentConfig { max_iterations: 3, max_retries: 1 })
+        .with_config(AgentConfig {
+            max_iterations: 3,
+            max_retries: 1,
+        })
         .build()
         .await
         .expect("failed to build agent");

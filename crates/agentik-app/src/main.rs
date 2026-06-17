@@ -12,14 +12,13 @@ mod kinds;
 mod settings_io;
 
 use std::io;
-use std::sync::Arc;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use uuid::Uuid;
 
-use agentik_runtime::{AgentEvent, AgentSpawnOpts, ProcessEvent, ProcessManager, ModelConfig};
+use agentik_runtime::{AgentEvent, AgentSpawnOpts, ModelConfig, ProcessEvent, ProcessManager, Runtime, RuntimeConfig};
 use agentik_sdk::types::messages::ContentBlock;
 use agentik_tui::{
     append_streaming_assistant, append_streaming_thinking, finalize_streaming,
@@ -158,30 +157,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    // ── Create runtime components ─────────────────────
-    let registry = Arc::new(agentik_runtime::AgentRegistry::new());
-    registry.register(kinds::coder_kind());
-
-    let manager = ProcessManager::with_registry_and_pool(registry, Default::default());
-
     // ── Load settings ─────────────────────────────────
     let initial_config = settings_io::load_settings(SETTINGS_FILE);
     let rt = tokio::runtime::Runtime::new()?;
 
-    // Configure pool.
-    let pool_model_count = rt.block_on(async {
-        match manager.configure_pool(&initial_config).await {
-            Ok(()) => {
-                let names = manager.pool_model_names().await;
-                tracing::info!("Pool configured with {} models", names.len());
-                names.len()
-            }
-            Err(e) => {
-                tracing::warn!("Failed to configure pool: {e}");
-                0
-            }
-        }
-    });
+    // ── Create runtime ──────────────────────────────
+    let runtime = rt.block_on(async {
+        let config = RuntimeConfig::with_embedded_skill_server(vec![
+            std::path::PathBuf::from("skills"),
+        ])
+        .with_model_config(initial_config.clone());
+
+        let r = Runtime::new(config).await?;
+        r.registry().register(kinds::coder_kind());
+        Ok::<_, agentik_runtime::RuntimeError>(r)
+    })?;
+
+    if let Some(addr) = runtime.skill_server_addr() {
+        tracing::info!("Skill server embedded at {addr}");
+    }
+
+    let manager = runtime.process_manager().clone();
+    let pool_model_count = rt.block_on(manager.pool_model_names()).len();
 
     // ── Build app ──────────────────────────────────────
     let mut app = App::new(manager, &initial_config, pool_model_count);
@@ -219,7 +216,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Shutdown ──────────────────────────────────────
     restore_terminal()?;
-    tracing::info!("Shutdown complete");
+    let results = rt.block_on(runtime.shutdown());
+    tracing::info!("Shutdown complete — {} agents exited", results.len());
     Ok(())
 }
 
