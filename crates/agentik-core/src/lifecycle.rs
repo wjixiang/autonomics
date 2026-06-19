@@ -2,9 +2,9 @@ use thiserror::Error;
 
 /// Agent lifecycle status.
 ///
-/// Defined in [`agentik_api`] and re-exported here so historical
+/// Defined in [`agentik_types`] and re-exported here so historical
 /// `agentik_core::lifecycle::AgentLifecycleStatus` paths keep resolving.
-pub use agentik_api::AgentLifecycleStatus;
+pub use agentik_types::AgentLifecycleStatus;
 
 #[derive(Debug, Error)]
 pub enum AgentLifecycleError {

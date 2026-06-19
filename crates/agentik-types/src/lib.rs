@@ -1,5 +1,6 @@
 pub mod errors;
 pub mod agent_events;
+pub mod lifecycle;
 pub mod shared;
 pub mod messages;
 pub mod models;
@@ -37,6 +38,8 @@ pub use tools::{
 };
 
 pub use agent_events::{AgentEvent, AgentUiEvent, ContentBlockKind};
+
+pub use lifecycle::AgentLifecycleStatus;
 
 pub use batches::{
     MessageBatch, BatchStatus, BatchRequestCounts, BatchRequest, BatchRequestBuilder,
