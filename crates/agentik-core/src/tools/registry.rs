@@ -59,7 +59,7 @@ impl ToolRegistry {
     /// impl ToolFunction for WeatherTool {
     ///     type Input = WeatherInput;
     ///     async fn run(&self, input: WeatherInput) -> Result<ToolResult, ToolError> {
-    ///         Ok(ToolResult::success("id", format!("Weather in {}: Sunny, 72°F", input.location)))
+    ///         Ok(ToolResult::success(format!("Weather in {}: Sunny, 72°F", input.location)))
     ///     }
     /// }
     ///
@@ -164,7 +164,7 @@ impl ToolRegistry {
 
         // Validate input against schema
         if let Err(validation_error) = tool_entry.definition.validate_input(&tool_use.input) {
-            return Ok(ToolResult::error(
+            return Ok(ToolResult::error_with_id(
                 tool_use.id.clone(),
                 format!("Validation failed: {}", validation_error),
             ));
@@ -172,7 +172,7 @@ impl ToolRegistry {
 
         // Custom validation from the tool implementation
         if let Err(custom_error) = tool_entry.implementation.validate_input(&tool_use.input) {
-            return Ok(ToolResult::error(
+            return Ok(ToolResult::error_with_id(
                 tool_use.id.clone(),
                 format!("Custom validation failed: {}", custom_error),
             ));
@@ -193,7 +193,7 @@ impl ToolRegistry {
                 Ok(result)
             }
             Ok(Err(execution_error)) => Err(execution_error),
-            Err(_) => Ok(ToolResult::error(
+            Err(_) => Ok(ToolResult::error_with_id(
                 tool_use.id.clone(),
                 format!(
                     "Tool execution timed out after {} seconds",
@@ -278,7 +278,6 @@ mod tests {
 
         async fn run(&self, input: EchoInput) -> Result<ToolResult, ToolError> {
             Ok(ToolResult::success(
-                "test_id",
                 format!("Echo: {}", input.message),
             ))
         }

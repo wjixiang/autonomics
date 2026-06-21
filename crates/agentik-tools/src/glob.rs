@@ -44,7 +44,6 @@ impl ToolFunction for GlobTool {
             }
             Err(e) => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Invalid glob pattern: {e}"),
                 ));
             }
@@ -59,7 +58,7 @@ impl ToolFunction for GlobTool {
         if out.is_empty() {
             out = "(no matches)".to_string();
         }
-        Ok(ToolResult::success(String::new(), out))
+        Ok(ToolResult::success(out))
     }
 }
 

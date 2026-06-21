@@ -1,11 +1,10 @@
 use std::path::Path;
 
-use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
-use agentik_core::tools::{ToolError, ToolFunction};
+use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
@@ -32,7 +31,6 @@ impl ToolFunction for EditTool {
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         if input.old_string == input.new_string {
             return Ok(ToolResult::error(
-                String::new(),
                 "old_string must differ from new_string".to_string(),
             ));
         }
@@ -42,7 +40,6 @@ impl ToolFunction for EditTool {
             Ok(c) => c,
             Err(e) => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Failed to read {}: {e}", input.file_path),
                 ));
             }
@@ -53,13 +50,11 @@ impl ToolFunction for EditTool {
 
         if count == 0 {
             return Ok(ToolResult::error(
-                String::new(),
                 "old_string not found in file".to_string(),
             ));
         }
         if count > 1 && !replace_all {
             return Ok(ToolResult::error(
-                String::new(),
                 format!(
                     "old_string matches {count} locations; set replace_all=true or make old_string unique"
                 ),
@@ -74,7 +69,6 @@ impl ToolFunction for EditTool {
 
         if let Err(e) = fs::write(path, &new_content).await {
             return Ok(ToolResult::error(
-                String::new(),
                 format!("Failed to write {}: {e}", input.file_path),
             ));
         }
@@ -82,7 +76,6 @@ impl ToolFunction for EditTool {
         let n = if replace_all { count } else { 1 };
         let plural = if n == 1 { "" } else { "s" };
         Ok(ToolResult::success(
-            String::new(),
             format!("Edited {} ({} replacement{})", input.file_path, n, plural),
         ))
     }

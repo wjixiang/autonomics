@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use agentik_core::tools::{ToolError, ToolFunction};
 use agentik_core::tools::truncation::{TruncationConfig, truncate_tool_output};
+use agentik_core::tools::{ToolError, ToolFunction};
 
 /// Hard ceiling enforced by the framework wrapper. The real per-command
 /// timeout comes from `BashInput::timeout` and is enforced inside `run()`,
@@ -64,17 +64,16 @@ impl ToolFunction for BashTool {
 
         // tokio::time::timeout drops the output() future on expiry, which
         // drops the Child; kill_on_drop ensures the process is SIGKILL'd.
-        let output = match timeout(Duration::from_secs(timeout_secs as u64), command.output()).await {
+        let output = match timeout(Duration::from_secs(timeout_secs as u64), command.output()).await
+        {
             Ok(Ok(out)) => out,
             Ok(Err(e)) => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Failed to spawn command: {e}"),
                 ));
             }
             Err(_) => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Command timed out after {timeout_secs}s and was killed."),
                 ));
             }
@@ -90,9 +89,9 @@ impl ToolFunction for BashTool {
         // so the model understands the command failed.
         let is_success = matches!(exit_code, Some(0));
         if is_success {
-            Ok(ToolResult::success(String::new(), content))
+            Ok(ToolResult::success(content))
         } else {
-            Ok(ToolResult::error(String::new(), content))
+            Ok(ToolResult::error(content))
         }
     }
 }
@@ -182,7 +181,10 @@ mod tests {
             max_lines: 10,
             max_bytes: 1_000_000,
         };
-        let s: String = (0..20).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let s: String = (0..20)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let out = truncate_tool_output(&s, &config);
         assert!(out.truncated);
         assert!(out.content.contains("[output truncated"));

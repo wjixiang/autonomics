@@ -355,7 +355,6 @@ mod tests {
                 })
             } else {
                 Ok(ToolResult::success(
-                    "test_id",
                     format!("Success on attempt {}", attempt + 1),
                 ))
             }
@@ -375,7 +374,7 @@ mod tests {
             _input: Value,
         ) -> Result<ToolResult, ToolError> {
             sleep(self.delay).await;
-            Ok(ToolResult::success("test_id", "Slow tool completed"))
+            Ok(ToolResult::success("Slow tool completed"))
         }
     }
 

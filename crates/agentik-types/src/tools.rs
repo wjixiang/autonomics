@@ -364,35 +364,44 @@ impl ToolChoice {
 }
 
 impl ToolResult {
-    pub fn success(tool_use_id: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn success(content: impl Into<String>) -> Self {
         Self {
-            tool_use_id: tool_use_id.into(),
+            tool_use_id: String::new(),
             content: ToolResultContent::Text(content.into()),
             is_error: None,
         }
     }
 
-    pub fn success_json(tool_use_id: impl Into<String>, content: Value) -> Self {
+    pub fn success_json(content: Value) -> Self {
         Self {
-            tool_use_id: tool_use_id.into(),
+            tool_use_id: String::new(),
             content: ToolResultContent::Json(content),
             is_error: None,
         }
     }
 
-    pub fn error(tool_use_id: impl Into<String>, error_message: impl Into<String>) -> Self {
+    pub fn error(error_message: impl Into<String>) -> Self {
         Self {
-            tool_use_id: tool_use_id.into(),
+            tool_use_id: String::new(),
             content: ToolResultContent::Text(error_message.into()),
             is_error: Some(true),
         }
     }
 
-    pub fn with_blocks(tool_use_id: impl Into<String>, blocks: Vec<ToolResultBlock>) -> Self {
+    pub fn with_blocks(blocks: Vec<ToolResultBlock>) -> Self {
         Self {
-            tool_use_id: tool_use_id.into(),
+            tool_use_id: String::new(),
             content: ToolResultContent::Blocks(blocks),
             is_error: None,
+        }
+    }
+
+    /// Create an error result with a specific tool_use_id (for orchestration layer).
+    pub fn error_with_id(tool_use_id: impl Into<String>, error_message: impl Into<String>) -> Self {
+        Self {
+            tool_use_id: tool_use_id.into(),
+            content: ToolResultContent::Text(error_message.into()),
+            is_error: Some(true),
         }
     }
 }
@@ -545,15 +554,19 @@ mod tests {
 
     #[test]
     fn test_tool_result_creation() {
-        let success_result = ToolResult::success("tool_123", "Success message");
-        assert_eq!(success_result.tool_use_id, "tool_123");
+        let success_result = ToolResult::success("Success message");
+        assert_eq!(success_result.tool_use_id, "");
         assert!(success_result.is_error.is_none());
 
-        let error_result = ToolResult::error("tool_456", "Error message");
-        assert_eq!(error_result.tool_use_id, "tool_456");
+        let error_result = ToolResult::error("Error message");
+        assert_eq!(error_result.tool_use_id, "");
         assert_eq!(error_result.is_error, Some(true));
 
-        let json_result = ToolResult::success_json("tool_789", json!({"temperature": 72}));
+        let error_with_id = ToolResult::error_with_id("tool_456", "Error message");
+        assert_eq!(error_with_id.tool_use_id, "tool_456");
+        assert_eq!(error_with_id.is_error, Some(true));
+
+        let json_result = ToolResult::success_json(json!({"temperature": 72}));
         if let ToolResultContent::Json(value) = json_result.content {
             assert_eq!(value["temperature"], 72);
         } else {

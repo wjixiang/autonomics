@@ -33,7 +33,6 @@ impl ToolFunction for ReadTool {
             Ok(c) => c,
             Err(e) => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Failed to read {}: {e}", input.file_path),
                 ));
             }
@@ -56,7 +55,7 @@ impl ToolFunction for ReadTool {
         if out.is_empty() {
             out.push_str("(empty file or range)");
         }
-        Ok(ToolResult::success(String::new(), out))
+        Ok(ToolResult::success(out))
     }
 }
 

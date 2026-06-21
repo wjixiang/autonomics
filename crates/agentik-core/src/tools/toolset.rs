@@ -93,7 +93,7 @@ impl Toolset {
             // 当 allowed_tools 存在时，跳过不在白名单内的工具
             if let Some(allowed) = allowed_tools {
                 if !allowed.contains(&tc.name) {
-                    let response = ToolResult::error(
+                    let response = ToolResult::error_with_id(
                         tc.id.clone(),
                         format!("tool '{}' is not available in current skill context", tc.name),
                     );
@@ -115,7 +115,7 @@ impl Toolset {
             //     continue;
             // }
             if let Err(e) = registration.implementation.validate_input(&tc.input) {
-                let response = ToolResult::error(tc.id.clone(), e.to_string());
+                let response = ToolResult::error_with_id(tc.id.clone(), e.to_string());
                 results.push(response.into_call_response(effects));
                 continue;
             }
@@ -139,7 +139,7 @@ impl Toolset {
                     r.tool_use_id = tc.id.clone();
                     r
                 }
-                Err(e) => ToolResult::error(tc.id.clone(), e.to_string()),
+                Err(e) => ToolResult::error_with_id(tc.id.clone(), e.to_string()),
             };
 
             results.push(tool_result.into_call_response(effects));
@@ -184,7 +184,6 @@ mod tests {
             _input: Value,
         ) -> Result<crate::tools::ToolResult, crate::tools::error::ToolError> {
             Ok(crate::tools::ToolResult::success(
-                "mock_id",
                 self.result_text.clone(),
             ))
         }

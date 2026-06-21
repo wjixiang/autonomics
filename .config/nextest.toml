@@ -1,0 +1,10 @@
+# .config/nextest.toml
+
+[profile.default]
+# 默认情况下，成功和失败都立即并最终打印所有输出
+success-output = "immediate-final"
+failure-output = "immediate-final"
+
+[profile.rustaceanvim]
+# 继承默认配置，专门给 rustaceanvim 使用
+inherits = "default"

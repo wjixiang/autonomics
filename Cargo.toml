@@ -1,6 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["crates/agentik-sdk", "crates/agentik-types", "crates/agentik-core", "crates/agentik-proc", "crates/agentik-tools", "crates/stat-primitives", "crates/gwascatalog-sdk"]
+members = [
+  "crates/agentik-sdk",
+  "crates/agentik-types",
+  "crates/agentik-core",
+  "crates/agentik-proc",
+  "crates/agentik-tools",
+  "crates/stat-primitives",
+  "crates/gwascatalog-sdk",
+  "crates/datalake", "crates/datalake-tools",
+]
 
 [workspace.package]
 edition = "2024"
@@ -11,11 +20,23 @@ rust-version = "1.85"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
+anyhow = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 async-trait = "0.1"
 
+iceberg = "0.9.0"
+iceberg-catalog-rest = "0.9.0"
+iceberg-storage-opendal = "0.9.0"
+iceberg-datafusion = "0.9.0"
+arrow = "57.3.0"
+arrow-array = "57.3.0"
+arrow-schema = "57.3.0"
+parquet = "57.3.0"
+rayon = "1.12.0"
+futures = "0.3"
+datafusion = "52.2.0"
 
 # Suppress unused-warnings for the public-API workspace.dependencies that
 # the umbrella doesn't directly import. Keep this list as a hint for

@@ -35,7 +35,7 @@ use agentik_sdk::types::{ToolDefinition, ToolEffect, ToolInput, ToolResult};
 /// impl ToolFunction for MyTool {
 ///     type Input = MyInput;
 ///     async fn run(&self, input: MyInput) -> Result<ToolResult, ToolError> {
-///         Ok(ToolResult::success("", format!("hi {}", input.name)))
+///         Ok(ToolResult::success(format!("hi {}", input.name)))
 ///     }
 /// }
 /// ```
@@ -163,7 +163,6 @@ mod tests {
 
         async fn run(&self, input: EchoInput) -> Result<ToolResult, ToolError> {
             Ok(ToolResult::success(
-                "test_id",
                 format!("Echo: {}", input.message),
             ))
         }

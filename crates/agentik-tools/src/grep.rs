@@ -36,7 +36,6 @@ impl ToolFunction for GrepTool {
             Ok(r) => r,
             Err(e) => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Invalid regex: {e}"),
                 ));
             }
@@ -46,7 +45,6 @@ impl ToolFunction for GrepTool {
                 Ok(p) => Some(p),
                 Err(e) => {
                     return Ok(ToolResult::error(
-                        String::new(),
                         format!("Invalid glob: {e}"),
                     ));
                 }
@@ -142,7 +140,7 @@ impl ToolFunction for GrepTool {
             }
         };
 
-        Ok(ToolResult::success(String::new(), out))
+        Ok(ToolResult::success(out))
     }
 }
 

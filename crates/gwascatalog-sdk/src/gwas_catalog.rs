@@ -1,3 +1,10 @@
+//! GWAS Catalog Summary Statistics Database API client.
+//!
+//! <https://www.ebi.ac.uk/gwas/summary-statistics/docs/>
+//!
+//! All endpoints are read-only (`GET`). Responses use HAL format with
+//! `_links` (pagination: `first`, `next`) and `_embedded` (data).
+
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -18,6 +25,7 @@ pub struct HalLink {
     pub href: String,
 }
 
+/// HAL `_links` object. Fields appear depending on resource type.
 #[derive(Debug, Default, Deserialize)]
 pub struct HalLinks {
     #[serde(default, rename = "self")]
@@ -46,6 +54,28 @@ pub struct HalLinks {
     pub gwas_catalog: Option<HalLink>,
 }
 
+/// A single variant–study association record.
+///
+/// | Field | Type | Description |
+/// |---|---|---|
+/// | `variant_id` | String | rsid of the variant |
+/// | `chromosome` | u32 | Chromosome number (X=23, Y=24, MT=25) |
+/// | `base_pair_location` | u64 | Base pair location |
+/// | `study_accession` | String | Study accession (e.g. GCST005038) |
+/// | `trait_` | Vec\<String\> | EFO trait URI(s) |
+/// | `p_value` | f64 | P-value of the association |
+/// | `code` | Option\<u32\> | Harmonisation outcome code |
+/// | `effect_allele` | Option\<String\> | Effect allele |
+/// | `other_allele` | Option\<String\> | Other allele |
+/// | `effect_allele_frequency` | Option\<f64\> | Effect allele frequency |
+/// | `odds_ratio` | Option\<f64\> | Odds ratio |
+/// | `ci_lower` | Option\<f64\> | CI lower bound |
+/// | `ci_upper` | Option\<f64\> | CI upper bound |
+/// | `beta` | Option\<f64\> | Beta coefficient |
+/// | `se` | Option\<f64\> | Standard error of beta |
+///
+/// Default values are harmonised; use `reveal=raw` or `reveal=all` to access
+/// original data (harmonised fields get `hm_` prefix with `reveal=all`).
 #[derive(Debug, Deserialize)]
 pub struct Association {
     pub variant_id: String,
@@ -120,6 +150,7 @@ mod p_value_serde {
     }
 }
 
+/// Chromosome resource.
 #[derive(Debug, Deserialize)]
 pub struct Chromosome {
     pub chromosome: String,
@@ -127,6 +158,7 @@ pub struct Chromosome {
     pub _links: HalLinks,
 }
 
+/// EFO trait resource.
 #[derive(Debug, Deserialize)]
 pub struct Trait {
     #[serde(rename = "trait")]
@@ -135,6 +167,7 @@ pub struct Trait {
     pub _links: HalLinks,
 }
 
+/// Study resource.
 #[derive(Debug, Deserialize)]
 pub struct Study {
     pub study_accession: String,
@@ -142,36 +175,45 @@ pub struct Study {
     pub _links: HalLinks,
 }
 
+/// `_embedded` wrapper for association lists ( keyed by index string ).
 #[derive(Debug, Default, Deserialize)]
 pub struct EmbeddedAssociations {
     #[serde(default)]
     pub associations: std::collections::HashMap<String, Association>,
 }
 
+/// `_embedded` wrapper for chromosome lists.
 #[derive(Debug, Default, Deserialize)]
 pub struct EmbeddedChromosomes {
     #[serde(default)]
     pub chromosomes: Vec<Chromosome>,
 }
 
+/// `_embedded` wrapper for trait lists.
 #[derive(Debug, Default, Deserialize)]
 pub struct EmbeddedTraits {
     #[serde(default, rename = "trait")]
     pub traits: Vec<Trait>,
 }
 
+/// `_embedded` wrapper for study lists (returned by `/studies`).
 #[derive(Debug, Default, Deserialize)]
 pub struct EmbeddedStudies {
     #[serde(default)]
     pub studies: Vec<Vec<Study>>,
 }
 
+/// `_embedded` wrapper for trait-specific study lists (returned by `/traits/{trait}/studies`).
 #[derive(Debug, Default, Deserialize)]
 pub struct EmbeddedTraitStudies {
     #[serde(default)]
     pub studies: Vec<Study>,
 }
 
+/// Generic HAL paginated response.
+///
+/// Use `_links.next` to fetch the next page; the `start` offset in the next link
+/// may not equal `previous_start + size` when filtering by p-value or base-pair range.
 #[derive(Debug, Deserialize)]
 #[serde(bound = "")]
 pub struct PaginatedResponse<T: serde::de::DeserializeOwned> {
@@ -183,6 +225,16 @@ pub struct PaginatedResponse<T: serde::de::DeserializeOwned> {
 
 // ── Query builders ────────────────────────────────────────────────────────
 
+/// Query parameters for association endpoints.
+///
+/// | Param | Type | Description |
+/// |---|---|---|
+/// | `start` | usize | Offset number (default 0) |
+/// | `size` | usize | Items per page (default 20) |
+/// | `reveal` | RevealMode | `"raw"` for original data, `"all"` for harmonised + raw (`hm_` prefix) |
+/// | `p_lower` | f64 | Lower p-value threshold (e.g. `1e-5`) |
+/// | `p_upper` | f64 | Upper p-value threshold |
+/// | `study_accession` | String | Filter by study accession |
 #[derive(Debug, Default, Clone)]
 pub struct AssociationQuery {
     pub start: Option<usize>,
@@ -193,6 +245,16 @@ pub struct AssociationQuery {
     pub study_accession: Option<String>,
 }
 
+/// Query parameters for chromosome-specific association endpoints.
+///
+/// Extends `AssociationQuery` with base-pair location filtering (only works on
+/// `/chromosomes/{chr}/associations`).
+///
+/// | Extra Param | Type | Description |
+/// |---|---|---|
+/// | `bp_lower` | u64 | Lower base-pair limit |
+/// | `bp_upper` | u64 | Upper base-pair limit |
+/// | `trait_` | String | Filter by trait ID |
 #[derive(Debug, Default, Clone)]
 pub struct ChromosomeAssociationQuery {
     pub start: Option<usize>,
@@ -206,6 +268,9 @@ pub struct ChromosomeAssociationQuery {
     pub trait_: Option<String>,
 }
 
+/// Controls what data `reveal` returns.
+/// - `Raw` — original/unharmonised values only
+/// - `All` — both harmonised (default) and raw; raw fields get `hm_` prefix
 #[derive(Debug, Clone, Copy)]
 pub enum RevealMode {
     Raw,
@@ -221,6 +286,7 @@ impl std::fmt::Display for RevealMode {
     }
 }
 
+/// Basic pagination query (`start` + `size`).
 #[derive(Debug, Default, Clone)]
 pub struct PaginationQuery {
     pub start: Option<usize>,
@@ -229,12 +295,28 @@ pub struct PaginationQuery {
 
 // ── API client ────────────────────────────────────────────────────────────
 
+/// Async client for the [GWAS Catalog Summary Statistics API].
+///
+/// [GWAS Catalog Summary Statistics API]: https://www.ebi.ac.uk/gwas/summary-statistics/docs/
+///
+/// # Example
+///
+/// ```ignore
+/// let api = GwasCatalogApi::new();
+/// let resp = api.list_associations(&AssociationQuery::default()).await?;
+/// if let Some(emb) = resp._embedded {
+///     for (_, assoc) in emb.associations {
+///         println!("{} p={}", assoc.variant_id, assoc.p_value);
+///     }
+/// }
+/// ```
 pub struct GwasCatalogApi {
     client: reqwest::Client,
     base_url: String,
 }
 
 impl GwasCatalogApi {
+    /// Create a client pointing to the production API.
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -242,6 +324,7 @@ impl GwasCatalogApi {
         }
     }
 
+    /// Create a client with a custom base URL (useful for testing or proxies).
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -251,6 +334,9 @@ impl GwasCatalogApi {
 
     // ── Associations ───────────────────────────────────────────────────
 
+    /// `GET /associations`
+    ///
+    /// Lists all available associations. Supports p-value filtering via query params.
     pub async fn list_associations(
         &self,
         query: &AssociationQuery,
@@ -258,6 +344,10 @@ impl GwasCatalogApi {
         self.get("/associations", query).await
     }
 
+    /// `GET /associations/{variant_id}`
+    ///
+    /// Lists all associations for a variant (valid rsid). Returns 404 if not found.
+    /// Add `study_accession` to the query to get a single association.
     pub async fn get_variant_associations(
         &self,
         variant_id: &str,
@@ -269,6 +359,9 @@ impl GwasCatalogApi {
 
     // ── Chromosomes ────────────────────────────────────────────────────
 
+    /// `GET /chromosomes`
+    ///
+    /// Lists all chromosome resources. X=23, Y=24, MT=25.
     pub async fn list_chromosomes(
         &self,
         query: &PaginationQuery,
@@ -276,10 +369,17 @@ impl GwasCatalogApi {
         self.get("/chromosomes", query).await
     }
 
+    /// `GET /chromosomes/{chromosome}`
+    ///
+    /// Returns a specific chromosome resource. Returns 404 if invalid.
     pub async fn get_chromosome(&self, chromosome: &str) -> Result<Chromosome, GwasCatalogError> {
         self.get(&format!("/chromosomes/{chromosome}"), &()).await
     }
 
+    /// `GET /chromosomes/{chromosome}/associations`
+    ///
+    /// Returns associations for a specific chromosome. Supports base-pair range
+    /// filtering via `bp_lower`/`bp_upper`. Returns 404 if chromosome doesn't exist.
     pub async fn list_chromosome_associations(
         &self,
         chromosome: &str,
@@ -289,6 +389,10 @@ impl GwasCatalogApi {
             .await
     }
 
+    /// `GET /chromosomes/{chromosome}/associations/{variant_id}`
+    ///
+    /// Faster than `get_variant_associations` if you know the chromosome.
+    /// Returns 404 if variant not found.
     pub async fn get_variant_on_chromosome(
         &self,
         chromosome: &str,
@@ -304,6 +408,9 @@ impl GwasCatalogApi {
 
     // ── Traits ──────────────────────────────────────────────────────────
 
+    /// `GET /traits`
+    ///
+    /// Lists all existing EFO trait resources.
     pub async fn list_traits(
         &self,
         query: &PaginationQuery,
@@ -311,10 +418,16 @@ impl GwasCatalogApi {
         self.get("/traits", query).await
     }
 
+    /// `GET /traits/{trait}`
+    ///
+    /// Returns a specific trait resource. Returns 404 if not found.
     pub async fn get_trait(&self, trait_id: &str) -> Result<Trait, GwasCatalogError> {
         self.get(&format!("/traits/{trait_id}"), &()).await
     }
 
+    /// `GET /traits/{trait}/associations`
+    ///
+    /// Lists associations for a specific trait. Returns 404 if trait not found.
     pub async fn list_trait_associations(
         &self,
         trait_id: &str,
@@ -324,6 +437,9 @@ impl GwasCatalogApi {
             .await
     }
 
+    /// `GET /traits/{trait}/studies`
+    ///
+    /// Lists studies for a specific trait. Returns 404 if trait not found.
     pub async fn list_trait_studies(
         &self,
         trait_id: &str,
@@ -335,6 +451,9 @@ impl GwasCatalogApi {
 
     // ── Studies ─────────────────────────────────────────────────────────
 
+    /// `GET /studies`
+    ///
+    /// Lists all existing study resources.
     pub async fn list_studies(
         &self,
         query: &PaginationQuery,
@@ -342,10 +461,16 @@ impl GwasCatalogApi {
         self.get("/studies", query).await
     }
 
+    /// `GET /studies/{study_accession}`
+    ///
+    /// Returns a specific study resource. Returns 404 if not found.
     pub async fn get_study(&self, study_accession: &str) -> Result<Study, GwasCatalogError> {
         self.get(&format!("/studies/{study_accession}"), &()).await
     }
 
+    /// `GET /studies/{study_accession}/associations`
+    ///
+    /// Returns associations for a specific study. Returns 404 if study not found.
     pub async fn list_study_associations(
         &self,
         study_accession: &str,

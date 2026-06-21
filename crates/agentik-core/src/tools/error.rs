@@ -25,6 +25,14 @@ pub enum ToolError {
     RegistryError { message: String },
 }
 
+impl From<anyhow::Error> for ToolError {
+    fn from(value: anyhow::Error) -> Self {
+        ToolError::ExecutionFailed {
+            source: value.into(),
+        }
+    }
+}
+
 impl From<&str> for ToolError {
     fn from(message: &str) -> Self {
         ToolError::ValidationFailed {

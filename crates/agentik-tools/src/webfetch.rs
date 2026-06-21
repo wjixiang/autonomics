@@ -47,7 +47,6 @@ impl ToolFunction for WebFetchTool {
             Ok(u) if u.scheme() == "http" || u.scheme() == "https" => u,
             _ => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("URL must be http(s)://... : got {:?}", input.url),
                 ));
             }
@@ -63,7 +62,6 @@ impl ToolFunction for WebFetchTool {
             Ok(c) => c,
             Err(e) => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Failed to build HTTP client: {e}"),
                 ));
             }
@@ -74,7 +72,6 @@ impl ToolFunction for WebFetchTool {
             Ok(r) => r,
             Err(e) => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Failed to fetch: {e}"),
                 ));
             }
@@ -84,7 +81,6 @@ impl ToolFunction for WebFetchTool {
         if let Some(len) = resp.content_length() {
             if len as usize > MAX_BYTES {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Response too large ({len} bytes, max {MAX_BYTES})"),
                 ));
             }
@@ -101,25 +97,23 @@ impl ToolFunction for WebFetchTool {
             Ok(b) => b,
             Err(e) => {
                 return Ok(ToolResult::error(
-                    String::new(),
                     format!("Failed to read response body: {e}"),
                 ));
             }
         };
         if bytes.len() > MAX_BYTES {
             return Ok(ToolResult::error(
-                String::new(),
                 format!("Response too large ({} bytes, max {MAX_BYTES})", bytes.len()),
             ));
         }
 
         let text = match convert(&content_type, &bytes) {
             Ok(t) => t,
-            Err(msg) => return Ok(ToolResult::error(String::new(), msg)),
+            Err(msg) => return Ok(ToolResult::error(msg)),
         };
 
         // 6. Truncate (head) and return.
-        Ok(ToolResult::success(String::new(), truncate_head(&text, MAX_OUTPUT_CHARS)))
+        Ok(ToolResult::success(truncate_head(&text, MAX_OUTPUT_CHARS)))
     }
 }
 
