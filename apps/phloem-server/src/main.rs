@@ -12,6 +12,7 @@ mod services;
 mod sse;
 mod state;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -31,8 +32,14 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let config = config::ServerConfig::from_env();
-    let state = AppState::new(config.clone());
+    // Config path: PHLOEM_CONFIG env var or ./phloem.json
+    let config_path = std::env::var("PHLOEM_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("phloem.json"));
+
+    let app_config = config::AppConfig::load(&config_path)?;
+    let server_config = app_config.server_config();
+    let state = AppState::new(app_config, config_path);
 
     let app = Router::new()
         .merge(routes::create_router())
@@ -40,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(CorsLayer::permissive())
         .with_state(Arc::new(state));
 
-    let addr = format!("{}:{}", config.host, config.port);
+    let addr = format!("{}:{}", server_config.host, server_config.port);
     info!("Phloem server starting on {addr}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;

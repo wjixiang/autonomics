@@ -23,14 +23,11 @@ pub enum ProviderError {
 #[automock]
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
-    fn add_models(&mut self, model: Vec<ModelInfo>);
-    fn get_model(&self, model_name: &str) -> Result<Model, ProviderError>;
-    async fn list_models(&self) -> Result<Vec<Model>, ProviderError>;
-}
+    /// Build a model by name, using the provided API key for authentication.
+    fn get_model(&self, model_name: &str, api_key: String) -> Result<Model, ProviderError>;
 
-#[derive(Clone)]
-pub struct ProviderInfo {
-    pub base_url: String,
-    pub api_key: String,
-    pub preset_models: Vec<ModelInfo>,
+    fn add_models(&mut self, model: Vec<ModelInfo>);
+
+    /// List available models (may query remote API or return presets).
+    async fn list_models(&self, api_key: String) -> Result<Vec<Model>, ProviderError>;
 }

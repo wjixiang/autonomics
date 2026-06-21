@@ -8,23 +8,23 @@ use agentik_sdk::Message;
 use agentik_sdk::provider::mimo::MODEL_MIMO_V2_5;
 use agentik_sdk::{
     model::model_pool::ModelPool,
-    provider::{
-        LlmProvider,
-        mimo::{MimoEndpoint, MimoProvider, TokenPlanRegion},
-    },
+    model::Model,
+    provider::mimo::{MimoEndpoint, MimoProvider, TokenPlanRegion},
     types::AgentEvent,
 };
 
 fn build_mimo_model_pool() -> ModelPool {
     let api_key = std::env::var("MIMO_API_KEY").expect("MIMO_API_KEY not set");
 
-    let provider = MimoProvider::new(
-        Some(MimoEndpoint::TokenPlan(TokenPlanRegion::China)),
+    let model_info = MimoProvider::preset_models(
         api_key,
-    );
-    let model = provider
-        .get_model(MODEL_MIMO_V2_5)
-        .expect("failed to get mimo model");
+        Some(MimoEndpoint::TokenPlan(TokenPlanRegion::China)),
+    )
+    .into_iter()
+    .find(|m| m.model_name == MODEL_MIMO_V2_5)
+    .expect("preset model not found");
+
+    let model = Model::new(model_info).expect("failed to build mimo model");
 
     let mut pool = ModelPool::new();
     pool.add_model(model);

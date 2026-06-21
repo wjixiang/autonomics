@@ -588,7 +588,7 @@ mod tests {
         mock_api: MockApiClient,
     ) -> (Agent, tokio::sync::mpsc::UnboundedReceiver<AgentEvent>) {
         let mut model_pool = ModelPool::new();
-        model_pool.add_model(Model::new(test_model_info(), mock_api));
+        model_pool.add_model(Model::with_client(test_model_info(), mock_api));
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 

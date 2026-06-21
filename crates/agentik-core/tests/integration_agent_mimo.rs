@@ -5,16 +5,19 @@
 async fn test_sdk_mimo_stream_smoke() {
     use agentik_core::message_ext::AgentMessageExt;
     use agentik_sdk::Message;
-    use agentik_sdk::provider::LlmProvider;
-    use agentik_sdk::provider::mimo::{MODEL_MIMO_V2_5_PRO, MimoEndpoint, TokenPlanRegion};
+    use agentik_sdk::model::Model;
+    use agentik_sdk::provider::mimo::{MODEL_MIMO_V2_5_PRO, MimoEndpoint, MimoProvider, TokenPlanRegion};
     use futures::StreamExt;
 
     let api_key = std::env::var("MIMO_API_KEY").expect("MIMO_API_KEY not set");
     let endpoint = MimoEndpoint::TokenPlan(TokenPlanRegion::China);
 
-    let provider = agentik_sdk::provider::mimo::MimoProvider::new(Some(endpoint), api_key);
+    let model_info = MimoProvider::preset_models(api_key, Some(endpoint))
+        .into_iter()
+        .find(|m| m.model_name == MODEL_MIMO_V2_5_PRO)
+        .expect("preset model not found");
 
-    let model = provider.get_model(MODEL_MIMO_V2_5_PRO).unwrap();
+    let model = Model::new(model_info).unwrap();
 
     println!("sending stream request...");
     let mut stream = model

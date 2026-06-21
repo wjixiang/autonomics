@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
+use crate::Anthropic;
+use crate::config::ClientConfig;
 use crate::model::model_info::ModelInfo;
+use crate::provider::client::AnthropicApiClient;
 use crate::provider::client::ApiClient;
 use crate::streaming::MessageStream;
 use agentik_types::errors::AnthropicError;
@@ -13,12 +16,26 @@ pub struct Model {
 }
 
 impl Model {
-    pub fn new(model_info: ModelInfo, client: impl ApiClient + 'static) -> Self {
+    /// Primary constructor: build `ApiClient` from `ModelInfo`'s own connection config.
+    pub fn new(model_info: ModelInfo) -> Result<Self, AnthropicError> {
+        let client_config = ClientConfig::new(&model_info.api_key, &model_info.base_url)
+            .with_auth_method(model_info.auth_method.clone());
+        let anthropic = Anthropic::with_config(client_config)?;
+        let api_client = AnthropicApiClient::new(anthropic);
+        Ok(Self {
+            model_info,
+            client: Arc::new(api_client),
+        })
+    }
+
+    /// Constructor for testing: inject a mock or custom `ApiClient`.
+    pub fn with_client(model_info: ModelInfo, client: impl ApiClient + 'static) -> Self {
         Self {
             model_info,
             client: Arc::new(client),
         }
     }
+
     pub fn vision(mut self, enabled: bool) -> Self {
         self.model_info.vision_ability = enabled;
         self

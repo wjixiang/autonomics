@@ -1,10 +1,6 @@
-use crate::Anthropic;
-use crate::config::ClientConfig;
-use crate::config::LogLevel;
 use crate::http::auth::AuthMethod;
 use crate::model::{Model, ModelInfo};
-use crate::provider::client::AnthropicApiClient;
-use crate::provider::{LlmProvider, ProviderError, ProviderInfo};
+use crate::provider::{LlmProvider, ProviderError};
 use async_trait::async_trait;
 
 pub const MODEL_MIMO_V2_5_PRO: &str = "mimo-v2.5-pro";
@@ -49,27 +45,29 @@ impl Default for MimoEndpoint {
     }
 }
 
-pub struct MimoProvider {
-    info: ProviderInfo,
-}
+pub struct MimoProvider;
 
 impl MimoProvider {
-    pub fn new(endpoint: Option<MimoEndpoint>, api_key: String) -> Self {
-        let info = ProviderInfo {
-            base_url: endpoint.unwrap_or_default().base_url().to_string(),
-            api_key,
-            preset_models: Self::preset_models(),
-        };
-
-        Self { info }
+    /// Return fully-configured preset models with the given API key and endpoint.
+    pub fn preset_models(api_key: String, endpoint: Option<MimoEndpoint>) -> Vec<ModelInfo> {
+        let base = endpoint.unwrap_or_default().base_url().to_string();
+        Self::model_definitions()
+            .into_iter()
+            .map(|mut m| {
+                m.base_url = base.clone();
+                m.api_key = api_key.clone();
+                m.auth_method = AuthMethod::Anthropic;
+                m
+            })
+            .collect()
     }
 
-    pub fn preset_models() -> Vec<ModelInfo> {
+    fn model_definitions() -> Vec<ModelInfo> {
         vec![
             // Pro series — 1M context, 128K output
             ModelInfo {
                 model_name: MODEL_MIMO_V2_5_PRO.to_string(),
-                provider: "mimo".to_string(),
+                provider_name: "mimo".to_string(),
                 context_length: 1_000_000,
                 max_output_tokens: 131_072,
                 vision_ability: false,
@@ -78,10 +76,13 @@ impl MimoProvider {
                 supports_thinking: true,
                 input_token_price: 1.0,
                 output_token_price: 3.0,
+                base_url: String::new(),
+                api_key: String::new(),
+                auth_method: AuthMethod::Anthropic,
             },
             ModelInfo {
                 model_name: MODEL_MIMO_V2_PRO.to_string(),
-                provider: "mimo".to_string(),
+                provider_name: "mimo".to_string(),
                 context_length: 1_000_000,
                 max_output_tokens: 131_072,
                 vision_ability: false,
@@ -90,11 +91,14 @@ impl MimoProvider {
                 supports_thinking: true,
                 input_token_price: 1.0,
                 output_token_price: 3.0,
+                base_url: String::new(),
+                api_key: String::new(),
+                auth_method: AuthMethod::Anthropic,
             },
             // Omni series — multi-modal understanding
             ModelInfo {
                 model_name: MODEL_MIMO_V2_5.to_string(),
-                provider: "mimo".to_string(),
+                provider_name: "mimo".to_string(),
                 context_length: 1_000_000,
                 max_output_tokens: 131_072,
                 vision_ability: true,
@@ -103,10 +107,13 @@ impl MimoProvider {
                 supports_thinking: true,
                 input_token_price: 0.4,
                 output_token_price: 2.0,
+                base_url: String::new(),
+                api_key: String::new(),
+                auth_method: AuthMethod::Anthropic,
             },
             ModelInfo {
                 model_name: MODEL_MIMO_V2_OMNI.to_string(),
-                provider: "mimo".to_string(),
+                provider_name: "mimo".to_string(),
                 context_length: 262_144,
                 max_output_tokens: 131_072,
                 vision_ability: true,
@@ -115,11 +122,14 @@ impl MimoProvider {
                 supports_thinking: true,
                 input_token_price: 0.4,
                 output_token_price: 2.0,
+                base_url: String::new(),
+                api_key: String::new(),
+                auth_method: AuthMethod::Anthropic,
             },
             // Flash series — lightweight, fast
             ModelInfo {
                 model_name: MODEL_MIMO_V2_FLASH.to_string(),
-                provider: "mimo".to_string(),
+                provider_name: "mimo".to_string(),
                 context_length: 262_144,
                 max_output_tokens: 65_536,
                 vision_ability: false,
@@ -128,63 +138,41 @@ impl MimoProvider {
                 supports_thinking: true,
                 input_token_price: 0.1,
                 output_token_price: 0.3,
+                base_url: String::new(),
+                api_key: String::new(),
+                auth_method: AuthMethod::Anthropic,
             },
         ]
-    }
-
-    fn build_client_config(&self) -> ClientConfig {
-        ClientConfig {
-            api_key: self.info.api_key.clone(),
-            base_url: self.info.base_url.clone(),
-            timeout: core::time::Duration::from_secs(30),
-            max_retries: 3,
-            log_level: LogLevel::Debug,
-            auth_method: AuthMethod::Anthropic,
-        }
     }
 }
 
 #[async_trait]
 impl LlmProvider for MimoProvider {
-    fn get_model(&self, model_name: &str) -> Result<Model, ProviderError> {
-        let existed_model = self
-            .info
-            .preset_models
-            .iter()
-            .find(|i| i.model_name == model_name)
+    fn get_model(&self, model_name: &str, api_key: String) -> Result<Model, ProviderError> {
+        let info = Self::preset_models(api_key, None)
+            .into_iter()
+            .find(|m| m.model_name == model_name)
             .ok_or_else(|| {
                 ProviderError::ModelNotFound(ModelInfo {
                     model_name: model_name.to_string(),
-                    provider: "mimo".to_string(),
+                    provider_name: "mimo".to_string(),
+                    base_url: String::new(),
+                    api_key: String::new(),
+                    auth_method: AuthMethod::Anthropic,
                     ..Default::default()
                 })
             })?;
-
-        let client = AnthropicApiClient::new(Anthropic::with_config(self.build_client_config())?);
-        Ok(Model::new(existed_model.clone(), client))
+        Ok(Model::new(info)?)
     }
 
-    fn add_models(&mut self, model: Vec<ModelInfo>) {
-        self.info.preset_models.extend(model);
+    fn add_models(&mut self, _model: Vec<ModelInfo>) {
+        // No-op: MimoProvider is stateless.
     }
 
-    async fn list_models(&self) -> Result<Vec<Model>, ProviderError> {
-        let client = Anthropic::with_config(self.build_client_config())?;
-        let model_list = client.models().list(None).await?;
-
-        let mut models = Vec::with_capacity(model_list.data.len());
-        for model_obj in &model_list.data {
-            if let Some(model_info) = self
-                .info
-                .preset_models
-                .iter()
-                .find(|i| i.model_name == model_obj.id)
-            {
-                let api_client =
-                    AnthropicApiClient::new(Anthropic::with_config(self.build_client_config())?);
-                models.push(Model::new(model_info.clone(), api_client));
-            }
-        }
-        Ok(models)
+    async fn list_models(&self, _api_key: String) -> Result<Vec<Model>, ProviderError> {
+        Ok(Self::preset_models(String::new(), None)
+            .into_iter()
+            .filter_map(|m| Model::new(m).ok())
+            .collect())
     }
 }
