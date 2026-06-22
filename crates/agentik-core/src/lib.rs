@@ -9,6 +9,7 @@ pub mod memory;
 pub mod message_ext;
 // pub mod process; // TODO: process module lives in agentik-runtime
 pub mod prompt;
+pub mod skill;
 pub mod storage;
 pub mod testing;
 pub mod tools;

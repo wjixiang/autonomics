@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::Anthropic;
 use crate::config::ClientConfig;
 use crate::model::model_info::ModelInfo;
+use crate::model::ProviderConfig;
 use crate::provider::client::AnthropicApiClient;
 use crate::provider::client::ApiClient;
 use crate::streaming::MessageStream;
@@ -16,10 +17,16 @@ pub struct Model {
 }
 
 impl Model {
-    /// Primary constructor: build `ApiClient` from `ModelInfo`'s own connection config.
-    pub fn new(model_info: ModelInfo) -> Result<Self, AnthropicError> {
-        let client_config = ClientConfig::new(&model_info.api_key, &model_info.base_url)
-            .with_auth_method(model_info.auth_method.clone());
+    /// Primary constructor: build `ApiClient` from the referenced provider's
+    /// connection config. The model's own `provider_id` must already match
+    /// `provider.id` — the caller (usually `ModelPool`) is responsible for the join.
+    pub fn new(model_info: ModelInfo, provider: &ProviderConfig) -> Result<Self, AnthropicError> {
+        debug_assert_eq!(
+            model_info.provider_id, provider.id,
+            "model/provider id mismatch"
+        );
+        let client_config = ClientConfig::new(&provider.api_key, &provider.base_url)
+            .with_auth_method(provider.auth_method.clone());
         let anthropic = Anthropic::with_config(client_config)?;
         let api_client = AnthropicApiClient::new(anthropic);
         Ok(Self {

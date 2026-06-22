@@ -1,29 +1,13 @@
 import { apiFetch } from './client';
 
-export interface ChatRequest {
-	agent_id?: string;
-	identity?: string;
-	content: string;
-}
-
-export interface ChatResponse {
+export interface SendResponse {
 	agent_id: string;
 	status: string;
 }
 
-export interface AgentInfo {
-	id: string;
-	identity: string;
-	status: string;
-}
-
-export async function sendMessage(req: ChatRequest): Promise<ChatResponse> {
-	return apiFetch<ChatResponse>('/api/chat', {
+export async function sendChatMessage(content: string): Promise<SendResponse> {
+	return apiFetch<SendResponse>('/api/chat/send', {
 		method: 'POST',
-		body: JSON.stringify(req)
+		body: JSON.stringify({ content })
 	});
-}
-
-export async function listAgents(): Promise<AgentInfo[]> {
-	return apiFetch<AgentInfo[]>('/api/agents');
 }

@@ -14,12 +14,23 @@ use crate::error::AppError;
 use crate::services::settings_service;
 use crate::state::AppState;
 
-/// GET /api/settings — return current application config.
+/// GET /api/settings — return current application config (api_keys masked).
 async fn get_settings(
     State(state): State<Arc<AppState>>,
-) -> Json<AppConfig> {
+) -> Json<serde_json::Value> {
     let config = settings_service::load_settings(&state).await;
-    Json(config)
+    let mut value = serde_json::to_value(&config).unwrap();
+    // Mask api_keys in the models array
+    if let Some(models) = value.get_mut("models").and_then(|m| m.as_array_mut()) {
+        for model in models {
+            if let Some(key) = model.get_mut("api_key").and_then(|k| k.as_str()) {
+                if !key.is_empty() {
+                    *model.get_mut("api_key").unwrap() = serde_json::json!("********");
+                }
+            }
+        }
+    }
+    Json(value)
 }
 
 /// PUT /api/settings — replace the entire config and persist to disk.

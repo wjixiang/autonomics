@@ -1,7 +1,4 @@
-use crate::http::auth::AuthMethod;
-use crate::model::{Model, ModelInfo};
-use crate::provider::{LlmProvider, ProviderError};
-use async_trait::async_trait;
+use crate::model::ModelInfo;
 
 // ─── Model IDs ──────────────────────────────────────────────────────────────
 // Current generation
@@ -13,21 +10,18 @@ pub const MODEL_DEEPSEEK_REASONER: &str = "deepseek-reasoner";
 
 pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/anthropic";
 
+/// Provider type key used by `ProviderConfig::provider_type`.
+pub const PROVIDER_TYPE: &str = "deepseek";
+
 pub struct DeepseekProvider;
 
 impl DeepseekProvider {
-    /// Return fully-configured preset models with the given API key.
-    pub fn preset_models(api_key: String, base_url: Option<String>) -> Vec<ModelInfo> {
-        let base = base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+    /// Preset model catalogue for the deepseek provider type — metadata only.
+    ///
+    /// `provider_id` is left nil; the caller binds a model to a provider
+    /// instance when persisting it.
+    pub fn preset_models() -> Vec<ModelInfo> {
         Self::model_definitions()
-            .into_iter()
-            .map(|mut m| {
-                m.base_url = base.clone();
-                m.api_key = api_key.clone();
-                m.auth_method = AuthMethod::Anthropic;
-                m
-            })
-            .collect()
     }
 
     fn model_definitions() -> Vec<ModelInfo> {
@@ -36,7 +30,7 @@ impl DeepseekProvider {
             // V4 Pro — flagship reasoning model.
             ModelInfo {
                 model_name: MODEL_DEEPSEEK_V4_PRO.to_string(),
-                provider_name: "deepseek".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 128_000,
                 max_output_tokens: 32_000,
                 vision_ability: false,
@@ -45,14 +39,11 @@ impl DeepseekProvider {
                 supports_thinking: true,
                 input_token_price: 0.5,
                 output_token_price: 2.0,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Anthropic,
             },
             // V4 Flash — fast, low-cost, still supports thinking.
             ModelInfo {
                 model_name: MODEL_DEEPSEEK_V4_FLASH.to_string(),
-                provider_name: "deepseek".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 128_000,
                 max_output_tokens: 32_000,
                 vision_ability: false,
@@ -61,15 +52,12 @@ impl DeepseekProvider {
                 supports_thinking: true,
                 input_token_price: 0.1,
                 output_token_price: 0.3,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Anthropic,
             },
             // ── Deprecated aliases (kept for backwards compatibility) ─────
             // deepseek-chat — non-thinking mode of v4-flash.
             ModelInfo {
                 model_name: MODEL_DEEPSEEK_CHAT.to_string(),
-                provider_name: "deepseek".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 64_000,
                 max_output_tokens: 8_000,
                 vision_ability: false,
@@ -78,14 +66,11 @@ impl DeepseekProvider {
                 supports_thinking: false,
                 input_token_price: 0.1,
                 output_token_price: 0.3,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Anthropic,
             },
             // deepseek-reasoner — thinking mode of v4-flash.
             ModelInfo {
                 model_name: MODEL_DEEPSEEK_REASONER.to_string(),
-                provider_name: "deepseek".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 64_000,
                 max_output_tokens: 8_000,
                 vision_ability: false,
@@ -94,42 +79,7 @@ impl DeepseekProvider {
                 supports_thinking: true,
                 input_token_price: 0.1,
                 output_token_price: 0.3,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Anthropic,
             },
         ]
-    }
-}
-
-#[async_trait]
-impl LlmProvider for DeepseekProvider {
-    fn get_model(&self, model_name: &str, api_key: String) -> Result<Model, ProviderError> {
-        let info = Self::preset_models(api_key, None)
-            .into_iter()
-            .find(|m| m.model_name == model_name)
-            .ok_or_else(|| {
-                ProviderError::ModelNotFound(ModelInfo {
-                    model_name: model_name.to_string(),
-                    provider_name: "deepseek".to_string(),
-                    base_url: String::new(),
-                    api_key: String::new(),
-                    auth_method: AuthMethod::Anthropic,
-                    ..Default::default()
-                })
-            })?;
-        Ok(Model::new(info)?)
-    }
-
-    fn add_models(&mut self, _model: Vec<ModelInfo>) {
-        // No-op: DeepseekProvider is stateless, models are built on demand.
-    }
-
-    async fn list_models(&self, _api_key: String) -> Result<Vec<Model>, ProviderError> {
-        // Stateless preset list — no remote discovery.
-        Ok(Self::preset_models(String::new(), None)
-            .into_iter()
-            .filter_map(|m| Model::new(m).ok())
-            .collect())
     }
 }

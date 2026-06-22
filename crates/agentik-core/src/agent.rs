@@ -28,6 +28,7 @@ use crate::{
     error::{AgentError, Retryable},
     lifecycle::AgentLifecycle,
     memory::Memory,
+    skill::SharedSkillRuntime,
     storage::{AgentSnapshot, AgentSnapshotStorage},
     tools::{ToolRegistration, Toolset},
 };
@@ -59,8 +60,12 @@ pub struct Agent {
     pub(crate) context_provider: Option<Arc<dyn ContextProvider>>,
     pub(crate) system_prompt_section: Option<String>,
     pub(crate) system_prompt_identity: Option<String>,
+    /// Optional active skill workflow. When set, the agent is constrained
+    /// to the current step's `allowed_tools` each turn and the step's todo
+    /// progress is injected into the system prompt.
+    pub(crate) skill_runtime: Option<SharedSkillRuntime>,
     /// Optional event channel for streaming progress to external observers.
-    pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentUiEvent>>,
+    pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentEvent>>,
     /// Currently selected model name. If None, falls back to round-robin.
     pub(crate) current_model_name: Option<String>,
 }
@@ -71,7 +76,7 @@ impl Agent {
     }
 
     /// Send an event to the optional observation channel.
-    fn send_event(&self, event: agentik_sdk::types::AgentUiEvent) {
+    fn send_event(&self, event: agentik_sdk::types::AgentEvent) {
         if let Some(tx) = &self.event_tx {
             let _ = tx.send(event);
         }
@@ -95,7 +100,7 @@ impl Agent {
     }
 
     /// Wire an event channel for external observation (e.g. TUI, tests).
-    pub fn set_event_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentUiEvent>) {
+    pub fn set_event_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentEvent>) {
         self.event_tx = Some(tx);
     }
 
@@ -130,6 +135,7 @@ impl Agent {
 
     pub async fn snapshot(&self) -> AgentSnapshot {
         let snapshot = AgentSnapshot {
+            snapshot_id: Uuid::new_v4(),
             ts: std::time::SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
@@ -144,6 +150,14 @@ impl Agent {
         }
 
         snapshot
+    }
+
+    pub fn lifecycle_status(&self) -> agentik_types::AgentLifecycleStatus {
+        self.lifecycle.status().clone()
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.lifecycle.is_running()
     }
 
     pub fn inject_message(&mut self, user_content: Vec<ContentBlock>) -> Result<(), AgentError> {
@@ -164,7 +178,7 @@ impl Agent {
 
     pub async fn start(&mut self) -> Result<(), AgentError> {
         self.lifecycle.set_running();
-        self.send_event(agentik_sdk::types::AgentUiEvent::LlmResponse(
+        self.send_event(agentik_sdk::types::AgentEvent::LlmResponse(
             "🤖 Agent started".to_string(),
         ));
 
@@ -175,7 +189,10 @@ impl Agent {
         while self.lifecycle.is_running() && iteration < self.config.max_iterations {
             iteration += 1;
             match self.agent_workflow(retry_feedback.take()).await {
-                Ok(()) => consecutive_retries = 0,
+                Ok(()) => {
+                    consecutive_retries = 0;
+                    self.snapshot().await;
+                }
                 Err(AgentError::CompactionRebuild) => {
                     // Compaction completed — re-enter the workflow with fresh context
                     tracing::info!("compaction rebuild, re-entering workflow");
@@ -201,7 +218,8 @@ impl Agent {
                 }
                 Err(e) => {
                     tracing::error!("{}", e.to_string());
-                    self.send_event(agentik_sdk::types::AgentUiEvent::Error(format!("{}", e)));
+                    self.send_event(agentik_sdk::types::AgentEvent::Error(format!("{}", e)));
+                    self.snapshot().await;
                     return Err(AgentError::WorkflowFailed {
                         iteration,
                         error: Box::new(e),
@@ -211,10 +229,19 @@ impl Agent {
         }
 
         if iteration >= self.config.max_iterations {
+            // Emit a terminal event so any observing client (SSE/UI) is never
+            // left hanging when the iteration budget is exhausted — every
+            // return path from `start()` must emit Done or Error.
+            self.send_event(agentik_sdk::types::AgentEvent::Error(format!(
+                "max iterations ({}) reached",
+                self.config.max_iterations
+            )));
+            self.snapshot().await;
             return Err(AgentError::MaxIterations(self.config.max_iterations));
         }
 
-        self.send_event(agentik_sdk::types::AgentUiEvent::Done);
+        self.snapshot().await;
+        self.send_event(agentik_sdk::types::AgentEvent::Done);
         Ok(())
     }
 
@@ -233,8 +260,14 @@ impl Agent {
         self.poll_context_provider().await;
 
         let context = self.build_context().await?;
-        self.send_event(agentik_sdk::types::AgentUiEvent::Requesting);
-        let response_message = self.request(context).await?;
+
+        // If a skill is active, restrict the LLM's toolset to the current
+        // step's allowed tools for this turn. The same whitelist is enforced
+        // again at execution time below.
+        let allowed = self.current_allowed_tools().await;
+
+        self.send_event(agentik_sdk::types::AgentEvent::Requesting);
+        let response_message = self.request(context, allowed.as_deref()).await?;
         event!(Level::INFO, "",);
         let last_usage = response_message.usage.clone().unwrap_or_default();
 
@@ -242,10 +275,10 @@ impl Agent {
         for block in &response_message.content {
             match block {
                 ContentBlock::Thinking { thinking, .. } if !thinking.is_empty() => {
-                    self.send_event(agentik_sdk::types::AgentUiEvent::Thinking(thinking.clone()));
+                    self.send_event(agentik_sdk::types::AgentEvent::Thinking(thinking.clone()));
                 }
                 ContentBlock::Text { text } if !text.is_empty() => {
-                    self.send_event(agentik_sdk::types::AgentUiEvent::LlmResponse(text.clone()));
+                    self.send_event(agentik_sdk::types::AgentEvent::LlmResponse(text.clone()));
                 }
                 _ => {}
             }
@@ -270,13 +303,16 @@ impl Agent {
         }
 
         for tc in &toolcalls {
-            self.send_event(agentik_sdk::types::AgentUiEvent::ToolCall {
+            self.send_event(agentik_sdk::types::AgentEvent::ToolCall {
                 name: tc.name.clone(),
                 input: tc.input.clone(),
             });
         }
 
-        let tool_results = self.toolset.execute(&toolcalls, None).await?;
+        let tool_results = self
+            .toolset
+            .execute(&toolcalls, allowed.as_deref())
+            .await?;
         tracing::debug!(?tool_results, "tool execution results");
 
         for tr in &tool_results {
@@ -289,7 +325,7 @@ impl Agent {
                 })
                 .collect::<Vec<_>>()
                 .join("");
-            self.send_event(agentik_sdk::types::AgentUiEvent::ToolResult {
+            self.send_event(agentik_sdk::types::AgentEvent::ToolResult {
                 ok: !tr.is_error.unwrap_or_default(),
                 content: result_text,
             });
@@ -327,6 +363,14 @@ impl Agent {
         }
     }
 
+    /// Return the tool whitelist for the active skill's current step, or
+    /// `None` when no skill is attached (meaning all tools are allowed).
+    async fn current_allowed_tools(&self) -> Option<Vec<String>> {
+        let rt = self.skill_runtime.as_ref()?;
+        let guard = rt.lock().await;
+        Some(guard.allowed_tools_for_current_step())
+    }
+
     /// Apply agent-level effects declared by tool results (e.g. lifecycle transitions).
     async fn handle_effect(&mut self, tool_results: &[ToolCallResponse]) {
         let effects: Vec<ToolEffect> = tool_results
@@ -358,6 +402,14 @@ impl Agent {
             builder = builder.with_extra_section(extra);
         }
 
+        // Inject the active skill's current step / todo progress.
+        if let Some(rt) = &self.skill_runtime {
+            let section = rt.lock().await.current_prompt_section();
+            if !section.is_empty() {
+                builder = builder.with_extra_section(section);
+            }
+        }
+
         let system_prompt = builder.parse();
 
         let context_messages = self.memory.render_context()?.to_vec();
@@ -370,7 +422,11 @@ impl Agent {
         Ok(context)
     }
 
-    async fn request(&mut self, context: Vec<Message>) -> Result<Message, AgentError> {
+    async fn request(
+        &mut self,
+        context: Vec<Message>,
+        allowed: Option<&[String]>,
+    ) -> Result<Message, AgentError> {
         let span = span!(Level::TRACE, "API Request");
         let _enter = span.enter();
 
@@ -400,7 +456,7 @@ impl Agent {
             return Err(AgentError::CompactionRebuild);
         }
 
-        let all_tools = self.toolset.tools();
+        let all_tools = self.toolset.tools_filtered(allowed);
 
         let mut stream = model
             .request_stream(context, &all_tools)

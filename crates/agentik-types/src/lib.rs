@@ -37,7 +37,7 @@ pub use tools::{
     ToolInput,
 };
 
-pub use agent_events::{AgentEvent, AgentUiEvent, ContentBlockKind};
+pub use agent_events::{AgentEvent, ContentBlockKind};
 
 pub use lifecycle::AgentLifecycleStatus;
 

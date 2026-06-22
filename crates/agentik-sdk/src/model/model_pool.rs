@@ -1,10 +1,12 @@
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid::Uuid;
 
-use crate::model::{Model, ModelInfo};
+use crate::model::{Model, ModelInfo, ProviderConfig};
 
 #[derive(Default)]
 pub struct ModelPool {
@@ -22,12 +24,14 @@ pub enum ModelPoolError {
     BuildError(String),
 }
 
-/// Pool configuration — a flat list of fully-configured `ModelInfo` entries.
+/// Pool configuration — the normalized provider/model pair.
 ///
-/// Each `ModelInfo` already carries its own connection config (`base_url`,
-/// `api_key`, `auth_method`), so no separate provider layer is needed.
+/// `providers` is the master list (connection config lives here, once per
+/// endpoint). `models` reference a provider by `provider_id`. `ModelPool` joins
+/// the two at build time, so the runtime hot path is unchanged.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelPoolConfig {
+    pub providers: Vec<ProviderConfig>,
     pub models: Vec<ModelInfo>,
 }
 
@@ -39,12 +43,26 @@ impl ModelPool {
         }
     }
 
-    /// Build a pool from a list of fully-configured model infos.
+    /// Build a pool by joining each model with its referenced provider.
+    ///
+    /// A model whose `provider_id` matches no provider in `config.providers`
+    /// yields a `BuildError` (rather than being silently dropped), since that
+    /// indicates a dangling reference — typically a config/migration bug.
     pub fn from_config(config: ModelPoolConfig) -> Result<Self, ModelPoolError> {
         let mut pool = Self::new();
 
+        let by_id: HashMap<Uuid, &ProviderConfig> =
+            config.providers.iter().map(|p| (p.id, p)).collect();
+
         for model_info in config.models {
-            let model = Model::new(model_info).map_err(|e| ModelPoolError::BuildError(e.to_string()))?;
+            let provider = by_id.get(&model_info.provider_id).ok_or_else(|| {
+                ModelPoolError::BuildError(format!(
+                    "model '{}' references unknown provider_id {}",
+                    model_info.model_name, model_info.provider_id
+                ))
+            })?;
+            let model =
+                Model::new(model_info, provider).map_err(|e| ModelPoolError::BuildError(e.to_string()))?;
             pool.add_model(model);
         }
 

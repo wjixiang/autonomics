@@ -1,9 +1,9 @@
 <script lang="ts">
-	import TopNav from '$lib/components/layout/TopNav.svelte';
+  import "../app.css";
 
-	let { children } = $props();
+  let { children } = $props();
 </script>
 
-<TopNav>
-	{@render children()}
-</TopNav>
+<div class="flex h-screen w-full overflow-hidden">
+  {@render children()}
+</div>

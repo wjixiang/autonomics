@@ -1,7 +1,4 @@
-use crate::http::auth::AuthMethod;
-use crate::model::{Model, ModelInfo};
-use crate::provider::{LlmProvider, ProviderError};
-use async_trait::async_trait;
+use crate::model::ModelInfo;
 
 // ─── Model IDs ──────────────────────────────────────────────────────────────
 // Flagship series
@@ -45,21 +42,15 @@ impl ZaiEndpoint {
     }
 }
 
+/// Provider type key used by `ProviderConfig::provider_type`.
+pub const PROVIDER_TYPE: &str = "zai";
+
 pub struct ZaiProvider;
 
 impl ZaiProvider {
-    /// Return fully-configured preset models with the given API key and endpoint.
-    pub fn preset_models(api_key: String, endpoint: Option<ZaiEndpoint>) -> Vec<ModelInfo> {
-        let base = endpoint.unwrap_or_default().base_url().to_string();
+    /// Preset model catalogue for the zai provider type — metadata only.
+    pub fn preset_models() -> Vec<ModelInfo> {
         Self::model_definitions()
-            .into_iter()
-            .map(|mut m| {
-                m.base_url = base.clone();
-                m.api_key = api_key.clone();
-                m.auth_method = AuthMethod::Bearer;
-                m
-            })
-            .collect()
     }
 
     fn model_definitions() -> Vec<ModelInfo> {
@@ -67,7 +58,7 @@ impl ZaiProvider {
             // ── Flagship series (200K context, 32K output) ───────────────
             ModelInfo {
                 model_name: MODEL_GLM_5_1.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 200_000,
                 max_output_tokens: 32_000,
                 vision_ability: false,
@@ -76,13 +67,10 @@ impl ZaiProvider {
                 supports_thinking: true,
                 input_token_price: 2.0,
                 output_token_price: 8.0,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             ModelInfo {
                 model_name: MODEL_GLM_5.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 200_000,
                 max_output_tokens: 32_000,
                 vision_ability: false,
@@ -91,13 +79,10 @@ impl ZaiProvider {
                 supports_thinking: true,
                 input_token_price: 2.0,
                 output_token_price: 8.0,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             ModelInfo {
                 model_name: MODEL_GLM_5_TURBO.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 200_000,
                 max_output_tokens: 32_000,
                 vision_ability: false,
@@ -106,14 +91,11 @@ impl ZaiProvider {
                 supports_thinking: false,
                 input_token_price: 1.0,
                 output_token_price: 3.0,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             // ── 4.x flagship series (128K context, 16K output) ───────────
             ModelInfo {
                 model_name: MODEL_GLM_4_7.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 128_000,
                 max_output_tokens: 16_000,
                 vision_ability: false,
@@ -122,13 +104,10 @@ impl ZaiProvider {
                 supports_thinking: true,
                 input_token_price: 2.0,
                 output_token_price: 8.0,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             ModelInfo {
                 model_name: MODEL_GLM_4_6.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 128_000,
                 max_output_tokens: 16_000,
                 vision_ability: false,
@@ -137,13 +116,10 @@ impl ZaiProvider {
                 supports_thinking: true,
                 input_token_price: 1.0,
                 output_token_price: 4.0,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             ModelInfo {
                 model_name: MODEL_GLM_4_5.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 128_000,
                 max_output_tokens: 16_000,
                 vision_ability: false,
@@ -152,14 +128,11 @@ impl ZaiProvider {
                 supports_thinking: true,
                 input_token_price: 1.0,
                 output_token_price: 4.0,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             // ── Air / mid-tier ───────────────────────────────────────────
             ModelInfo {
                 model_name: MODEL_GLM_4_5_AIR.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 128_000,
                 max_output_tokens: 16_000,
                 vision_ability: false,
@@ -168,14 +141,11 @@ impl ZaiProvider {
                 supports_thinking: false,
                 input_token_price: 0.3,
                 output_token_price: 1.2,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             // ── Flash / lightweight ──────────────────────────────────────
             ModelInfo {
                 model_name: MODEL_GLM_4_7_FLASH.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 128_000,
                 max_output_tokens: 16_000,
                 vision_ability: false,
@@ -184,13 +154,10 @@ impl ZaiProvider {
                 supports_thinking: false,
                 input_token_price: 0.1,
                 output_token_price: 0.1,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             ModelInfo {
                 model_name: MODEL_GLM_4_FLASH.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 128_000,
                 max_output_tokens: 16_000,
                 vision_ability: false,
@@ -199,14 +166,11 @@ impl ZaiProvider {
                 supports_thinking: false,
                 input_token_price: 0.1,
                 output_token_price: 0.1,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             // ── Vision series (64K context) ─────────────────────────────
             ModelInfo {
                 model_name: MODEL_GLM_4_1V_THINKING_FLASH.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 64_000,
                 max_output_tokens: 8_000,
                 vision_ability: true,
@@ -215,13 +179,10 @@ impl ZaiProvider {
                 supports_thinking: true,
                 input_token_price: 0.5,
                 output_token_price: 0.5,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             ModelInfo {
                 model_name: MODEL_GLM_4_6V_FLASH.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 64_000,
                 max_output_tokens: 8_000,
                 vision_ability: true,
@@ -230,13 +191,10 @@ impl ZaiProvider {
                 supports_thinking: false,
                 input_token_price: 0.5,
                 output_token_price: 0.5,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
             ModelInfo {
                 model_name: MODEL_GLM_4V_FLASH.to_string(),
-                provider_name: "zai".to_string(),
+                provider_id: uuid::Uuid::nil(),
                 context_length: 64_000,
                 max_output_tokens: 8_000,
                 vision_ability: true,
@@ -245,41 +203,7 @@ impl ZaiProvider {
                 supports_thinking: false,
                 input_token_price: 0.1,
                 output_token_price: 0.1,
-                base_url: String::new(),
-                api_key: String::new(),
-                auth_method: AuthMethod::Bearer,
             },
         ]
-    }
-}
-
-#[async_trait]
-impl LlmProvider for ZaiProvider {
-    fn get_model(&self, model_name: &str, api_key: String) -> Result<Model, ProviderError> {
-        let info = Self::preset_models(api_key, None)
-            .into_iter()
-            .find(|m| m.model_name == model_name)
-            .ok_or_else(|| {
-                ProviderError::ModelNotFound(ModelInfo {
-                    model_name: model_name.to_string(),
-                    provider_name: "zai".to_string(),
-                    base_url: String::new(),
-                    api_key: String::new(),
-                    auth_method: AuthMethod::Bearer,
-                    ..Default::default()
-                })
-            })?;
-        Ok(Model::new(info)?)
-    }
-
-    fn add_models(&mut self, _model: Vec<ModelInfo>) {
-        // No-op: ZaiProvider is stateless.
-    }
-
-    async fn list_models(&self, _api_key: String) -> Result<Vec<Model>, ProviderError> {
-        Ok(Self::preset_models(String::new(), None)
-            .into_iter()
-            .filter_map(|m| Model::new(m).ok())
-            .collect())
     }
 }

@@ -41,6 +41,29 @@ async fn main() -> anyhow::Result<()> {
     let server_config = app_config.server_config();
     let state = AppState::new(app_config, config_path);
 
+    // Create the single default agent at startup.
+    // Use the stable UUID from config (if previously persisted) so memory
+    // can be restored from the latest snapshot.
+    let default_id = {
+        let config = state.config.read().await;
+        config.default_agent_id
+    };
+    let handle = services::agent_manager::get_or_create_agent(
+        &state,
+        default_id,
+        Some("You are a helpful AI assistant."),
+    )
+    .await
+    .expect("failed to create default agent");
+    *state.default_agent_id.write().await = Some(handle.id);
+
+    // Persist the default agent UUID to config (no-op if already saved).
+    services::agent_manager::persist_default_agent_id(&state, handle.id)
+        .await
+        .expect("failed to persist default agent id");
+
+    info!(agent_id = %handle.id, "default agent created at startup");
+
     let app = Router::new()
         .merge(routes::create_router())
         .layer(TraceLayer::new_for_http())

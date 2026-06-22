@@ -1,0 +1,19 @@
+[package]
+name = "phloem-tui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+color-eyre = "0.6.5"
+crossterm = "0.29.0"
+ratatui = "0.30.0"
+agentik-core = { path = "../../crates/agentik-core" }
+agentik-sdk = { path = "../../crates/agentik-sdk" }
+rusqlite = "0.40.1"
+anyhow.workspace = true
+uuid = "1.23.3"
+
+[lints]
+workspace = true

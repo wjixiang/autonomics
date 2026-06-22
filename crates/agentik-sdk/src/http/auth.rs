@@ -12,6 +12,20 @@ pub enum AuthMethod {
     Bearer,
 }
 
+impl TryFrom<String> for AuthMethod {
+    type Error = AnthropicError;
+
+    fn try_from(value: String) -> std::result::Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "anthropic" => Ok(AuthMethod::Anthropic),
+            "bearer" => Ok(AuthMethod::Bearer),
+            other => Err(AnthropicError::Configuration {
+                message: format!("Unknown auth method: {other}"),
+            }),
+        }
+    }
+}
+
 /// Authentication handler for Anthropic API and compatible gateways
 #[derive(Debug, Clone)]
 pub struct AuthHandler {

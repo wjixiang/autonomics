@@ -151,6 +151,24 @@ impl Toolset {
     pub fn tools(&self) -> Vec<ToolDefinition> {
         self.tools.values().map(|r| r.definition.clone()).collect()
     }
+
+    /// Return tool definitions, optionally restricted to a name whitelist.
+    ///
+    /// When `allowed` is `None`, behaves like [`tools`](Self::tools).
+    /// When `Some(names)`, only tools whose name is in `names` are
+    /// returned. Used by the skill system to limit which tools the LLM
+    /// is offered during a given workflow step.
+    pub fn tools_filtered(&self, allowed: Option<&[String]>) -> Vec<ToolDefinition> {
+        match allowed {
+            None => self.tools(),
+            Some(names) => self
+                .tools
+                .iter()
+                .filter(|(name, _)| names.iter().any(|n| n == name.as_str()))
+                .map(|(_, r)| r.definition.clone())
+                .collect(),
+        }
+    }
 }
 
 #[cfg(test)]

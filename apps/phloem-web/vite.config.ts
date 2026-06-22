@@ -1,9 +1,12 @@
 import adapter from "@sveltejs/adapter-auto";
 import { sveltekit } from "@sveltejs/kit/vite";
 import { defineConfig } from "vite";
+import tailwindcss from "@tailwindcss/vite";
+import path from "path";
 
 export default defineConfig({
   plugins: [
+    tailwindcss(),
     sveltekit({
       compilerOptions: {
         // Force runes mode for the project, except for libraries. Can be removed in svelte 6.
@@ -24,6 +27,11 @@ export default defineConfig({
         target: "http://192.168.10.9:3000",
         changeOrigin: true,
       },
+    },
+  },
+  resolve: {
+    alias: {
+      $lib: path.resolve("./src/lib"),
     },
   },
 });
