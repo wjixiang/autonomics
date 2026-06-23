@@ -21,6 +21,7 @@ impl IcebergConfig {
             ),
             ("s3.endpoint".to_string(), self.s3_endpoint.clone()),
             ("s3.region".to_string(), self.s3_region.clone()),
+            ("s3.path-style-access".to_string(), "true".to_string()),
             (
                 "s3.access-key-id".to_string(),
                 self.s3_access_key_id.clone(),
@@ -35,8 +36,9 @@ impl IcebergConfig {
 
 impl Default for IcebergConfig {
     fn default() -> Self {
+        let catalog_uri = env::var("ICEBERG_REST_URI").expect("ICEBERG_REST_URI not set");
         Self {
-            catalog_uri: env::var("ICEBERG_REST_URI").expect("ICEBERG_REST_URI not set"),
+            catalog_uri,
             warehouse: "datalake".to_string(),
             s3_endpoint: "http://localhost:3900".to_string(),
             s3_region: "garage".to_string(),

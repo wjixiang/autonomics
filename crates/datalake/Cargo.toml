@@ -13,3 +13,4 @@ datafusion = "52.5"
 tokio = { workspace = true }
 arrow = "57.3.0"
 arrow-array = "57.3.0"
+serde_json = { workspace = true }

@@ -7,5 +7,11 @@ apps/phloem-web/node_modules/
 apps/phloem-web/.svelte-kit/
 apps/phloem-web/build/
 
+# TUI logs and runtime artefacts
+apps/phloem-tui/logs/
+
 # Config
 phloem.json
+
+# Vendored external crate (cloned for local reference, not part of workspace)
+ratatui-comfy-tabs/
