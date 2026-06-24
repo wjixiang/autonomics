@@ -6,6 +6,8 @@ use reqwest::{Client, header, multipart};
 use rusqlite::Connection;
 use serde_json::Value;
 
+use file_base::OpendalFileStorage;
+
 use crate::types::*;
 
 const BASE_URL: &str = "https://api.opengwas.io/api";
@@ -705,6 +707,35 @@ impl OpengwasClient {
     /// (does not delete metadata or data files).
     pub async fn qc_delete(&self, id: &str) -> Result<Value> {
         self.delete(&format!("/quality_control/delete/{id}")).await
+    }
+
+    // =======================================================================
+    // Download
+    // =======================================================================
+
+    /// Download a file from a URL and store it in [`OpendalFileStorage`].
+    ///
+    /// Uses the existing `Client` (with auth headers) to fetch the file,
+    /// then writes the entire body to OpenDAL at the given path.
+    pub async fn download_file_to_storage(
+        &self,
+        url: &str,
+        storage: &OpendalFileStorage,
+        path: &str,
+    ) -> Result<u64> {
+        let resp = self.client.get(url).send().await?;
+        resp.error_for_status_ref()?;
+
+        let bytes = resp.bytes().await?;
+        let size = bytes.len() as u64;
+
+        storage
+            .op
+            .write(path, bytes.to_vec())
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        Ok(size)
     }
 }
 

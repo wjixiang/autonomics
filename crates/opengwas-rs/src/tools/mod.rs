@@ -4,6 +4,7 @@
 //! toolset via [`opengwas_registrations`].
 
 mod associations;
+mod download;
 mod gwasinfo_by_id;
 mod gwasinfo_count;
 mod gwasinfo_search;
@@ -17,6 +18,7 @@ mod variants_rsid;
 use std::sync::Arc;
 
 use agentik_core::tools::ToolRegistration;
+use file_base::OpendalFileStorage;
 
 pub(crate) use self::helpers::json_err;
 use crate::OpengwasClient;
@@ -40,8 +42,12 @@ mod helpers {
 /// Build [`ToolRegistration`]s for all OpenGWAS tools.
 ///
 /// Pass a shared [`OpengwasClient`] so every tool reuses the same HTTP
-/// connection and SQLite cache.
-pub fn opengwas_registrations(client: Arc<OpengwasClient>) -> Vec<ToolRegistration> {
+/// connection and SQLite cache, and a shared [`OpendalFileStorage`] for
+/// file download operations.
+pub fn opengwas_registrations(
+    client: Arc<OpengwasClient>,
+    storage: Arc<OpendalFileStorage>,
+) -> Vec<ToolRegistration> {
     use agentik_core::tools::ToolRegistration as R;
     vec![
         R::from(gwasinfo_by_id::GwasinfoByIdTool {
@@ -73,6 +79,10 @@ pub fn opengwas_registrations(client: Arc<OpengwasClient>) -> Vec<ToolRegistrati
         }),
         R::from(ld_matrix::LdMatrixTool {
             client: client.clone(),
+        }),
+        R::from(download::DownloadFilesTool {
+            client,
+            storage,
         }),
     ]
 }
