@@ -1,0 +1,22 @@
+[package]
+name = "agentik-runtime"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Sync-to-async bridge for running an agentik agent from a sync context"
+
+[dependencies]
+agentik-core = { path = "../agentik-core" }
+agentik-sdk = { path = "../agentik-sdk" }
+aether-tools = { path = "../aether-tools" }
+datalake = { path = "../datalake" }
+opengwas-rs = { path = "../opengwas-rs" }
+eutils-rs = { path = "../eutils-rs" }
+file-base = { path = "../file-base" }
+tokio = { workspace = true }
+tokio-util = "0.7"
+color-eyre = "0.6"
+
+[lints]
+workspace = true
