@@ -19,21 +19,21 @@ use crate::ns_to_json;
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_list_namespaces",
+    name = "iceberg_list_namespaces",
     description = "List Iceberg namespaces directly under a parent namespace. Returns only the immediate children (one level), not the full nested tree. Omit `parent` to list top-level namespaces."
 )]
-pub struct AetherListNamespacesInput {
+pub struct IcebergListNamespacesInput {
     #[desc = "Parent namespace path (dotted), e.g. 'warehouse.analytics'. Omit to list top-level namespaces."]
     pub parent: Option<String>,
 }
 
-pub struct AetherListNamespacesTool {
+pub struct IcebergListNamespacesTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherListNamespacesTool {
-    type Input = AetherListNamespacesInput;
+impl ToolFunction for IcebergListNamespacesTool {
+    type Input = IcebergListNamespacesInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;
@@ -65,23 +65,23 @@ impl ToolFunction for AetherListNamespacesTool {
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_create_namespace",
+    name = "iceberg_create_namespace",
     description = "Create an Iceberg namespace. By default fails if the namespace already exists; set `if_not_exists` to true to make it idempotent."
 )]
-pub struct AetherCreateNamespaceInput {
+pub struct IcebergCreateNamespaceInput {
     #[desc = "Namespace path (dotted) to create, e.g. 'warehouse.analytics'"]
     pub namespace: String,
     #[desc = "If true, succeed (returning the existing namespace) when it already exists. Defaults to false."]
     pub if_not_exists: Option<bool>,
 }
 
-pub struct AetherCreateNamespaceTool {
+pub struct IcebergCreateNamespaceTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherCreateNamespaceTool {
-    type Input = AetherCreateNamespaceInput;
+impl ToolFunction for IcebergCreateNamespaceTool {
+    type Input = IcebergCreateNamespaceInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;
@@ -106,21 +106,21 @@ impl ToolFunction for AetherCreateNamespaceTool {
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_namespace_exists",
+    name = "iceberg_namespace_exists",
     description = "Check whether an Iceberg namespace exists. Returns a JSON object with an `exists` boolean."
 )]
-pub struct AetherNamespaceExistsInput {
+pub struct IcebergNamespaceExistsInput {
     #[desc = "Namespace path (dotted) to check, e.g. 'warehouse.analytics'"]
     pub namespace: String,
 }
 
-pub struct AetherNamespaceExistsTool {
+pub struct IcebergNamespaceExistsTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherNamespaceExistsTool {
-    type Input = AetherNamespaceExistsInput;
+impl ToolFunction for IcebergNamespaceExistsTool {
+    type Input = IcebergNamespaceExistsInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;
@@ -137,21 +137,21 @@ impl ToolFunction for AetherNamespaceExistsTool {
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_drop_namespace",
+    name = "iceberg_drop_namespace",
     description = "Drop (delete) an Iceberg namespace. The namespace must be empty (contain no tables) for the catalog to allow this."
 )]
-pub struct AetherDropNamespaceInput {
+pub struct IcebergDropNamespaceInput {
     #[desc = "Namespace path (dotted) to drop, e.g. 'warehouse.analytics'"]
     pub namespace: String,
 }
 
-pub struct AetherDropNamespaceTool {
+pub struct IcebergDropNamespaceTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherDropNamespaceTool {
-    type Input = AetherDropNamespaceInput;
+impl ToolFunction for IcebergDropNamespaceTool {
+    type Input = IcebergDropNamespaceInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;

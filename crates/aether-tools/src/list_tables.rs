@@ -10,21 +10,21 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_list_tables",
+    name = "iceberg_list_tables",
     description = "List all Iceberg tables visible in the DataFusion workspace. Returns table names grouped by namespace. Optionally filter to a specific namespace."
 )]
-pub struct AetherListTablesInput {
+pub struct IcebergListTablesInput {
     #[desc = "Optional namespace (schema) to filter tables by. If omitted, lists all tables across all namespaces."]
     pub namespace: Option<String>,
 }
 
-pub struct AetherListTablesTool {
+pub struct IcebergListTablesTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherListTablesTool {
-    type Input = AetherListTablesInput;
+impl ToolFunction for IcebergListTablesTool {
+    type Input = IcebergListTablesInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let workspace = self.workspace.clone();

@@ -5,6 +5,7 @@ use agentik_core::Agent;
 use agentik_sdk::model::model_pool::ModelPool;
 use agentik_sdk::types::{AgentEvent, ContentBlock};
 use datalake::aether::AetherWorkspace;
+use datalake::DatasetStore;
 use tokio::sync::Mutex;
 
 /// Bridges the sync TUI thread to the async agent runtime.
@@ -33,7 +34,11 @@ impl AgentRuntime {
                     .await
                     .expect("failed to initialise Aether workspace"),
             );
-            let tools = aether_tools::aether_registrations(workspace);
+            // The dataset store shares the Aether workspace's DataFusion
+            // session so Iceberg tables are visible to dataset tools.
+            let store = Arc::new(DatasetStore::from_workspace(&workspace));
+            let mut tools = aether_tools::iceberg_registrations(workspace);
+            tools.extend(aether_tools::dataset_registrations(store));
 
             Agent::builder()
                 .with_model_pool(Arc::new(model_pool))

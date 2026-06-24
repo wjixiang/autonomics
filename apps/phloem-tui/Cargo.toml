@@ -10,6 +10,7 @@ color-eyre = "0.6.5"
 crossterm = "0.29.0"
 ratatui = { version = "0.30.0", features = ["unstable-rendered-line-info"] }
 ratatui-comfy-tabs = "0.5"
+ratatui-textarea = "0.9"
 agentik-core = { path = "../../crates/agentik-core" }
 agentik-sdk = { path = "../../crates/agentik-sdk" }
 rusqlite = "0.40.1"

@@ -1,5 +1,5 @@
 use crate::config_db::{ModelInput, ProviderInput, ProviderRow};
-use crate::widgets::input_area::InputState;
+use crate::widgets::input_area::{InputArea, InputState};
 use agentik_sdk::types::AgentEvent;
 
 pub const TABS: &[&str] = &["Agent", "Config"];
@@ -65,7 +65,7 @@ pub struct AgentTabState {
     pub messages: Vec<ChatLine>,
     pub scroll_offset: usize,
     pub status: AgentStatus,
-    pub input: InputState,
+    pub input: InputArea,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub input_mode: InputMode,
@@ -81,7 +81,7 @@ impl Default for AgentTabState {
             messages: Vec::new(),
             scroll_offset: 0,
             status: AgentStatus::Idle,
-            input: InputState::new(),
+            input: InputArea::new(),
             input_tokens: 0,
             output_tokens: 0,
             input_mode: InputMode::Browse,
@@ -99,7 +99,7 @@ impl AgentTabState {
 
     /// Take the current input text and clear the input field.
     pub fn take_input(&mut self) -> String {
-        let text = self.input.value().to_string();
+        let text = self.input.value();
         self.input.clear();
         text
     }

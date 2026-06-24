@@ -5,9 +5,10 @@
 //! underlying REST catalog connection and DataFusion session are reused
 //! across every invocation.
 //!
-//! Wire the tools into an agent's toolset via [`aether_registrations`].
+//! Wire the tools into an agent's toolset via [`iceberg_registrations`].
 
 pub mod common;
+pub mod dataset;
 pub mod describe_table;
 pub mod list_tables;
 pub mod namespace;
@@ -21,19 +22,30 @@ use serde_json::{Value, json};
 
 pub use agentik_core::tools::ToolRegistration;
 pub use datalake::aether::AetherWorkspace;
-pub use describe_table::{AetherDescribeTableInput, AetherDescribeTableTool};
-pub use list_tables::{AetherListTablesInput, AetherListTablesTool};
-pub use namespace::{
-    AetherCreateNamespaceInput, AetherCreateNamespaceTool, AetherDropNamespaceInput,
-    AetherDropNamespaceTool, AetherListNamespacesInput, AetherListNamespacesTool,
-    AetherNamespaceExistsInput, AetherNamespaceExistsTool,
+pub use dataset::{
+    DatasetDescribeInput, DatasetDescribeTool, DatasetDropInput, DatasetDropTool,
+    DatasetEggerInput, DatasetEggerTool, DatasetIvwInput, DatasetIvwTool,
+    DatasetLimitInput, DatasetLimitTool, DatasetListInput, DatasetListTool,
+    DatasetLoadTableInput, DatasetLoadTableTool, DatasetMapInput, DatasetMapTool,
+    DatasetOlsInput, DatasetOlsTool, DatasetPreviewInput, DatasetPreviewTool,
+    DatasetSelectInput, DatasetSelectTool, DatasetSortInput, DatasetSortTool,
+    DatasetSqlInput, DatasetSqlTool, DatasetSummarizeInput, DatasetSummarizeTool,
+    DatasetUnionInput, DatasetUnionTool,
+    dataset_registrations,
 };
-pub use query::{AetherPreviewTableInput, AetherPreviewTableTool};
+pub use describe_table::{IcebergDescribeTableInput, IcebergDescribeTableTool};
+pub use list_tables::{IcebergListTablesInput, IcebergListTablesTool};
+pub use namespace::{
+    IcebergCreateNamespaceInput, IcebergCreateNamespaceTool, IcebergDropNamespaceInput,
+    IcebergDropNamespaceTool, IcebergListNamespacesInput, IcebergListNamespacesTool,
+    IcebergNamespaceExistsInput, IcebergNamespaceExistsTool,
+};
+pub use query::{IcebergPreviewTableInput, IcebergPreviewTableTool};
 pub use table::{
-    AetherCreateTableInput, AetherCreateTableTool, AetherDropTableInput, AetherDropTableTool,
-    AetherListTablesInNamespaceInput, AetherListTablesInNamespaceTool, AetherLoadTableInput,
-    AetherLoadTableTool, AetherRenameTableInput, AetherRenameTableTool, AetherTableExistsInput,
-    AetherTableExistsTool,
+    IcebergCreateTableInput, IcebergCreateTableTool, IcebergDropTableInput,
+    IcebergDropTableTool, IcebergListTablesInNamespaceInput, IcebergListTablesInNamespaceTool,
+    IcebergLoadTableInput, IcebergLoadTableTool, IcebergRenameTableInput,
+    IcebergRenameTableTool, IcebergTableExistsInput, IcebergTableExistsTool,
 };
 
 /// Serialize an Iceberg [`Namespace`] into a JSON object.
@@ -48,55 +60,55 @@ fn ns_to_json(ns: &Namespace, already_exists: bool) -> Value {
 /// All aether tool registrations, ready to register into a toolset.
 ///
 /// Returns 13 tools:
-/// - **DataFusion** (2): `aether_list_tables`, `aether_describe_table`
-/// - **Namespace CRUD** (4): `aether_list_namespaces`, `aether_create_namespace`,
-///   `aether_namespace_exists`, `aether_drop_namespace`
-/// - **Table CRUD** (6): `aether_list_tables_in_namespace`, `aether_table_exists`,
-///   `aether_load_table`, `aether_create_table`, `aether_drop_table`,
-///   `aether_rename_table`
-/// - **SQL preview** (1): `aether_preview_table`
-pub fn aether_registrations(workspace: Arc<AetherWorkspace>) -> Vec<ToolRegistration> {
+/// - **DataFusion** (2): `iceberg_list_tables`, `iceberg_describe_table`
+/// - **Namespace CRUD** (4): `iceberg_list_namespaces`, `iceberg_create_namespace`,
+///   `iceberg_namespace_exists`, `iceberg_drop_namespace`
+/// - **Table CRUD** (6): `iceberg_list_tables_in_namespace`, `iceberg_table_exists`,
+///   `iceberg_load_table`, `iceberg_create_table`, `iceberg_drop_table`,
+///   `iceberg_rename_table`
+/// - **SQL preview** (1): `iceberg_preview_table`
+pub fn iceberg_registrations(workspace: Arc<AetherWorkspace>) -> Vec<ToolRegistration> {
     vec![
         // DataFusion-level tools
-        ToolRegistration::from(AetherListTablesTool {
+        ToolRegistration::from(IcebergListTablesTool {
             workspace: workspace.clone(),
         }),
-        ToolRegistration::from(AetherDescribeTableTool {
+        ToolRegistration::from(IcebergDescribeTableTool {
             workspace: workspace.clone(),
         }),
         // namespace tools
-        ToolRegistration::from(AetherListNamespacesTool {
+        ToolRegistration::from(IcebergListNamespacesTool {
             workspace: workspace.clone(),
         }),
-        ToolRegistration::from(AetherCreateNamespaceTool {
+        ToolRegistration::from(IcebergCreateNamespaceTool {
             workspace: workspace.clone(),
         }),
-        ToolRegistration::from(AetherNamespaceExistsTool {
+        ToolRegistration::from(IcebergNamespaceExistsTool {
             workspace: workspace.clone(),
         }),
-        ToolRegistration::from(AetherDropNamespaceTool {
+        ToolRegistration::from(IcebergDropNamespaceTool {
             workspace: workspace.clone(),
         }),
         // table tools
-        ToolRegistration::from(AetherListTablesInNamespaceTool {
+        ToolRegistration::from(IcebergListTablesInNamespaceTool {
             workspace: workspace.clone(),
         }),
-        ToolRegistration::from(AetherTableExistsTool {
+        ToolRegistration::from(IcebergTableExistsTool {
             workspace: workspace.clone(),
         }),
-        ToolRegistration::from(AetherLoadTableTool {
+        ToolRegistration::from(IcebergLoadTableTool {
             workspace: workspace.clone(),
         }),
-        ToolRegistration::from(AetherCreateTableTool {
+        ToolRegistration::from(IcebergCreateTableTool {
             workspace: workspace.clone(),
         }),
-        ToolRegistration::from(AetherDropTableTool {
+        ToolRegistration::from(IcebergDropTableTool {
             workspace: workspace.clone(),
         }),
-        ToolRegistration::from(AetherRenameTableTool {
+        ToolRegistration::from(IcebergRenameTableTool {
             workspace: workspace.clone(),
         }),
         // read tool
-        ToolRegistration::from(AetherPreviewTableTool { workspace }),
+        ToolRegistration::from(IcebergPreviewTableTool { workspace }),
     ]
 }

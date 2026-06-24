@@ -19,21 +19,21 @@ use crate::common::{build_schema, err, parse_columns, table_ident};
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_list_tables_in_namespace",
-    description = "List Iceberg tables within a namespace via the REST catalog. Supports nested (multi-segment) namespace paths, e.g. 'warehouse.analytics'. Returns table names (not their full identifiers). For top-level namespaces the DataFusion-based aether_list_tables can also be used."
+    name = "iceberg_list_tables_in_namespace",
+    description = "List Iceberg tables within a namespace via the REST catalog. Supports nested (multi-segment) namespace paths, e.g. 'warehouse.analytics'. Returns table names (not their full identifiers). For top-level namespaces the DataFusion-based iceberg_list_tables can also be used."
 )]
-pub struct AetherListTablesInNamespaceInput {
+pub struct IcebergListTablesInNamespaceInput {
     #[desc = "Namespace path (dotted) to list tables in, e.g. 'warehouse.analytics'"]
     pub namespace: String,
 }
 
-pub struct AetherListTablesInNamespaceTool {
+pub struct IcebergListTablesInNamespaceTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherListTablesInNamespaceTool {
-    type Input = AetherListTablesInNamespaceInput;
+impl ToolFunction for IcebergListTablesInNamespaceTool {
+    type Input = IcebergListTablesInNamespaceInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;
@@ -54,23 +54,23 @@ impl ToolFunction for AetherListTablesInNamespaceTool {
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_table_exists",
+    name = "iceberg_table_exists",
     description = "Check whether an Iceberg table exists. Returns a JSON object with an `exists` boolean."
 )]
-pub struct AetherTableExistsInput {
+pub struct IcebergTableExistsInput {
     #[desc = "Namespace path (dotted) containing the table, e.g. 'warehouse.analytics'"]
     pub namespace: String,
     #[desc = "Table name"]
     pub table: String,
 }
 
-pub struct AetherTableExistsTool {
+pub struct IcebergTableExistsTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherTableExistsTool {
-    type Input = AetherTableExistsInput;
+impl ToolFunction for IcebergTableExistsTool {
+    type Input = IcebergTableExistsInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;
@@ -87,23 +87,23 @@ impl ToolFunction for AetherTableExistsTool {
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_load_table",
-    description = "Load an Iceberg table's metadata: schema columns, location, format version, properties, and the current snapshot. Does not read row data — use aether_preview_table for that."
+    name = "iceberg_load_table",
+    description = "Load an Iceberg table's metadata: schema columns, location, format version, properties, and the current snapshot. Does not read row data — use iceberg_preview_table for that."
 )]
-pub struct AetherLoadTableInput {
+pub struct IcebergLoadTableInput {
     #[desc = "Namespace path (dotted) containing the table, e.g. 'warehouse.analytics'"]
     pub namespace: String,
     #[desc = "Table name"]
     pub table: String,
 }
 
-pub struct AetherLoadTableTool {
+pub struct IcebergLoadTableTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherLoadTableTool {
-    type Input = AetherLoadTableInput;
+impl ToolFunction for IcebergLoadTableTool {
+    type Input = IcebergLoadTableInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;
@@ -151,10 +151,10 @@ impl ToolFunction for AetherLoadTableTool {
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_create_table",
+    name = "iceberg_create_table",
     description = "Create an Iceberg table with a simple schema. Columns are specified as compact 'name:type' strings (append '!' to mark required), e.g. ['id:long!', 'event:string', 'ts:timestamp']. Supported types: boolean, int, long, float, double, date, time, timestamp, timestamptz, string, uuid, binary."
 )]
-pub struct AetherCreateTableInput {
+pub struct IcebergCreateTableInput {
     #[desc = "Namespace path (dotted) to create the table in, e.g. 'warehouse.analytics'"]
     pub namespace: String,
     #[desc = "Table name to create"]
@@ -167,13 +167,13 @@ pub struct AetherCreateTableInput {
     pub if_not_exists: Option<bool>,
 }
 
-pub struct AetherCreateTableTool {
+pub struct IcebergCreateTableTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherCreateTableTool {
-    type Input = AetherCreateTableInput;
+impl ToolFunction for IcebergCreateTableTool {
+    type Input = IcebergCreateTableInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;
@@ -223,23 +223,23 @@ impl ToolFunction for AetherCreateTableTool {
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_drop_table",
+    name = "iceberg_drop_table",
     description = "Drop (delete) an Iceberg table and its metadata. This removes the table from the catalog; underlying data files may be retained depending on the catalog/storage configuration."
 )]
-pub struct AetherDropTableInput {
+pub struct IcebergDropTableInput {
     #[desc = "Namespace path (dotted) containing the table, e.g. 'warehouse.analytics'"]
     pub namespace: String,
     #[desc = "Table name to drop"]
     pub table: String,
 }
 
-pub struct AetherDropTableTool {
+pub struct IcebergDropTableTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherDropTableTool {
-    type Input = AetherDropTableInput;
+impl ToolFunction for IcebergDropTableTool {
+    type Input = IcebergDropTableInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;
@@ -256,10 +256,10 @@ impl ToolFunction for AetherDropTableTool {
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
-    name = "aether_rename_table",
+    name = "iceberg_rename_table",
     description = "Rename (move) an Iceberg table to a new namespace and/or name. Both source and destination namespaces must already exist."
 )]
-pub struct AetherRenameTableInput {
+pub struct IcebergRenameTableInput {
     #[desc = "Source namespace path (dotted), e.g. 'warehouse.analytics'"]
     pub from_namespace: String,
     #[desc = "Source table name"]
@@ -270,13 +270,13 @@ pub struct AetherRenameTableInput {
     pub to_table: String,
 }
 
-pub struct AetherRenameTableTool {
+pub struct IcebergRenameTableTool {
     pub workspace: Arc<AetherWorkspace>,
 }
 
 #[async_trait]
-impl ToolFunction for AetherRenameTableTool {
-    type Input = AetherRenameTableInput;
+impl ToolFunction for IcebergRenameTableTool {
+    type Input = IcebergRenameTableInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
         let catalog = self.workspace.catalog().await.map_err(err)?;

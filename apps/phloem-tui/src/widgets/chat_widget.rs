@@ -112,15 +112,29 @@ impl StatefulWidget for ChatWidget<'_> {
     }
 }
 
+/// Strip the leading and trailing `|` from a pipe-delimited table line,
+/// returning the inner content.
+///
+/// Returns `None` unless `s` is at least two characters and both starts and
+/// ends with `|`. This guards the slice `s[1..len-1]` against a lone `|`
+/// (length 1), which would otherwise panic with an invalid range
+/// (`[1..0]`).
+fn pipe_inner<'a>(s: &'a str) -> Option<&'a str> {
+    if s.len() < 2 || !s.starts_with('|') || !s.ends_with('|') {
+        return None;
+    }
+    Some(&s[1..s.len() - 1])
+}
+
 /// Check if a line is a markdown table separator (e.g. `| --- | --- |`).
 fn is_table_separator(line: &str) -> bool {
     let trimmed = line.trim();
-    if !trimmed.starts_with('|') || !trimmed.ends_with('|') {
-        return false;
+    match pipe_inner(trimmed) {
+        Some(inner) => inner
+            .chars()
+            .all(|c| c == '-' || c == '|' || c == ':' || c == ' '),
+        None => false,
     }
-    trimmed[1..trimmed.len() - 1]
-        .chars()
-        .all(|c| c == '-' || c == '|' || c == ':' || c == ' ')
 }
 
 /// Render a markdown table as styled `Line`s with box-drawing characters.
@@ -132,11 +146,8 @@ fn render_table_lines(table_lines: &[&str]) -> Vec<Line<'static>> {
         if is_table_separator(trimmed) {
             continue;
         }
-        if trimmed.starts_with('|') && trimmed.ends_with('|') {
-            let cells: Vec<&str> = trimmed[1..trimmed.len() - 1]
-                .split('|')
-                .map(|s| s.trim())
-                .collect();
+        if let Some(inner) = pipe_inner(trimmed) {
+            let cells: Vec<&str> = inner.split('|').map(|s| s.trim()).collect();
             rows.push(cells);
         }
     }
@@ -299,11 +310,21 @@ fn render_line(msg: &ChatLine) -> Vec<Line<'_>> {
             }
             lines
         }
-        ChatLine::ToolCall { name, .. } => {
-            vec![Line::from(Span::styled(
+        ChatLine::ToolCall { name, input } => {
+            let mut lines = vec![Line::from(Span::styled(
                 format!("🔧 Calling: {}", name),
                 Style::default().fg(Color::Yellow),
-            ))]
+            ))];
+            if !input.is_empty() {
+                // Render each input parameter on its own indented line.
+                for line in input.lines() {
+                    lines.push(Line::from(Span::styled(
+                        format!("   {}", line),
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                }
+            }
+            lines
         }
         ChatLine::ToolResult { ok, content } => {
             let icon = if *ok { "✓" } else { "✗" };
@@ -343,5 +364,26 @@ fn render_line(msg: &ChatLine) -> Vec<Line<'_>> {
                 Style::default().fg(Color::DarkGray),
             ))]
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipe_inner_handles_lone_pipe_without_panicking() {
+        // Regression: a bare `|` (length 1) previously made
+        // `trimmed[1..trimmed.len() - 1]` slice `[1..0]` and panic.
+        assert_eq!(pipe_inner("|"), None);
+        assert_eq!(is_table_separator("|"), false);
+
+        // Normal cases.
+        assert_eq!(pipe_inner("| a | b |"), Some(" a | b "));
+        assert!(is_table_separator("| --- | --- |"));
+        assert!(!is_table_separator("| a | b |"));
+
+        // Empty-content pipe pair is still a valid inner slice.
+        assert_eq!(pipe_inner("||"), Some(""));
     }
 }

@@ -3,7 +3,7 @@ use std::time::Duration;
 use agentik_sdk::AuthMethod;
 use agentik_sdk::model::model_pool::ModelPoolConfig;
 use agentik_sdk::model::{ModelInfo, ProviderConfig};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Direction, Layout},
@@ -37,7 +37,7 @@ impl App {
 
         let model_pool = Self::build_model_pool(&conn).expect("failed to build model pool");
 
-        let agent_runtime = AgentRuntime::new(model_pool, "You are a helpful assistant.")
+        let agent_runtime = AgentRuntime::new(model_pool, "You are a helpful assistant. ")
             .expect("failed to create agent runtime");
 
         let mut state = AppState::default();
@@ -240,9 +240,42 @@ impl App {
                 }
             }
             Event::Resize(_, _) | Event::FocusGained | Event::FocusLost => {}
-            Event::Mouse(_) | Event::Paste(_) => {}
+            Event::Mouse(mouse) => self.handle_mouse(mouse)?,
+            Event::Paste(s) => {
+                // Only insert paste into the input area when in input mode and agent is idle.
+                if matches!(self.state.main_tab_state, MainTabState::AgentTab) {
+                    let ts = &mut self.state.agent_tab_state;
+                    if ts.input_mode == InputMode::Input && ts.status == state::AgentStatus::Idle {
+                        ts.input.insert_str(&s);
+                    }
+                }
+            }
             _ => {}
         }
+        Ok(())
+    }
+
+    /// Handle mouse events: scroll wheel scrolls the chat in Agent tab.
+    fn handle_mouse(&mut self, mouse: MouseEvent) -> std::io::Result<()> {
+        if !matches!(self.state.main_tab_state, MainTabState::AgentTab) {
+            return Ok(());
+        }
+
+        let ts = &mut self.state.agent_tab_state;
+        let lines_per_tick = 3;
+
+        match mouse.kind {
+            MouseEventKind::ScrollDown => {
+                ts.scroll_offset = ts.scroll_offset.saturating_add(lines_per_tick);
+                ts.auto_scroll = false;
+            }
+            MouseEventKind::ScrollUp => {
+                ts.scroll_offset = ts.scroll_offset.saturating_sub(lines_per_tick);
+                ts.auto_scroll = false;
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 

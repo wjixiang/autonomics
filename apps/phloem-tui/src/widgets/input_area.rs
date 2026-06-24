@@ -1,12 +1,13 @@
 use crossterm::event::{KeyCode, KeyEvent};
-
 use ratatui::{
     layout::Rect,
     prelude::{StatefulWidget, Widget},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Paragraph},
+    style::{Color, Style},
+    widgets::Block,
 };
+use ratatui_textarea::TextArea;
+
+// ── Single-line text input (used by the config tab forms) ──────
 
 /// State for a single-line text input.
 #[derive(Debug, Default)]
@@ -122,12 +123,79 @@ impl InputState {
     }
 }
 
-/// State for [`InputWidget`].
-pub struct InputWidgetState<'a> {
-    pub input: &'a mut InputState,
+// ── Multi-line textarea input (used by the agent chat) ─────────
+
+/// Wrapper around `ratatui_textarea::TextArea` for the chat input area.
+///
+/// Uses `TextArea<'static>` so the struct carries no lifetime and can be
+/// stored directly in state (e.g. inside `AgentTabState`).
+#[derive(Debug)]
+pub struct InputArea {
+    textarea: TextArea<'static>,
 }
 
-/// Composite widget: bordered input area + text content with visual cursor.
+impl InputArea {
+    pub fn new() -> Self {
+        let mut textarea = TextArea::default();
+        textarea.set_placeholder_text("Type a message...");
+        textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
+        // No block set — the InputWidget renders its own bordered block around us.
+        Self { textarea }
+    }
+
+    /// Get the current text content as a single string.
+    pub fn value(&self) -> String {
+        self.textarea.lines().join("\n")
+    }
+
+    /// Check if the textarea is empty.
+    pub fn is_empty(&self) -> bool {
+        self.textarea.is_empty()
+    }
+
+    /// Clear all content.
+    pub fn clear(&mut self) {
+        self.textarea.clear();
+    }
+
+    /// Handle a key event. Returns true if the text content was modified.
+    /// Enter and Escape are intercepted (not forwarded to the textarea) since
+    /// the caller handles them for message sending / mode switching.
+    pub fn handle_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Enter | KeyCode::Esc => false,
+            _ => self.textarea.input(key),
+        }
+    }
+
+    /// Insert a paste string at the cursor position.
+    pub fn insert_str(&mut self, s: &str) {
+        self.textarea.insert_str(s);
+    }
+
+    /// Set placeholder text (used for disabled / running state).
+    pub fn set_placeholder(&mut self, text: &str) {
+        self.textarea.set_placeholder_text(text);
+    }
+
+    /// Borrow the inner textarea for rendering.
+    pub fn textarea(&self) -> &TextArea<'_> {
+        &self.textarea
+    }
+}
+
+impl Default for InputArea {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// State for [`InputWidget`].
+pub struct InputWidgetState<'a> {
+    pub input: &'a mut InputArea,
+}
+
+/// Composite widget: bordered input area backed by ratatui-textarea.
 pub struct InputWidget<'a> {
     pub disabled: bool,
     pub title: &'a str,
@@ -138,7 +206,6 @@ impl<'a> StatefulWidget for InputWidget<'a> {
     type State = InputWidgetState<'a>;
 
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer, state: &mut Self::State) {
-        // Render border
         let style = if self.disabled {
             Style::default().fg(Color::DarkGray)
         } else {
@@ -151,59 +218,7 @@ impl<'a> StatefulWidget for InputWidget<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        if self.disabled {
-            Paragraph::new(Line::from(Span::styled(
-                if self.placeholder.is_empty() {
-                    "■ running...".to_string()
-                } else {
-                    self.placeholder.to_string()
-                },
-                Style::default().fg(Color::DarkGray),
-            )))
-            .render(inner, buf);
-        } else {
-            render_input_text(state.input, self.placeholder, inner, buf);
-        }
-    }
-}
-
-/// Render the text content inside the input area with a visual block cursor.
-pub fn render_input_text(
-    state: &InputState,
-    placeholder: &str,
-    area: Rect,
-    buf: &mut ratatui::prelude::Buffer,
-) {
-    if state.is_empty() {
-        Paragraph::new(Span::styled(
-            placeholder,
-            Style::default().fg(Color::DarkGray),
-        ))
-        .render(area, buf);
-    } else {
-        let text = state.value();
-        let cursor_pos = state.cursor;
-
-        let before = &text[..cursor_pos];
-        let after = &text[cursor_pos..];
-
-        let line = Line::from(vec![
-            Span::raw(before.to_string()),
-            Span::styled(
-                if after.is_empty() {
-                    " ".to_string()
-                } else {
-                    after.chars().next().unwrap().to_string()
-                },
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::REVERSED),
-            ),
-            Span::raw(
-                after[after.chars().next().map_or(0, |c| c.len_utf8())..].to_string(),
-            ),
-        ]);
-
-        Paragraph::new(line).render(area, buf);
+        state.input.set_placeholder(self.placeholder);
+        state.input.textarea().render(inner, buf);
     }
 }

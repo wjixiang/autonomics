@@ -15,6 +15,7 @@ iceberg = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 datafusion = { workspace = true }
 anyhow.workspace = true
+stat-primitives = { path = "../stat-primitives" }
 async-trait.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
