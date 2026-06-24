@@ -71,6 +71,13 @@ pub enum Provenance {
     },
     /// Created manually (e.g. from raw `RecordBatch` values).
     Manual,
+    /// Created by ingesting a file (VCF, CSV, etc.) via data-ingest.
+    FileIngest {
+        /// Original file path.
+        path: String,
+        /// Format name (e.g. "VCF").
+        format: String,
+    },
 }
 
 impl fmt::Display for Provenance {
@@ -80,6 +87,7 @@ impl fmt::Display for Provenance {
             Self::Table { table } => write!(f, "table: {table}"),
             Self::Transform { op, parents } => write!(f, "{op}({})", parents.join(", ")),
             Self::Manual => f.write_str("manual"),
+            Self::FileIngest { path, format } => write!(f, "file_ingest({format}, {path})"),
         }
     }
 }
