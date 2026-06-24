@@ -13,7 +13,7 @@ use ratatui_comfy_tabs::{TabBarAlign, TabDirection, TabNav, TabNavState};
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use crate::agent_runtime::AgentRuntime;
+use agentik_runtime::AgentRuntime;
 use crate::state::{self, AgentStatus, AppState, InputMode, MainTabState};
 use crate::widgets::agent_tab_widget::AgentTabWidget;
 
