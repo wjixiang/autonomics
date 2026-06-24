@@ -9,6 +9,7 @@ apps/phloem-web/build/
 
 # TUI logs and runtime artefacts
 apps/phloem-tui/logs/
+logs/
 
 # Config
 phloem.json

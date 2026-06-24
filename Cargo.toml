@@ -9,7 +9,7 @@ members = [
   "crates/stat-primitives",
   "crates/gwascatalog-sdk",
   "crates/datalake", "crates/bibliography-tools",
-  "apps/phloem-server", "apps/phloem-tui", "crates/aether-tools", "crates/opengwas-rs",
+  "apps/phloem-server", "apps/phloem-tui", "crates/aether-tools", "crates/opengwas-rs", "crates/eutils-rs", "crates/agentik-runtime", "crates/file-base", "crates/data-ingest",
 ]
 
 [workspace.package]
@@ -34,6 +34,7 @@ iceberg-datafusion = "0.9.0"
 arrow = "57.3.0"
 arrow-array = "57.3.0"
 arrow-schema = "57.3.0"
+arrow-csv = "57.3.0"
 parquet = "57.3.0"
 rayon = "1.12.0"
 futures = "0.3"
