@@ -4,7 +4,7 @@
 //! toolset via [`opengwas_registrations`].
 
 mod associations;
-mod download;
+pub mod download;
 mod gwasinfo_by_id;
 mod gwasinfo_count;
 mod gwasinfo_search;
@@ -80,9 +80,6 @@ pub fn opengwas_registrations(
         R::from(ld_matrix::LdMatrixTool {
             client: client.clone(),
         }),
-        R::from(download::DownloadFilesTool {
-            client,
-            storage,
-        }),
+        R::from(download::DownloadFilesTool::new(client, storage)),
     ]
 }

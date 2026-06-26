@@ -22,27 +22,32 @@ pub struct DownloadFilesInput {
 }
 
 /// Flatten the nested JSON response into `(study_id, filename, url)` triples.
-fn parse_file_entries(resp: &serde_json::Value) -> Vec<(&str, &str, &str)> {
+///
+/// The API returns `{ study_id: ["url1", "url2", ...] }` where each URL ends
+/// with the filename (e.g. `.../ieu-a-2.vcf.gz`).
+fn parse_file_entries(resp: &serde_json::Value) -> Vec<(String, String, String)> {
     resp.as_object()
         .into_iter()
         .flatten()
         .flat_map(|(study_id, files)| {
-            files
-                .as_object()
-                .into_iter()
-                .flatten()
-                .flat_map(move |(filename, url_val)| {
-                    url_val
-                        .as_str()
-                        .map(|url| (study_id.as_str(), filename.as_str(), url))
-                })
+            files.as_array().into_iter().flatten().filter_map(move |url_val| {
+                let url = url_val.as_str()?;
+                let filename = url.rsplit('/').next()?;
+                Some((study_id.clone(), filename.to_string(), url.to_string()))
+            })
         })
         .collect()
 }
 
 pub struct DownloadFilesTool {
-    pub(crate) client: Arc<OpengwasClient>,
-    pub(crate) storage: Arc<OpendalFileStorage>,
+    client: Arc<OpengwasClient>,
+    storage: Arc<OpendalFileStorage>,
+}
+
+impl DownloadFilesTool {
+    pub fn new(client: Arc<OpengwasClient>, storage: Arc<OpendalFileStorage>) -> Self {
+        Self { client, storage }
+    }
 }
 
 #[async_trait]
@@ -54,7 +59,7 @@ impl ToolFunction for DownloadFilesTool {
     }
 
     fn timeout_seconds(&self) -> u64 {
-        300
+        6000
     }
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
@@ -75,7 +80,7 @@ impl ToolFunction for DownloadFilesTool {
             let storage_path = format!("/{study_id}/{filename}");
             let size = self
                 .client
-                .download_file_to_storage(url, &self.storage, &storage_path)
+                .download_file_to_storage(&url, &self.storage, &storage_path)
                 .await
                 .map_err(json_err)?;
             downloaded.push(serde_json::json!({
