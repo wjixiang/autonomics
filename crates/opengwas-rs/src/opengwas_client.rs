@@ -80,9 +80,9 @@ impl OpengwasClient {
     /// automatically prepended.
     ///
     /// Panics if no token can be resolved.
-    pub fn new<S: Into<String>>(token: Option<S>) -> Self {
+    pub fn new(token: Option<&str>) -> Self {
         let token = match token {
-            Some(t) => Some(t.into()),
+            Some(t) => Some(t.to_string()),
             None => std::env::var("OPENGWAS_TOKEN").ok(),
         };
         let full = format!(
@@ -451,8 +451,9 @@ impl OpengwasClient {
         let db_clone = Arc::clone(db);
         tokio::task::spawn_blocking(move || {
             let guard = db_clone.lock().unwrap();
-            let sql =
-                format!("SELECT {SELECT_COLUMNS} FROM gwasinfo WHERE LOWER(\"{field}\") LIKE ?1 LIMIT ?2");
+            let sql = format!(
+                "SELECT {SELECT_COLUMNS} FROM gwasinfo WHERE LOWER(\"{field}\") LIKE ?1 LIMIT ?2"
+            );
             let mut stmt = guard.prepare(&sql)?;
             let rows = stmt.query_map(rusqlite::params![pattern, limit], row_to_gwasinfo)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -771,7 +772,7 @@ pub struct EditUploadOptions {
 mod tests {
     use super::*;
     fn get_client() -> OpengwasClient {
-        OpengwasClient::new::<String>(None)
+        OpengwasClient::new(None)
     }
 
     #[tokio::test]
@@ -784,5 +785,21 @@ mod tests {
             .unwrap();
 
         dbg!(result);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_gwasinfo_files_response() {
+        let client = get_client();
+
+        let result = client
+            .gwasinfo_files(&GwasInfoFilesRequest {
+                id: vec!["ieu-a-2".to_string()],
+                commercial_approval_received: None,
+            })
+            .await
+            .unwrap();
+
+        dbg!(&result);
     }
 }

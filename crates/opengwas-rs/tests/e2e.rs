@@ -10,7 +10,7 @@ fn require_client() -> Option<OpengwasClient> {
         eprintln!("OPENGWAS_TOKEN not set — skipping authenticated test");
         return None;
     }
-    Some(OpengwasClient::new::<&str>(None))
+    Some(OpengwasClient::new(None))
 }
 
 // ---------------------------------------------------------------------------
