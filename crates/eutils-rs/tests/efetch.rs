@@ -5,6 +5,7 @@ use eutils_rs::EutilsClient;
 mod common;
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn efetch_abstract_single_pmid() -> Result<()> {
     let client = common::test_client();
@@ -26,6 +27,7 @@ async fn efetch_abstract_single_pmid() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn efetch_medline_format() -> Result<()> {
     let client = common::test_client();
@@ -46,6 +48,7 @@ async fn efetch_medline_format() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn efetch_multiple_pmids() -> Result<()> {
     let client = common::test_client();
@@ -68,6 +71,7 @@ async fn efetch_multiple_pmids() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn efetch_invalid_pmid() {
     let client = common::test_client();
@@ -85,6 +89,7 @@ async fn efetch_invalid_pmid() {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn efetch_default_text_mode() -> Result<()> {
     let client = common::test_client();

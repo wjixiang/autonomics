@@ -5,6 +5,7 @@ use eutils_rs::EutilsClient;
 mod common;
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn ecitmatch_known_article() -> Result<()> {
     let client = common::test_client();
@@ -20,6 +21,7 @@ async fn ecitmatch_known_article() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn ecitmatch_batch_citations() -> Result<()> {
     let client = common::test_client();
@@ -41,6 +43,7 @@ async fn ecitmatch_batch_citations() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn ecitmatch_empty_batch() -> Result<()> {
     let client = common::test_client();

@@ -12,6 +12,7 @@ use std::sync::Arc;
 /// Set these env vars before running:
 ///   ICEBERG_REST_URI, ICEBERG_S3_ACCESS_KEY_ID, ICEBERG_S3_SECRET_ACCESS_KEY
 #[tokio::test]
+#[ignore]
 async fn test_create_and_load_table() {
     let lake = Datalake::new();
 

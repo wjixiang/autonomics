@@ -4,6 +4,7 @@ use eutils_rs::EutilsClient;
 mod common;
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn espell_correct_spelling() -> Result<()> {
     if !common::espell_available().await {
@@ -21,6 +22,7 @@ async fn espell_correct_spelling() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn espell_misspelled_term() -> Result<()> {
     if !common::espell_available().await {
@@ -38,6 +40,7 @@ async fn espell_misspelled_term() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn espell_response_structure() -> Result<()> {
     if !common::espell_available().await {

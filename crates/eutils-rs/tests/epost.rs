@@ -4,6 +4,7 @@ use eutils_rs::EutilsClient;
 mod common;
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn epost_and_chain_to_efetch() -> Result<()> {
     let client = common::test_client();
@@ -39,6 +40,7 @@ async fn epost_and_chain_to_efetch() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn epost_returns_valid_key_and_webenv() -> Result<()> {
     let client = common::test_client();

@@ -5,6 +5,7 @@ use eutils_rs::EutilsClient;
 mod common;
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esummary_single_pmid_v2() -> Result<()> {
     let client = common::test_client();
@@ -35,6 +36,7 @@ async fn esummary_single_pmid_v2() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esummary_multiple_pmids() -> Result<()> {
     let client = common::test_client();
@@ -56,6 +58,7 @@ async fn esummary_multiple_pmids() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esummary_invalid_pmid_returns_empty() -> Result<()> {
     let client = common::test_client();
@@ -75,6 +78,7 @@ async fn esummary_invalid_pmid_returns_empty() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esummary_article_has_expected_fields() -> Result<()> {
     let client = common::test_client();

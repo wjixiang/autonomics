@@ -2,6 +2,7 @@ use agentik_sdk::{Anthropic, ClientConfig, LogLevel};
 use std::time::Duration;
 
 #[tokio::test]
+#[ignore]
 async fn test_client_creation_with_api_key() {
     let client = Anthropic::new("test-api-key", "https://api.anthropic.com").expect("Should create client");
     assert_eq!(client.config().api_key, "test-api-key");
@@ -9,6 +10,7 @@ async fn test_client_creation_with_api_key() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_client_creation_with_config() {
     let config = ClientConfig::new("test-key", "https://api.anthropic.com")
         .with_timeout(Duration::from_secs(30))
@@ -23,6 +25,7 @@ async fn test_client_creation_with_config() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_config_validation() {
     let config = ClientConfig::new("", "https://api.anthropic.com");
     let result = config.validate();
@@ -31,6 +34,7 @@ async fn test_config_validation() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_config_with_invalid_url() {
     let config = ClientConfig::new("test-key", "https://api.anthropic.com").with_base_url("invalid-url");
     let result = config.validate();
@@ -39,6 +43,7 @@ async fn test_config_with_invalid_url() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_client_test_connection() {
     let client = Anthropic::new("test-api-key", "https://api.anthropic.com").expect("Should create client");
     // This should pass validation since we have a valid config

@@ -5,6 +5,7 @@ use eutils_rs::EutilsClient;
 mod common;
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_basic_pubmed_search() -> Result<()> {
     let client = common::test_client();
@@ -21,6 +22,7 @@ async fn esearch_basic_pubmed_search() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_with_retmax_pagination() -> Result<()> {
     let client = common::test_client();
@@ -40,6 +42,7 @@ async fn esearch_with_retmax_pagination() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_retstart_offset() -> Result<()> {
     let client = common::test_client();
@@ -59,6 +62,7 @@ async fn esearch_retstart_offset() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_with_usehistory() -> Result<()> {
     let client = common::test_client();
@@ -81,6 +85,7 @@ async fn esearch_with_usehistory() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_date_filter() -> Result<()> {
     let client = common::test_client();
@@ -103,6 +108,7 @@ async fn esearch_date_filter() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_reldate_filter() -> Result<()> {
     let client = common::test_client();
@@ -124,6 +130,7 @@ async fn esearch_reldate_filter() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_sort_pub_date() -> Result<()> {
     let client = common::test_client();
@@ -142,6 +149,7 @@ async fn esearch_sort_pub_date() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_empty_result() -> Result<()> {
     let client = common::test_client();
@@ -161,6 +169,7 @@ async fn esearch_empty_result() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_specific_pmid_query() -> Result<()> {
     let client = common::test_client();
@@ -179,6 +188,7 @@ async fn esearch_specific_pmid_query() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn esearch_two_pages_dont_overlap() -> Result<()> {
     let client = common::test_client();

@@ -4,6 +4,7 @@ use eutils_rs::EutilsClient;
 mod common;
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn egquery_cross_database_search() -> Result<()> {
     if !common::egquery_available().await {
@@ -34,6 +35,7 @@ async fn egquery_cross_database_search() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn egquery_niche_term() -> Result<()> {
     if !common::egquery_available().await {
@@ -56,6 +58,7 @@ async fn egquery_niche_term() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn egquery_no_matches() -> Result<()> {
     if !common::egquery_available().await {

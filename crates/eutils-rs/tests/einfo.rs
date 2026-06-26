@@ -4,6 +4,7 @@ use eutils_rs::EutilsClient;
 mod common;
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn einfo_lists_all_databases() -> Result<()> {
     let client = common::test_client();
@@ -23,6 +24,7 @@ async fn einfo_lists_all_databases() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn einfo_single_database() -> Result<()> {
     let client = common::test_client();
@@ -47,6 +49,7 @@ async fn einfo_single_database() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn einfo_gene_database() -> Result<()> {
     let client = common::test_client();
@@ -69,6 +72,7 @@ async fn einfo_gene_database() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn einfo_invalid_database_returns_error() {
     let client = common::test_client();

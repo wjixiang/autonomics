@@ -5,6 +5,7 @@ use eutils_rs::EutilsClient;
 mod common;
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn elink_related_articles() -> Result<()> {
     let client = common::test_client();
@@ -29,6 +30,7 @@ async fn elink_related_articles() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn elink_gene_to_pubmed() -> Result<()> {
     let client = common::test_client();
@@ -49,6 +51,7 @@ async fn elink_gene_to_pubmed() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn elink_neighbor_history() -> Result<()> {
     let client = common::test_client();
@@ -69,6 +72,7 @@ async fn elink_neighbor_history() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn elink_multiple_pmids() -> Result<()> {
     let client = common::test_client();

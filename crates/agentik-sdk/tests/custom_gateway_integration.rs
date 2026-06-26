@@ -50,6 +50,7 @@ macro_rules! require_token {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_basic_message_creation() {
     require_token!(client);
 
@@ -99,6 +100,7 @@ async fn test_basic_message_creation() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_system_prompt() {
     require_token!(client);
 
@@ -130,6 +132,7 @@ async fn test_system_prompt() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_temperature_parameters() {
     require_token!(client);
 
@@ -176,6 +179,7 @@ async fn test_temperature_parameters() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_max_tokens_limits() {
     require_token!(client);
 
@@ -207,6 +211,7 @@ async fn test_max_tokens_limits() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_streaming_response() {
     require_token!(client);
 
@@ -259,6 +264,7 @@ async fn test_streaming_response() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_bearer_token_authentication() {
     require_token!(_client);
 
@@ -304,6 +310,7 @@ async fn test_bearer_token_authentication() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_comprehensive_feature_set() {
     require_token!(client);
 

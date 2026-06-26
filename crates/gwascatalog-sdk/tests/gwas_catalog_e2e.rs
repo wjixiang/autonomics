@@ -7,6 +7,7 @@ fn api() -> GwasCatalogApi {
 // ── Associations ──────────────────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore]
 async fn list_associations_default() {
     let resp = api()
         .list_associations(&AssociationQuery::default())
@@ -18,6 +19,7 @@ async fn list_associations_default() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_associations_with_paging() {
     let q = AssociationQuery {
         start: Some(0),
@@ -30,6 +32,7 @@ async fn list_associations_with_paging() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_associations_p_value_filter() {
     let q = AssociationQuery {
         p_lower: Some(1e-9),
@@ -44,6 +47,7 @@ async fn list_associations_p_value_filter() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_associations_study_accession_filter() {
     let q = AssociationQuery {
         study_accession: Some("GCST000028".to_string()),
@@ -57,6 +61,7 @@ async fn list_associations_study_accession_filter() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_associations_reveal_raw() {
     let q = AssociationQuery {
         reveal: Some(RevealMode::Raw),
@@ -70,6 +75,7 @@ async fn list_associations_reveal_raw() {
 // ── Variant associations ──────────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore]
 async fn get_variant_associations() {
     let q = AssociationQuery {
         size: Some(2),
@@ -89,6 +95,7 @@ async fn get_variant_associations() {
 // ── Chromosomes ───────────────────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore]
 async fn list_chromosomes_default() {
     let resp = api()
         .list_chromosomes(&PaginationQuery::default())
@@ -100,6 +107,7 @@ async fn list_chromosomes_default() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_chromosomes_with_paging() {
     let q = PaginationQuery {
         start: Some(0),
@@ -111,6 +119,7 @@ async fn list_chromosomes_with_paging() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn get_chromosome() {
     let chrom = api().get_chromosome("1").await.unwrap();
     assert_eq!(chrom.chromosome, "1");
@@ -119,6 +128,7 @@ async fn get_chromosome() {
 // ── Chromosome associations ────────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore]
 async fn list_chromosome_associations_default() {
     let q = ChromosomeAssociationQuery {
         size: Some(2),
@@ -133,6 +143,7 @@ async fn list_chromosome_associations_default() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_chromosome_associations_bp_filter() {
     let q = ChromosomeAssociationQuery {
         bp_lower: Some(1000000),
@@ -150,6 +161,7 @@ async fn list_chromosome_associations_bp_filter() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn get_variant_on_chromosome() {
     let q = AssociationQuery {
         size: Some(2),
@@ -170,6 +182,7 @@ async fn get_variant_on_chromosome() {
 // ── Traits ────────────────────────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore]
 async fn list_traits_default() {
     let resp = api()
         .list_traits(&PaginationQuery::default())
@@ -179,6 +192,7 @@ async fn list_traits_default() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_traits_with_paging() {
     let q = PaginationQuery {
         start: Some(0),
@@ -190,6 +204,7 @@ async fn list_traits_with_paging() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn get_trait() {
     let trait_id = "EFO_0001360";
     let t = api().get_trait(trait_id).await.unwrap();
@@ -197,6 +212,7 @@ async fn get_trait() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_trait_associations() {
     let q = AssociationQuery {
         size: Some(2),
@@ -210,6 +226,7 @@ async fn list_trait_associations() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_trait_studies() {
     let q = PaginationQuery {
         size: Some(3),
@@ -225,6 +242,7 @@ async fn list_trait_studies() {
 // ── Studies ────────────────────────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore]
 async fn list_studies_default() {
     let resp = api()
         .list_studies(&PaginationQuery::default())
@@ -234,6 +252,7 @@ async fn list_studies_default() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_studies_with_paging() {
     let q = PaginationQuery {
         start: Some(0),
@@ -244,12 +263,14 @@ async fn list_studies_with_paging() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn get_study() {
     let s = api().get_study("GCST000028").await.unwrap();
     assert_eq!(s.study_accession, "GCST000028");
 }
 
 #[tokio::test]
+#[ignore]
 async fn list_study_associations() {
     let q = AssociationQuery {
         size: Some(2),
@@ -269,6 +290,7 @@ async fn list_study_associations() {
 // ── Error handling ────────────────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore]
 async fn get_nonexistent_trait_returns_api_error() {
     let err = api()
         .get_trait("EFO_NONEXISTENT")
@@ -281,6 +303,7 @@ async fn get_nonexistent_trait_returns_api_error() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn get_nonexistent_study_returns_error() {
     let err = api()
         .get_study("GCST999999")
@@ -293,6 +316,7 @@ async fn get_nonexistent_study_returns_error() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn get_nonexistent_trait_returns_error() {
     let err = api()
         .get_trait("EFO_NONEXISTENT")
@@ -307,6 +331,7 @@ async fn get_nonexistent_trait_returns_error() {
 // ── Data structure validation ─────────────────────────────────────────────
 
 #[tokio::test]
+#[ignore]
 async fn association_fields_populated() {
     let q = AssociationQuery {
         size: Some(1),

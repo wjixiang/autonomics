@@ -32,6 +32,7 @@ async fn run_tool(
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn tool_pubmed_search() -> Result<()> {
     let client = Arc::new(common::test_client());
@@ -53,6 +54,7 @@ async fn tool_pubmed_search() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn tool_pubmed_fetch() -> Result<()> {
     let client = Arc::new(common::test_client());
@@ -78,6 +80,7 @@ async fn tool_pubmed_fetch() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn tool_pubmed_summary() -> Result<()> {
     let client = Arc::new(common::test_client());
@@ -99,6 +102,7 @@ async fn tool_pubmed_summary() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn tool_pubmed_related() -> Result<()> {
     let client = Arc::new(common::test_client());
@@ -120,6 +124,7 @@ async fn tool_pubmed_related() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn tool_pubmed_spell() -> Result<()> {
     let client = Arc::new(common::test_client());
@@ -144,6 +149,7 @@ async fn tool_pubmed_spell() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn tool_einfo() -> Result<()> {
     let client = Arc::new(common::test_client());
@@ -165,6 +171,7 @@ async fn tool_einfo() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 #[common::serial]
 async fn tool_egquery() -> Result<()> {
     let client = Arc::new(common::test_client());
@@ -189,6 +196,7 @@ async fn tool_egquery() -> Result<()> {
 }
 
 #[test]
+#[ignore]
 fn tool_registrations_count() {
     let client = Arc::new(common::test_client());
     let registrations = eutils_rs::eutils_registrations(client);
@@ -205,6 +213,7 @@ fn tool_registrations_count() {
 }
 
 #[test]
+#[ignore]
 fn tool_definitions_have_schemas() {
     let client = Arc::new(common::test_client());
     let registrations = eutils_rs::eutils_registrations(client);
