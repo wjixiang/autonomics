@@ -184,6 +184,7 @@ impl AgentBuilder {
             let mut toolset = Toolset::default();
             toolset.register_all(crate::tools::lifecycle_registrations())?;
             toolset.register_all(self.tools)?;
+            toolset.register_all(crate::tools::task_registrations(toolset.tasks_handle()))?;
             toolset
         };
 

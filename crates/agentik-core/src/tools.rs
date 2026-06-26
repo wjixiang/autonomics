@@ -33,4 +33,6 @@ pub use agentik_sdk::types::{
 pub use builtins::{
     AbortTaskInput, AbortTaskTool,
     lifecycle_registrations,
+    TaskResultViewerTool, ViewTaskResultsInput,
+    task_registrations,
 };

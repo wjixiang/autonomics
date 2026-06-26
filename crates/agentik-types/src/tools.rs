@@ -119,11 +119,23 @@ pub enum ToolEffect {
 }
 
 impl ToolResult {
-    pub fn from_backend_task(tool_use_id: &str) -> Self {
+    pub fn from_pending_task(tool_use_id: &str) -> Self {
         Self {
             tool_use_id: tool_use_id.to_string(),
             content: ToolResultContent::Text(format!(
                 "Task '{}' is running in backend",
+                tool_use_id
+            )),
+            is_error: None,
+            effects: vec![],
+        }
+    }
+
+    pub fn task_finish_notification(tool_use_id: &str) -> Self {
+        Self {
+            tool_use_id: tool_use_id.to_string(),
+            content: ToolResultContent::Text(format!(
+                "Task '{}' has finished, use tool to view output",
                 tool_use_id
             )),
             is_error: None,

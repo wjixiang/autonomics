@@ -9,7 +9,7 @@ use crate::tools::error::ToolError;
 pub type TaskId = String;
 
 #[derive(Clone)]
-pub enum RunningStatus {
+pub enum RunMode {
     Fg,
     Bg,
 }
@@ -17,27 +17,44 @@ pub enum RunningStatus {
 /// Lifecycle of a spawned tool invocation.
 #[derive(Clone)]
 pub enum TaskStatus {
-    Running(RunningStatus),
+    Running,
     Done(ToolResult),
     Failed(ToolError),
 }
 
 /// What `wait()` returns: result available or still running.
-pub enum WaitResult {
-    Done(ToolResult),
+pub enum WaitResultKind {
+    Done {
+        result: ToolResult,
+        run_mode: RunMode,
+    },
     StillRunning(TaskId),
     Failed(ToolResult),
 }
 
-// impl From<WaitResult> for ToolResult {
-//     fn from(value: WaitResult) -> ToolResult {
-//         match value {
-//             WaitResult::Done(tool_result) => tool_result,
-//             WaitResult::StillRunning(id) => ToolResult::from_backend_task(&id),
-//             WaitResult::Failed(tool_result) => tool_result,
-//         }
-//     }
-// }
+pub struct WaitResult {
+    pub inner: WaitResultKind,
+    read_tx: watch::Sender<bool>,
+}
+
+impl From<WaitResult> for ToolResult {
+    fn from(value: WaitResult) -> Self {
+        match value.inner {
+            WaitResultKind::StillRunning(id) => ToolResult::from_pending_task(&id),
+            WaitResultKind::Failed(tool_result) => {
+                value.read_tx.send(true).ok();
+                tool_result
+            }
+            WaitResultKind::Done { result, run_mode } => match run_mode {
+                RunMode::Fg => {
+                    value.read_tx.send(true).ok();
+                    result
+                }
+                RunMode::Bg => ToolResult::task_finish_notification(result.tool_use_id.as_str()),
+            },
+        }
+    }
+}
 
 /// A single tool invocation tracked by [`Toolset`](super::toolset::Toolset).
 ///
@@ -48,10 +65,11 @@ pub enum WaitResult {
 pub struct TaskEntry {
     id: TaskId,
     status: watch::Receiver<TaskStatus>,
-    status_tx: watch::Sender<TaskStatus>,
     cancel_token: CancellationToken,
     block_secs: u64,
-    read: bool,
+    read: watch::Receiver<bool>,
+    read_tx: watch::Sender<bool>,
+    run_mode: RunMode,
 }
 
 impl TaskEntry {
@@ -64,7 +82,8 @@ impl TaskEntry {
         cancel_token: CancellationToken,
         block_secs: u64,
     ) -> Self {
-        let (status_tx, status) = watch::channel(TaskStatus::Running(RunningStatus::Fg));
+        let (status_tx, status) = watch::channel(TaskStatus::Running);
+        let (read_tx, read) = watch::channel(false);
 
         let tx = status_tx.clone();
         tokio::spawn(async move {
@@ -87,10 +106,11 @@ impl TaskEntry {
         Self {
             id,
             status,
-            status_tx,
             cancel_token,
             block_secs,
-            read: false,
+            read,
+            read_tx,
+            run_mode: RunMode::Fg,
         }
     }
 
@@ -127,22 +147,26 @@ impl TaskEntry {
         tokio::select! {
             _ = self.status.changed() => {
                 match self.status.borrow().clone() {
-                    TaskStatus::Done(result) => WaitResult::Done(result),
-                    TaskStatus::Failed(err) => WaitResult::Failed(ToolResult::error(err.to_string()).with_id(&self.id)),
-                    TaskStatus::Running(st) => {
-                        match st {
-                            RunningStatus::Fg => unreachable!(), // Never will change into Fg status
-                            RunningStatus::Bg =>
-                       WaitResult::StillRunning(self.id.clone()),
-                        }
-                    },
+                    TaskStatus::Done(result) => WaitResult { inner: WaitResultKind::Done { result, run_mode: RunMode::Fg }, read_tx: self.read_tx.clone() },
+                    TaskStatus::Failed(err) => WaitResult { inner: WaitResultKind::Failed(ToolResult::error(err.to_string()).with_id(&self.id)), read_tx: self.read_tx.clone() },
+                    TaskStatus::Running =>
+                       WaitResult { inner: WaitResultKind::StillRunning(self.id.clone()), read_tx: self.read_tx.clone() },
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(self.block_secs)) => {
                 // Sync phase expired, task continues async
-                self.status_tx.send(TaskStatus::Running(RunningStatus::Bg)).ok();
-                WaitResult::StillRunning(self.id.clone())
+                self.run_mode = RunMode::Bg;
+                WaitResult { inner: WaitResultKind::StillRunning(self.id.clone()), read_tx: self.read_tx.clone() }
             }
         }
+    }
+
+    pub fn is_read(&self) -> bool {
+        *self.read.borrow()
+    }
+
+    /// Mark this task's result as consumed.
+    pub fn mark_read(&self) {
+        self.read_tx.send(true).ok();
     }
 }

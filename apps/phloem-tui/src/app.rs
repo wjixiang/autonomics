@@ -26,6 +26,8 @@ pub struct App {
     conn: Connection,
     /// True when state has changed and a re-render is needed.
     dirty: bool,
+    /// Set to break the main event loop so `ratatui::run()` can call `restore()`.
+    should_quit: bool,
 }
 
 impl App {
@@ -51,6 +53,7 @@ impl App {
             agent_runtime,
             conn,
             dirty: true, // render the initial frame
+            should_quit: false,
         }
     }
 
@@ -169,6 +172,9 @@ impl App {
 
     fn app(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
         loop {
+            if self.should_quit {
+                break Ok(());
+            }
             // ── Event handling phase ──
             // Drain all queued input events before rendering.
             if event::poll(POLL_TIMEOUT)? {
@@ -273,13 +279,13 @@ impl App {
     }
 
     fn handle_key(&mut self, key: &KeyEvent) {
-        // Ctrl+C: always quit
+        // Ctrl+C: cancel running agent first, then quit on second press
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             if !matches!(self.state.agent_tab_state.status, AgentStatus::Idle) {
                 self.agent_runtime.cancel();
-            } else {
-                std::process::exit(130);
+                return;
             }
+            self.should_quit = true;
             return;
         }
 

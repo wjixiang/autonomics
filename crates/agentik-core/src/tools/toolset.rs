@@ -1,11 +1,11 @@
 use futures::future::join_all;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::tools::task_runtime::{TaskStatus, WaitResult};
+use crate::tools::task_runtime::TaskStatus;
 
 use super::DynToolFunction;
 use super::error::ToolError;
@@ -90,6 +90,14 @@ impl Toolset {
         self.tools.contains_key(name)
     }
 
+    /// Return a clone of the shared task-list handle.
+    ///
+    /// Used by builtin tools (e.g. `view_task_results`) that need to
+    /// inspect background tasks without going through the agent loop.
+    pub fn tasks_handle(&self) -> Arc<Mutex<Vec<TaskEntry>>> {
+        self.tasks.clone()
+    }
+
     pub async fn execute(
         &self,
         toolcalls: &[ToolUse],
@@ -167,23 +175,13 @@ impl Toolset {
 
         let wait_results = join_all(tasks.iter_mut().map(|t| t.wait())).await;
 
-        let mut should_retain_task_ids: HashSet<String> = HashSet::new();
         let mut results: Vec<ToolResult> = wait_results
-            .iter()
+            .into_iter()
             .map(|r| {
-                let (task_id, mut result) = match r {
-                    WaitResult::Done(tool_result) => {
-                        (tool_result.tool_use_id.clone(), tool_result.clone())
-                    }
-                    WaitResult::StillRunning(id) => {
-                        should_retain_task_ids.insert(id.clone());
-                        (id.clone(), ToolResult::from_backend_task(id))
-                    }
-                    WaitResult::Failed(tool_result) => {
-                        (tool_result.tool_use_id.clone(), tool_result.clone())
-                    }
-                };
-                result.effects = effects_map.remove(&task_id).unwrap_or_default();
+                let mut result: ToolResult = r.into();
+
+                // NOTE: replace effect symbol with tokio::watch
+                result.effects = effects_map.remove(&result.tool_use_id).unwrap_or_default();
                 result
             })
             .collect();
@@ -191,7 +189,7 @@ impl Toolset {
         results.extend(immediate_results);
 
         // Clear finished tasks
-        tasks.retain(|t| should_retain_task_ids.contains(t.id()));
+        tasks.retain(|t| !t.is_read());
 
         Ok(results)
     }
