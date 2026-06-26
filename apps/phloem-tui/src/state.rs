@@ -32,6 +32,21 @@ impl Default for MainTabState {
     }
 }
 
+// ── Tool task tracking ─────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolTaskStatus {
+    Running,
+    Done { ok: bool },
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolTaskInfo {
+    pub id: String,
+    pub name: String,
+    pub status: ToolTaskStatus,
+}
+
 // ── Chat data model ─────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -66,6 +81,7 @@ pub enum InputMode {
 /// Mutable state for the Agent tab.
 pub struct AgentTabState {
     pub messages: Vec<ChatLine>,
+    pub tool_tasks: Vec<ToolTaskInfo>,
     pub scroll_offset: usize,
     pub status: AgentStatus,
     pub input: InputArea,
@@ -90,6 +106,7 @@ impl Default for AgentTabState {
     fn default() -> Self {
         Self {
             messages: Vec::new(),
+            tool_tasks: Vec::new(),
             scroll_offset: 0,
             status: AgentStatus::Idle,
             input: InputArea::new(),
@@ -221,17 +238,26 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
             state.scroll_to_bottom();
         }
         AgentEvent::ToolCallBackground { id, name } => {
-            state.messages.push(ChatLine::ToolBackground { id, name });
+            state.messages.push(ChatLine::ToolBackground { id: id.clone(), name: name.clone() });
+            state.tool_tasks.push(ToolTaskInfo {
+                id,
+                name,
+                status: ToolTaskStatus::Running,
+            });
             state.messages_version += 1;
             state.scroll_to_bottom();
         }
-        AgentEvent::ToolBackgroundComplete { id: _id, ok, content } => {
+        AgentEvent::ToolBackgroundComplete { id, ok, content } => {
             state.messages.push(ChatLine::ToolResult { ok, content });
+            if let Some(task) = state.tool_tasks.iter_mut().find(|t| t.id == id) {
+                task.status = ToolTaskStatus::Done { ok };
+            }
             state.messages_version += 1;
             state.scroll_to_bottom();
         }
         AgentEvent::Done => {
             state.status = AgentStatus::Idle;
+            state.tool_tasks.clear();
             state.messages.push(ChatLine::Separator);
             state.messages_version += 1;
             state.scroll_to_bottom();

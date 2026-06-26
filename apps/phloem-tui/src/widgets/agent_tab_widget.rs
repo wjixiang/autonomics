@@ -9,6 +9,7 @@ use crate::widgets::{
     chat_widget::{ChatWidget, ChatWidgetState},
     input_area::{InputWidget, InputWidgetState},
     status_bar::StatusBar,
+    tool_exec_widget::ToolExecWidget,
 };
 
 /// Composite widget that renders the entire Agent tab: status bar, chat area with
@@ -19,10 +20,18 @@ pub struct AgentTabWidget<'a> {
 
 impl Widget for AgentTabWidget<'_> {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
+        let task_count = self.state.tool_tasks.len() as u16;
+        let task_constraint = if task_count > 0 {
+            Constraint::Length(task_count + 2) // +2 for border
+        } else {
+            Constraint::Length(0)
+        };
+
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // StatusBar
+                task_constraint,       // ToolExecWidget (0 when empty)
                 Constraint::Min(5),    // Chat
                 Constraint::Length(3), // Input
             ])
@@ -38,8 +47,16 @@ impl Widget for AgentTabWidget<'_> {
         };
         status_bar.render(layout[0], buf);
 
+        // ── Tool execution panel ──
+        if task_count > 0 {
+            let tool_widget = ToolExecWidget {
+                tasks: &ts.tool_tasks,
+            };
+            tool_widget.render(layout[1], buf);
+        }
+
         // ── Chat area ──
-        let chat_area = layout[1];
+        let chat_area = layout[2];
         let chat_block = Block::default().padding(Padding::new(2, 2, 2, 2));
         let chat_inner_area = chat_block.inner(chat_area);
 
@@ -89,6 +106,6 @@ impl Widget for AgentTabWidget<'_> {
         let mut input_state = InputWidgetState {
             input: &mut ts.input,
         };
-        input_widget.render(layout[2], buf, &mut input_state);
+        input_widget.render(layout[3], buf, &mut input_state);
     }
 }
