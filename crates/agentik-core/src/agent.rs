@@ -192,6 +192,8 @@ impl Agent {
         self.cancel_token = token;
     }
 
+    pub async fn run(&mut self) {}
+
     pub async fn start(&mut self) -> Result<(), AgentError> {
         self.lifecycle.set_running();
         self.send_event(agentik_sdk::types::AgentEvent::LlmResponse(
