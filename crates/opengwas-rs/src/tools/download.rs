@@ -21,6 +21,25 @@ pub struct DownloadFilesInput {
     pub id: Vec<String>,
 }
 
+/// Flatten the nested JSON response into `(study_id, filename, url)` triples.
+fn parse_file_entries(resp: &serde_json::Value) -> Vec<(&str, &str, &str)> {
+    resp.as_object()
+        .into_iter()
+        .flatten()
+        .flat_map(|(study_id, files)| {
+            files
+                .as_object()
+                .into_iter()
+                .flatten()
+                .flat_map(move |(filename, url_val)| {
+                    url_val
+                        .as_str()
+                        .map(|url| (study_id.as_str(), filename.as_str(), url))
+                })
+        })
+        .collect()
+}
+
 pub struct DownloadFilesTool {
     pub(crate) client: Arc<OpengwasClient>,
     pub(crate) storage: Arc<OpendalFileStorage>,
@@ -30,7 +49,13 @@ pub struct DownloadFilesTool {
 impl ToolFunction for DownloadFilesTool {
     type Input = DownloadFilesInput;
 
-    fn timeout_seconds(&self) -> u64 { 300 }
+    fn sync_seconds(&self) -> u64 {
+        1
+    }
+
+    fn timeout_seconds(&self) -> u64 {
+        300
+    }
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
         // 1. Get download URLs from the API.
@@ -46,28 +71,19 @@ impl ToolFunction for DownloadFilesTool {
         // 2. Download each file into storage.
         let mut downloaded = Vec::new();
 
-        // The API response is typically a map: { "ieu-a-2": { "vcf.gz": "...", ... }, ... }
-        if let Some(map) = resp.as_object() {
-            for (study_id, files) in map {
-                if let Some(file_urls) = files.as_object() {
-                    for (filename, url_val) in file_urls {
-                        if let Some(url) = url_val.as_str() {
-                            let storage_path = format!("/{study_id}/{filename}");
-                            let size = self
-                                .client
-                                .download_file_to_storage(url, &self.storage, &storage_path)
-                                .await
-                                .map_err(json_err)?;
-                            downloaded.push(serde_json::json!({
-                                "study_id": study_id,
-                                "filename": filename,
-                                "path": storage_path,
-                                "size": size,
-                            }));
-                        }
-                    }
-                }
-            }
+        for (study_id, filename, url) in parse_file_entries(&resp) {
+            let storage_path = format!("/{study_id}/{filename}");
+            let size = self
+                .client
+                .download_file_to_storage(url, &self.storage, &storage_path)
+                .await
+                .map_err(json_err)?;
+            downloaded.push(serde_json::json!({
+                "study_id": study_id,
+                "filename": filename,
+                "path": storage_path,
+                "size": size,
+            }));
         }
 
         Ok(AgentToolResult::success_json(serde_json::json!({

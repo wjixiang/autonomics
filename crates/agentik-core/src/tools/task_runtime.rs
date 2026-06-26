@@ -1,32 +1,43 @@
 use agentik_sdk::ToolResult;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::tools::error::ToolError;
 
 pub type TaskId = String;
 
+#[derive(Clone)]
+pub enum RunningStatus {
+    Fg,
+    Bg,
+}
+
 /// Lifecycle of a spawned tool invocation.
 #[derive(Clone)]
 pub enum TaskStatus {
-    Idle,
-    SyncRunning,
-    AsyncRunning,
+    Running(RunningStatus),
     Done(ToolResult),
-    Cancelled,
     Failed(ToolError),
 }
 
 /// What `wait()` returns: result available or still running.
 pub enum WaitResult {
     Done(ToolResult),
-    StillRunning(String),
+    StillRunning(TaskId),
     Failed(ToolResult),
 }
+
+// impl From<WaitResult> for ToolResult {
+//     fn from(value: WaitResult) -> ToolResult {
+//         match value {
+//             WaitResult::Done(tool_result) => tool_result,
+//             WaitResult::StillRunning(id) => ToolResult::from_backend_task(&id),
+//             WaitResult::Failed(tool_result) => tool_result,
+//         }
+//     }
+// }
 
 /// A single tool invocation tracked by [`Toolset`](super::toolset::Toolset).
 ///
@@ -39,8 +50,8 @@ pub struct TaskEntry {
     status: watch::Receiver<TaskStatus>,
     status_tx: watch::Sender<TaskStatus>,
     cancel_token: CancellationToken,
-    start_at: Instant,
     block_secs: u64,
+    read: bool,
 }
 
 impl TaskEntry {
@@ -53,7 +64,7 @@ impl TaskEntry {
         cancel_token: CancellationToken,
         block_secs: u64,
     ) -> Self {
-        let (status_tx, status) = watch::channel(TaskStatus::SyncRunning);
+        let (status_tx, status) = watch::channel(TaskStatus::Running(RunningStatus::Fg));
 
         let tx = status_tx.clone();
         tokio::spawn(async move {
@@ -78,8 +89,8 @@ impl TaskEntry {
             status,
             status_tx,
             cancel_token,
-            start_at: Instant::now(),
             block_secs,
+            read: false,
         }
     }
 
@@ -96,7 +107,7 @@ impl TaskEntry {
         self.status.borrow().clone()
     }
 
-    /// Wait for the next status change (e.g. `AsyncRunning` → `Done`).
+    /// Wait for the next status change (e.g. `Running` → `Done`).
     pub async fn changed(&mut self) {
         self.status.changed().await.ok();
     }
@@ -118,12 +129,18 @@ impl TaskEntry {
                 match self.status.borrow().clone() {
                     TaskStatus::Done(result) => WaitResult::Done(result),
                     TaskStatus::Failed(err) => WaitResult::Failed(ToolResult::error(err.to_string()).with_id(&self.id)),
-                    _ => WaitResult::StillRunning(self.id.clone()),
+                    TaskStatus::Running(st) => {
+                        match st {
+                            RunningStatus::Fg => unreachable!(), // Never will change into Fg status
+                            RunningStatus::Bg =>
+                       WaitResult::StillRunning(self.id.clone()),
+                        }
+                    },
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(self.block_secs)) => {
                 // Sync phase expired, task continues async
-                self.status_tx.send(TaskStatus::AsyncRunning).ok();
+                self.status_tx.send(TaskStatus::Running(RunningStatus::Bg)).ok();
                 WaitResult::StillRunning(self.id.clone())
             }
         }
