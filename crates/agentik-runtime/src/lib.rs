@@ -48,7 +48,7 @@ impl AgentRuntime {
             let mut tools = aether_tools::iceberg_registrations(workspace);
             tools.extend(aether_tools::dataset_registrations(store));
 
-            let opengwas = Arc::new(OpengwasClient::new(None::<String>));
+            let opengwas = Arc::new(OpengwasClient::new(None));
             let file_storage = Arc::new(OpendalFileStorage::new());
             tools.extend(opengwas_rs::opengwas_registrations(opengwas, file_storage));
 

@@ -147,7 +147,7 @@ pub async fn get_or_create_agent(
 
     let workspace = Arc::new(AetherWorkspace::new().await?);
     let store = Arc::new(DatasetStore::from_workspace(&workspace));
-    let opengwas = Arc::new(OpengwasClient::new(None::<String>));
+    let opengwas = Arc::new(OpengwasClient::new(None));
     let file_storage = Arc::new(OpendalFileStorage::new());
     let mut tools = iceberg_registrations(workspace);
     tools.extend(dataset_registrations(store));
