@@ -48,6 +48,20 @@ impl Default for AgentConfig {
     }
 }
 
+/// Internal events that wake the agent's outer [`run`] loop.
+///
+/// External callers (e.g. the TUI runtime) send these through
+/// [`Agent::internal_event_tx`] to drive the agent without holding a
+/// reference to the `Agent` struct.
+pub enum InternalEvent {
+    /// User injected a new message (already in memory via `inject_message`).
+    MessageInject(Vec<ContentBlock>),
+    /// A background tool task completed; results already injected into memory.
+    BgTaskComplete,
+    /// External Runtime requests the agent to shut down.
+    Shutdown,
+}
+
 pub struct Agent {
     pub(crate) id: Uuid,
     pub(crate) model_pool: Arc<ModelPool>,
@@ -71,6 +85,9 @@ pub struct Agent {
     /// External cancellation signal, Cloned out to callers so they can
     /// interrupt the agent loop cooperatively.
     pub(crate) cancel_token: CancellationToken,
+    pub internal_event_tx: tokio::sync::mpsc::UnboundedSender<InternalEvent>,
+    /// Receiver consumed once by [`run()`]; `None` after that.
+    pub internal_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<InternalEvent>>,
 }
 
 impl Agent {
@@ -192,73 +209,101 @@ impl Agent {
         self.cancel_token = token;
     }
 
-    pub async fn run(&mut self) {}
+    /// Long-running event loop that drives the agent autonomously.
+    ///
+    /// Blocks until shut down.  Internal events wake the agent; the agent
+    /// runs one "session" (zero or more LLM round-trips) per wake-up and
+    /// returns to idle when the LLM produces no tool calls.
+    ///
+    /// Exit paths:
+    /// - [`InternalEvent::Shutdown` received
+    /// - Channel closed (all senders dropped)
+    /// - External cancellation token fired
+    pub async fn run(&mut self) {
+        let mut rx = self
+            .internal_event_rx
+            .take()
+            .expect("internal_event_rx already consumed by a prior run()");
+        let cancelled = self.cancel_token.clone();
 
-    pub async fn start(&mut self) -> Result<(), AgentError> {
+        loop {
+            tokio::select! {
+                Some(event) = rx.recv() => {
+                    match event {
+                        InternalEvent::Shutdown => break,
+                        InternalEvent::MessageInject(content) => {
+                            let _ = self.inject_message(content);
+                        }
+                        InternalEvent::BgTaskComplete => {
+                            // Poll completed task results and inject into memory.
+                            let completed = self.toolset.poll_completed_tasks().await;
+                            for (id, ok, content) in &completed {
+                                self.send_event(
+                                    agentik_sdk::types::AgentEvent::ToolBackgroundComplete {
+                                        id: id.clone(),
+                                        ok: *ok,
+                                        content: content.clone(),
+                                    },
+                                );
+                                let _ = self.memory.remember(Message::tool_result(
+                                    id.clone(),
+                                    content.clone(),
+                                    !ok,
+                                ));
+                            }
+                        }
+                    }
+                }
+                _ = cancelled.cancelled() => {
+                    self.lifecycle.set_aborted();
+                    self.snapshot().await;
+                    self.send_event(AgentEvent::Error("Agent cancelled".into()));
+                    return;
+                }
+            }
+
+            self.run_session(&mut rx, &cancelled).await;
+        }
+
+        self.lifecycle.set_aborted();
+        self.snapshot().await;
+    }
+
+    /// Run one "session": a sequence of LLM round-trips until the agent
+    /// goes idle, hits an error, or is cancelled.
+    ///
+    /// Returns when the agent is idle (lifecycle = IDLE) or aborted.
+    async fn run_session(
+        &mut self,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<InternalEvent>,
+        cancelled: &CancellationToken,
+    ) {
         self.lifecycle.set_running();
         self.send_event(agentik_sdk::types::AgentEvent::LlmResponse(
-            "🤖 Agent started".to_string(),
+            "🤖 Agent started".into(),
         ));
 
         let mut iteration = 0;
         let mut consecutive_retries = 0;
-        let mut retry_feedback: Option<String> = None;
-        let cancelled = self.cancel_token.clone();
 
-        'outer: while self.lifecycle.is_running()
-            && iteration < self.config.max_iterations
-            && !self.cancel_token.is_cancelled()
-        {
+        loop {
+            if iteration >= self.config.max_iterations
+                || !self.lifecycle.is_running()
+                || cancelled.is_cancelled()
+            {
+                break;
+            }
+
             iteration += 1;
-            // Cooperatively race the workflow against the external cancel signal.
-            // `select!` awaits both branches simultaneously; whichever resolves
-            // first wins. `cancelled.cancelled()` returns a Future that resolves
-            // when `cancel_token.cancel()` is called from outside (e.g. user presses Esc).
             tokio::select! {
-                result = self.agent_workflow(retry_feedback.take()) => {
+                result = self.agent_workflow(None) => {
                     match result {
                         Ok(()) => {
                             consecutive_retries = 0;
                             self.snapshot().await;
-
-                            // Poll background tasks: if any completed, inject
-                            // the real result into memory and loop back to
-                            // re-enter agent_workflow (which will call the LLM
-                            // again with the real result).
-                            while self.toolset.has_background_tasks().await {
-                                let completed = self
-                                    .toolset
-                                    .poll_completed_tasks()
-                                    .await;
-                                if !completed.is_empty() {
-                                    for (id, ok, content) in &completed {
-                                        self.send_event(
-                                            agentik_sdk::types::AgentEvent::ToolBackgroundComplete {
-                                                id: id.clone(),
-                                                ok: *ok,
-                                                content: content.clone(),
-                                            },
-                                        );
-                                        self.memory.remember(Message::tool_result(
-                                            id.clone(),
-                                            content.clone(),
-                                            !ok,
-                                        ))?;
-                                    }
-                                    // Re-enter agent_workflow with the new results.
-                                    continue 'outer;
-                                }
-                                // No completions yet — brief sleep, race against cancel.
-                                tokio::select! {
-                                    _ = tokio::time::sleep(Duration::from_millis(200)) => {}
-                                    _ = cancelled.cancelled() => {
-                                        self.lifecycle.set_aborted();
-                                        self.snapshot().await;
-                                        self.send_event(AgentEvent::Error("Task cancelled by user".into()));
-                                        return Err(AgentError::Cancelled);
-                                    }
-                                }
-                            }
+                            // No tool calls → agent is done for this session.
+                            self.send_event(agentik_sdk::types::AgentEvent::Done);
+                            break;
                         }
                         Err(AgentError::CompactionRebuild) => {
                             tracing::info!("compaction rebuild, re-entering workflow");
@@ -274,22 +319,34 @@ impl Agent {
                                 self.config.max_retries
                             );
                             let delay = Duration::from_secs(1) * (1 << (consecutive_retries - 1));
-                            tracing::warn!("exponential backoff: sleeping {delay:?} before retry");
                             tokio::time::sleep(delay).await;
-
-                            // Record error feedback
-                            self.memory.remember(Message::user(e.retry_message()))?;
-
+                            let _ = self.memory.remember(Message::user(e.retry_message()));
                             continue;
                         }
                         Err(e) => {
-                            tracing::error!("{}", e.to_string());
-                            self.send_event(agentik_sdk::types::AgentEvent::Error(format!("{}", e)));
+                            tracing::error!("workflow failed at iteration {iteration}: {e}");
+                            self.send_event(AgentEvent::Error(format!("{e}")));
                             self.snapshot().await;
-                            return Err(AgentError::WorkflowFailed {
-                                iteration,
-                                error: Box::new(e),
-                            });
+                            self.lifecycle.set_idle();
+                            break;
+                        }
+                    }
+                }
+                // ── Event arrived during workflow — process, then restart ──
+                Some(event) = rx.recv() => {
+                    match event {
+                        InternalEvent::Shutdown => {
+                            self.lifecycle.set_aborted();
+                            self.snapshot().await;
+                        }
+                        InternalEvent::MessageInject(content) => {
+                            let _ = self.inject_message(content);
+                        }
+                        InternalEvent::BgTaskComplete => {
+                            tracing::info!("background task completed during workflow");
+                            self.send_event(AgentEvent::LlmResponse(
+                                "🔄 Background task completed".into(),
+                            ));
                         }
                     }
                 }
@@ -297,26 +354,13 @@ impl Agent {
                     self.lifecycle.set_aborted();
                     self.snapshot().await;
                     self.send_event(AgentEvent::Error("Task cancelled by user".into()));
-                    return Err(AgentError::Cancelled);
                 }
             }
         }
 
-        if iteration >= self.config.max_iterations {
-            // Emit a terminal event so any observing client (SSE/UI) is never
-            // left hanging when the iteration budget is exhausted — every
-            // return path from `start()` must emit Done or Error.
-            self.send_event(agentik_sdk::types::AgentEvent::Error(format!(
-                "max iterations ({}) reached",
-                self.config.max_iterations
-            )));
-            self.snapshot().await;
-            return Err(AgentError::MaxIterations(self.config.max_iterations));
+        if !self.lifecycle.is_running() {
+            self.lifecycle.set_idle();
         }
-
-        self.snapshot().await;
-        self.send_event(agentik_sdk::types::AgentEvent::Done);
-        Ok(())
     }
 
     /// Core agent workflow
@@ -383,7 +427,14 @@ impl Agent {
             });
         }
 
-        let tool_results = self.toolset.execute(&toolcalls, allowed.as_deref()).await?;
+        let tool_results = self
+            .toolset
+            .execute(
+                &toolcalls,
+                allowed.as_deref(),
+                Some(self.internal_event_tx.clone()),
+            )
+            .await?;
         tracing::debug!(?tool_results, "tool execution results");
 
         for tr in &tool_results {
@@ -746,7 +797,7 @@ mod tests {
         let (mut agent, mut rx) = build_test_agent(mock).await;
 
         tokio::spawn(async move {
-            let _ = agent.start().await;
+            let _ = agent.run().await;
         });
 
         let _events = collect_events(&mut rx).await;

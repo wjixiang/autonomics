@@ -102,6 +102,7 @@ impl Toolset {
         &self,
         toolcalls: &[ToolUse],
         allowed_tools: Option<&[String]>,
+        notify_tx: Option<super::task_runtime::BgTaskNotifyTx>,
     ) -> Result<Vec<ToolResult>, ToolError> {
         let mut effects_map: HashMap<String, Vec<ToolEffect>> = HashMap::new();
         let mut immediate_results: Vec<ToolResult> = Vec::new();
@@ -162,11 +163,12 @@ impl Toolset {
                 }
             });
 
-            tasks.push(TaskEntry::new(
+            tasks.push(TaskEntry::with_notify(
                 tc.id.clone(),
                 task_handle,
                 cancel_token,
                 sync_secs,
+                notify_tx.clone(),
             ));
         }
 
@@ -198,6 +200,7 @@ impl Toolset {
         self.tools.values().map(|r| r.definition.clone()).collect()
     }
 
+    #[deprecated]
     /// Poll for completed background tasks. Returns `(tool_use_id, ok, content)`
     /// for each finished task and removes them from the internal task list.
     /// Failed tasks are treated as error results and also removed.
@@ -325,7 +328,7 @@ mod tests {
             input: json!({ "reason": "test" }),
         };
 
-        let results = toolset.execute(&[tool_call], None).await.unwrap();
+        let results = toolset.execute(&[tool_call], None, None).await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool_use_id, "tc1");
         assert!(results[0].effects.is_empty());
@@ -348,7 +351,7 @@ mod tests {
             input: json!({ "reason": "task aborted" }),
         };
 
-        let results = toolset.execute(&[tool_call], None).await.unwrap();
+        let results = toolset.execute(&[tool_call], None, None).await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].effects, vec![ToolEffect::Abort]);
     }

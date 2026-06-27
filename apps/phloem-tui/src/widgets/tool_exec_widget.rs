@@ -35,10 +35,7 @@ impl Widget for ToolExecWidget<'_> {
             };
 
             let line = Line::from(vec![
-                ratatui::text::Span::styled(
-                    format!(" {icon} "),
-                    Style::default().fg(color),
-                ),
+                ratatui::text::Span::styled(format!(" {icon} "), Style::default().fg(color)),
                 ratatui::text::Span::styled(
                     task.name.clone(),
                     Style::default()
@@ -46,7 +43,10 @@ impl Widget for ToolExecWidget<'_> {
                         .add_modifier(Modifier::BOLD),
                 ),
             ]);
-            line.render(ratatui::layout::Rect::new(inner.left(), row, inner.width, 1), buf);
+            line.render(
+                ratatui::layout::Rect::new(inner.left(), row, inner.width, 1),
+                buf,
+            );
         }
     }
 }

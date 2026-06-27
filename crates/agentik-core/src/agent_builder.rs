@@ -207,6 +207,11 @@ impl AgentBuilder {
         // CancellationToken
         let cancel_token = self.cancel_token.unwrap_or_else(CancellationToken::new);
 
+        // Internal event channel — tx is handed to the external runtime,
+        // rx is consumed once by Agent::run().
+        let (internal_event_tx, internal_event_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+
         Ok(Agent {
             id: self.id.unwrap_or_else(Uuid::new_v4),
             model_pool,
@@ -223,6 +228,8 @@ impl AgentBuilder {
             event_tx: self.event_tx,
             current_model_name: None,
             cancel_token,
+            internal_event_tx,
+            internal_event_rx: Some(internal_event_rx),
         })
     }
 }
