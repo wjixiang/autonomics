@@ -51,7 +51,7 @@ impl Widget for StatusBar<'_> {
     }
 }
 
-fn format_tokens(n: u64) -> String {
+pub(crate) fn format_tokens(n: u64) -> String {
     if n < 1_000 {
         format!("{}", n)
     } else if n < 1_000_000 {

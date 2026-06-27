@@ -87,7 +87,10 @@ pub fn task_registrations(tasks: Arc<RwLock<Vec<TaskEntry>>>) -> Vec<ToolRegistr
                   running ones with their accumulated output. Use this to check \
                   progress of long-running tools."
 )]
-pub struct ViewTaskStatusInput {}
+pub struct ViewTaskStatusInput {
+    #[desc = "ID of target background task"]
+    task_id: String,
+}
 
 pub struct TaskStatusViewerTool {
     tasks: Arc<RwLock<Vec<TaskEntry>>>,
@@ -99,6 +102,16 @@ impl TaskStatusViewerTool {
     }
 }
 
+impl From<TaskStatus> for &'static str {
+    fn from(status: TaskStatus) -> &'static str {
+        match status {
+            TaskStatus::Running => "running",
+            TaskStatus::Done(_) => "done",
+            TaskStatus::Failed(_) => "failed",
+        }
+    }
+}
+
 #[async_trait]
 impl ToolFunction for TaskStatusViewerTool {
     type Input = ViewTaskStatusInput;
@@ -107,27 +120,24 @@ impl ToolFunction for TaskStatusViewerTool {
         30
     }
 
-    async fn run(&self, _input: Self::Input) -> Result<AgentToolResult, ToolError> {
+    async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
         let tasks = self.tasks.read().await;
-        let mut results = Vec::new();
+        let target_task = tasks.iter().find(|t| t.id() == input.task_id);
 
-        for entry in tasks.iter() {
-            let status_str = match entry.status() {
-                TaskStatus::Running => "running",
-                TaskStatus::Done(_) => "done",
-                TaskStatus::Failed(_) => "failed",
-            };
-            results.push(serde_json::json!({
-                "task_id": entry.id(),
-                "name": entry.name(),
-                "status": status_str,
-                "output": entry.output(),
+        if let Some(task) = target_task {
+            let status: &str = task.status().into();
+            let result = AgentToolResult::success_json(serde_json::json!({
+                "task_id": task.id(),
+                "name": task.name(),
+                "status": status,
             }));
-        }
 
-        Ok(AgentToolResult::success_json(serde_json::json!({
-            "count": results.len(),
-            "tasks": results,
-        })))
+            Ok(result)
+        } else {
+            Ok(AgentToolResult::error(format!(
+                "no background task with id {:?}",
+                input.task_id
+            )))
+        }
     }
 }

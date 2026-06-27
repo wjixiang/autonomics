@@ -1,16 +1,13 @@
 use std::sync::Arc;
 
-use agentik_core::{
-    agent::{Agent, AgentConfig},
-    message_ext::AgentMessageExt,
-};
-use agentik_sdk::Message;
+use agentik_core::agent::{Agent, AgentConfig, InternalEvent};
+use agentik_sdk::ContentBlock;
 use agentik_sdk::http::auth::AuthMethod;
 use agentik_sdk::model::ProviderConfig;
 use agentik_sdk::provider::mimo::MODEL_MIMO_V2_5;
 use agentik_sdk::{
-    model::model_pool::ModelPool,
     model::Model,
+    model::model_pool::ModelPool,
     provider::mimo::{MimoEndpoint, MimoProvider, TokenPlanRegion},
     types::AgentEvent,
 };
@@ -47,7 +44,6 @@ async fn test_agent_basic_workflow_with_mimo() {
 
     let mut agent = Agent::builder()
         .with_model_pool(Arc::new(build_mimo_model_pool()))
-        .with_initial_messages(vec![Message::user("Say exactly: hello world")])
         .with_system_prompt_section(
             "You are a helpful assistant. Keep responses very short (one sentence).",
         )
@@ -60,9 +56,16 @@ async fn test_agent_basic_workflow_with_mimo() {
         .expect("failed to build agent");
 
     agent.event_tx = Some(tx);
+    let internal_tx = agent.internal_event_tx.clone();
     let handle = tokio::spawn(async move {
-        let _ = agent.start().await;
+        let _ = agent.run().await;
     });
+
+    // `run()` is event-driven: it blocks on the internal channel and only runs
+    // a session once a `MessageInject` arrives. Seed messages alone won't start it.
+    let _ = internal_tx.send(InternalEvent::MessageInject(vec![ContentBlock::Text {
+        text: "Say exactly: hello world".into(),
+    }]));
 
     let events = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         let mut evts = vec![];

@@ -49,10 +49,22 @@ pub struct ToolTaskInfo {
 
 // ── Chat data model ─────────────────────────────────────
 
+/// Token usage for a single LLM turn, attached to the assistant message it
+/// produced. `input_tokens` is `Option` because the streaming protocol only
+/// reports it on the final delta of a turn.
+#[derive(Debug, Clone, Copy)]
+pub struct TurnUsage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: u64,
+}
+
 #[derive(Debug, Clone)]
 pub enum ChatLine {
     User(String),
-    Assistant(String),
+    Assistant {
+        text: String,
+        usage: Option<TurnUsage>,
+    },
     Thinking(String),
     ToolCall { name: String, input: String },
     ToolResult { ok: bool, content: String },
@@ -100,6 +112,10 @@ pub struct AgentTabState {
     pub cached_width: u16,
     /// Monotonic counter bumped on every message mutation; used to detect cache staleness.
     pub messages_version: u64,
+    /// Index of the assistant line currently being streamed, so incoming
+    /// `UsageUpdate` events can be attributed to the right turn. Reset on each
+    /// `Requesting` (one per LLM call); `None` for tool-only turns.
+    pub streaming_assistant: Option<usize>,
 }
 
 impl Default for AgentTabState {
@@ -119,6 +135,7 @@ impl Default for AgentTabState {
             cached_version: 0,
             cached_width: 0,
             messages_version: 0,
+            streaming_assistant: None,
         }
     }
 }
@@ -175,6 +192,9 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
     match event {
         AgentEvent::Requesting => {
             state.status = AgentStatus::Requesting;
+            // A new LLM call begins — clear the streaming-assistant handle so
+            // usage from this call isn't attributed to a prior turn's line.
+            state.streaming_assistant = None;
         }
         AgentEvent::TextDelta(text) => {
             state.status = AgentStatus::Streaming;
@@ -182,13 +202,14 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
             let last_is_assistant = state
                 .messages
                 .last()
-                .is_some_and(|l| matches!(l, ChatLine::Assistant(_)));
+                .is_some_and(|l| matches!(l, ChatLine::Assistant { .. }));
             if last_is_assistant {
-                if let Some(ChatLine::Assistant(s)) = state.messages.last_mut() {
+                if let Some(ChatLine::Assistant { text: s, .. }) = state.messages.last_mut() {
                     s.push_str(&text);
                 }
             } else {
-                state.messages.push(ChatLine::Assistant(text));
+                state.messages.push(ChatLine::Assistant { text, usage: None });
+                state.streaming_assistant = Some(state.messages.len() - 1);
             }
             state.messages_version += 1;
             state.scroll_to_bottom();
@@ -212,6 +233,17 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
             input_tokens,
             output_tokens,
         } => {
+            // Attribute this turn's usage to the assistant line being streamed.
+            // Overwriting handles multiple deltas within one stream (output_tokens
+            // accumulates); tool-only turns have no assistant line and are skipped.
+            if let Some(idx) = state.streaming_assistant {
+                if let Some(ChatLine::Assistant { usage, .. }) = state.messages.get_mut(idx) {
+                    *usage = Some(TurnUsage {
+                        input_tokens,
+                        output_tokens,
+                    });
+                }
+            }
             if let Some(t) = input_tokens {
                 state.input_tokens = t;
             }

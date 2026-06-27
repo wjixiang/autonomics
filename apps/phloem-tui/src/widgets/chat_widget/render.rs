@@ -5,10 +5,19 @@ use ratatui::{
 };
 use tui_markdown::from_str_with_options;
 
-use crate::state::ChatLine;
+use crate::state::{ChatLine, TurnUsage};
+use crate::widgets::status_bar::format_tokens;
 
 use super::style::MD_OPTIONS;
 use super::table::{is_table_separator, render_table_lines};
+
+/// Format a turn's token usage as a compact dim line, e.g. "↑1.2k ↓340".
+fn format_turn_usage(u: TurnUsage) -> String {
+    match u.input_tokens {
+        Some(inp) => format!("↑{} ↓{}", format_tokens(inp), format_tokens(u.output_tokens)),
+        None => format!("↓{}", format_tokens(u.output_tokens)),
+    }
+}
 
 /// Render assistant message text with markdown support.
 /// Splits the text into non-table segments (rendered via `tui-markdown`)
@@ -101,7 +110,7 @@ pub(crate) fn render_line_owned(msg: &ChatLine, area: Rect) -> Vec<Line<'static>
             }
             lines
         }
-        ChatLine::Assistant(text) => {
+        ChatLine::Assistant { text, usage } => {
             let mut lines: Vec<Line<'_>> = vec![Line::from(Span::styled(
                 "Assistant",
                 Style::default()
@@ -109,6 +118,12 @@ pub(crate) fn render_line_owned(msg: &ChatLine, area: Rect) -> Vec<Line<'static>
                     .add_modifier(Modifier::BOLD),
             ))];
             render_assistant_text(text, area.width as usize, &mut lines);
+            if let Some(u) = usage {
+                lines.push(Line::from(Span::styled(
+                    format_turn_usage(*u),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
             into_owned_lines(lines)
         }
         ChatLine::Thinking(text) => {
