@@ -304,7 +304,13 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
         }
         AgentEvent::Done => {
             state.status = AgentStatus::Idle;
-            state.tool_tasks.clear();
+            // Keep still-running background tasks visible across the IDLE
+            // window — the agent intentionally goes IDLE while they execute
+            // and is woken later by `ToolBackgroundComplete`. Only drop tasks
+            // that have already finished.
+            state
+                .tool_tasks
+                .retain(|t| matches!(t.status, ToolTaskStatus::Running));
             state.messages.push(ChatLine::Separator);
             state.messages_version += 1;
             state.scroll_to_bottom();

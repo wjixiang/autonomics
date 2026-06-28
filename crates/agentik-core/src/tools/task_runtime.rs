@@ -9,7 +9,7 @@ use crate::tools::error::ToolError;
 
 pub type TaskId = String;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum RunMode {
     Fg,
     Bg,
@@ -79,12 +79,17 @@ pub struct TaskEntry {
     block_secs: u64,
     read: watch::Receiver<bool>,
     read_tx: watch::Sender<bool>,
-    run_mode: RunMode,
-    /// Optional sender to notify the agent when a background task completes.
-    notify_tx: Option<BgTaskNotifyTx>,
+    /// Watch channel so the monitor task can observe the current run mode
+    /// (Fg→Bg transition happens after sync timeout in [`wait`]).
+    run_mode: watch::Receiver<RunMode>,
+    run_mode_tx: watch::Sender<RunMode>,
     /// Accumulated output from the tool execution, readable at any time.
+    /// NOTE: These two fields are used for agent to get real-time / intermediate output of
+    /// executing tool, rather than the final tool result.
     output: watch::Receiver<String>,
     output_tx: watch::Sender<String>,
+    /// Final output of tool result, only readable when tool execution has done.
+    tool_result: watch::Receiver<Option<ToolResult>>,
 }
 
 impl TaskEntry {
@@ -114,15 +119,38 @@ impl TaskEntry {
         let (status_tx, status) = watch::channel(TaskStatus::Running);
         let (read_tx, read) = watch::channel(false);
         let (output_tx, output) = watch::channel(String::new());
+        let (run_mode_tx, run_mode) = watch::channel(RunMode::Fg);
+        let (tool_result_tx, tool_result) = watch::channel::<Option<ToolResult>>(None);
 
         let tx = status_tx.clone();
-        let bg_notify = notify_tx.clone();
         let out = output_tx.clone();
+        let mode_rx = run_mode.clone();
+        let bg_notify = notify_tx.clone();
+        let spwan_ts_tx = tool_result_tx.clone();
+        let task_id = id.clone();
         tokio::spawn(async move {
             match handle.await {
                 Ok(Ok(tool_result)) => {
-                    let _ = out.send(tool_result.text_content());
-                    tx.send(TaskStatus::Done(tool_result)).ok();
+                    // TODO: use tokio::watch to get tool_result instead of directly carried inside
+                    // TaskStatus::Done
+
+                    // Store final result in `tool_result` field.
+                    spwan_ts_tx.send(Some(tool_result.clone())).ok();
+
+                    let current_mode = mode_rx.borrow().clone();
+                    if matches!(current_mode, RunMode::Bg) {
+                        // NOTE: background tasks' results should not be injected into memory. This
+                        // will corrupt LLM's context and cause hallucination. Instead let agent
+                        // read tool_result stored in TaskEntry.
+                        //
+                        // WARN: This is a temperary patching measure
+                        tx.send(TaskStatus::Done(ToolResult::task_finish_notification(
+                            &tool_result.tool_use_id,
+                        )))
+                        .ok();
+                    } else {
+                        tx.send(TaskStatus::Done(tool_result)).ok();
+                    }
                 }
                 Ok(Err(e)) => {
                     let _ = out.send(e.to_string());
@@ -137,9 +165,15 @@ impl TaskEntry {
                     .ok();
                 }
             }
-            // Notify the agent's event loop that a background task finished.
-            if let Some(notify) = bg_notify {
-                let _ = notify.send(InternalEvent::BgTaskComplete);
+            // Notify the agent's event loop when a background task finishes.
+            // Only send when the task transitioned to Bg (sync timeout expired);
+            // Fg tasks are consumed inline by `wait()` and need no wake-up.
+            // Carries the tool_use_id so the agent can address the exact task
+            // without scanning the whole task list.
+            if *mode_rx.borrow() == RunMode::Bg {
+                if let Some(notify) = bg_notify {
+                    let _ = notify.send(InternalEvent::BgTaskComplete(task_id));
+                }
             }
         });
 
@@ -151,10 +185,11 @@ impl TaskEntry {
             block_secs,
             read,
             read_tx,
-            run_mode: RunMode::Fg,
-            notify_tx,
+            run_mode,
+            run_mode_tx,
             output,
             output_tx,
+            tool_result,
         }
     }
 
@@ -176,8 +211,19 @@ impl TaskEntry {
         self.status.borrow().clone()
     }
 
-    pub fn run_mode(&self) -> &RunMode {
-        &self.run_mode
+    pub fn run_mode(&self) -> RunMode {
+        self.run_mode.borrow().clone()
+    }
+
+    /// The real final result of the tool, once execution has finished.
+    ///
+    /// Returns `None` while the task is still running (no result stored yet).
+    /// Unlike [`status()`](Self::status), this carries the *actual* result for
+    /// background tasks — their `TaskStatus::Done` only holds a
+    /// finish-notification placeholder so the real output is not injected into
+    /// the LLM context. Callers retrieve the real output through here, by id.
+    pub fn tool_result(&self) -> Option<ToolResult> {
+        self.tool_result.borrow().clone()
     }
 
     /// Wait for the next status change (e.g. `Running` → `Done`).
@@ -209,7 +255,7 @@ impl TaskEntry {
             }
             _ = tokio::time::sleep(Duration::from_secs(self.block_secs)) => {
                 // Sync phase expired, task continues async
-                self.run_mode = RunMode::Bg;
+                self.run_mode_tx.send(RunMode::Bg).ok();
                 WaitResult { inner: WaitResultKind::StillRunning(self.id.clone()), read_tx: self.read_tx.clone() }
             }
         }
@@ -222,11 +268,6 @@ impl TaskEntry {
     /// Mark this task's result as consumed.
     pub fn mark_read(&self) {
         self.read_tx.send(true).ok();
-    }
-
-    /// Return a clone of the background task notification sender.
-    pub fn notify_tx(&self) -> Option<BgTaskNotifyTx> {
-        self.notify_tx.clone()
     }
 
     /// Non-blocking read of accumulated output so far.

@@ -113,6 +113,8 @@ impl Toolset {
         // ---- Phase 1: spawn tool tasks WITHOUT holding the tasks lock ----
         // `tokio::spawn` / `TaskEntry::with_notify` are instantaneous; no need
         // to hold any lock across them. Collect entries and push once.
+        //
+        // Turning ToolCall into TaskEntry
         let mut new_entries: Vec<TaskEntry> = Vec::with_capacity(toolcalls.len());
 
         for tc in toolcalls {
@@ -229,7 +231,7 @@ impl Toolset {
         }
 
         // NOTE: intermediate result should be pull by agent rather than injected passively
-        // results.extend(immediate_results);
+        results.extend(immediate_results);
 
         Ok(results)
     }
@@ -238,33 +240,36 @@ impl Toolset {
         self.tools.values().map(|r| r.definition.clone()).collect()
     }
 
-    #[deprecated]
-    /// Poll for completed background tasks. Returns `(tool_use_id, ok, content)`
-    /// for each finished task and removes them from the internal task list.
-    /// Failed tasks are treated as error results and also removed.
-    pub async fn poll_completed_tasks(&self) -> Vec<(String, bool, String)> {
-        let mut tasks = self.tasks.write().await;
-        let mut completed = Vec::new();
-        tasks.retain(|entry| {
-            match entry.status() {
-                TaskStatus::Done(ref result) => {
-                    completed.push((
-                        result.tool_use_id.clone(),
-                        !result.is_error.unwrap_or_default(),
-                        result.text_content(),
-                    ));
-                    false
-                }
-                TaskStatus::Failed(ref err) => {
-                    // Treat failure as an error result.
-                    let id = entry.id().to_string();
-                    completed.push((id, false, err.to_string()));
-                    false
-                }
-                _ => true, // still running
+    /// Look up a finished background task by `tool_use_id` and return
+    /// `(name, ok, content)` for a completion notification, **without**
+    /// removing the entry from the task list.
+    ///
+    /// The real result stays in the `TaskEntry` (read on demand via
+    /// `view_task_results`) so it is never injected into the LLM context.
+    /// For background tasks the `Done` status only holds a placeholder, so the
+    /// real content is read from `tool_result`.
+    ///
+    /// Returns `None` when the task is unknown or still running.
+    pub async fn finished_task_notification(
+        &self,
+        id: &str,
+    ) -> Option<(String, bool, String)> {
+        let tasks = self.tasks.read().await;
+        let entry = tasks.iter().find(|t| t.id() == id)?;
+        match entry.status() {
+            TaskStatus::Done(_) => {
+                let result = entry.tool_result();
+                let ok = result.as_ref().map_or(true, |r| !r.is_error.unwrap_or(false));
+                let content = result
+                    .map(|r| r.text_content())
+                    .unwrap_or_else(|| "task finished".to_string());
+                Some((entry.name().to_string(), ok, content))
             }
-        });
-        completed
+            TaskStatus::Failed(ref err) => {
+                Some((entry.name().to_string(), false, err.to_string()))
+            }
+            TaskStatus::Running => None,
+        }
     }
 
     /// Check whether any background tasks are still running.
@@ -294,14 +299,23 @@ impl Toolset {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use crate::tools::ToolFunction;
-    use agentik_sdk::types::tools::{ToolBuilder, ToolUse};
+    use agentik_sdk::types::tools::ToolUse;
     use agentik_types::AgentEvent;
     use async_trait::async_trait;
-    use serde_json::{Value, json};
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
     use tokio::sync::mpsc;
 
-    use super::{ToolRegistration, Toolset};
+    use super::Toolset;
+
+    #[derive(Deserialize, Serialize, agentik_proc::ToolInput)]
+    #[tool(name = "test_tool", description = "A test tool")]
+    struct MockInput {
+        reason: String,
+    }
 
     struct MockTool {
         result_text: String,
@@ -315,35 +329,68 @@ mod tests {
         }
     }
 
+    #[derive(Deserialize, Serialize, agentik_proc::ToolInput)]
+    #[tool(name = "test_bg_tool", description = "A bg tool")]
+    struct MockTwophaseInput {
+        reason: String,
+    }
+
+    struct MockTwophaseTool {
+        result_text: String,
+    }
+
+    impl MockTwophaseTool {
+        fn new(text: &str) -> Self {
+            Self {
+                result_text: text.to_string(),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToolFunction for MockTwophaseTool {
+        type Input = MockTwophaseInput;
+
+        fn sync_seconds(&self) -> u64 {
+            1
+        }
+        async fn run(
+            &self,
+            input: MockTwophaseInput,
+        ) -> Result<crate::tools::ToolResult, crate::tools::error::ToolError> {
+            dbg!(&input.reason);
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            Ok(crate::tools::ToolResult::success(self.result_text.clone()))
+        }
+    }
+
     #[async_trait]
     impl ToolFunction for MockTool {
-        type Input = Value;
+        type Input = MockInput;
 
-        async fn execute(
+        async fn run(
             &self,
-            _input: Value,
+            _input: MockInput,
         ) -> Result<crate::tools::ToolResult, crate::tools::error::ToolError> {
             Ok(crate::tools::ToolResult::success(self.result_text.clone()))
         }
     }
 
-    fn mock_registration(name: &str, description: &str) -> ToolRegistration {
-        ToolRegistration {
-            definition: ToolBuilder::new(name, description)
-                .parameter("reason", "string", "reason")
-                .required("reason")
-                .build(),
-            implementation: std::sync::Arc::new(MockTool::new("mock result")),
-        }
+    /// Register any `ToolFunction` onto the toolset. The tool's name,
+    /// description, and JSON-schema come from its `definition()` (which
+    /// defaults to `Self::Input::definition()`).
+    fn register_mock<T: ToolFunction + 'static>(
+        toolset: &mut Toolset,
+        tool: T,
+    ) -> Result<(), crate::tools::error::ToolError> {
+        toolset.register(tool.into())
     }
 
     #[tokio::test]
     async fn test_register_and_list_tools() {
         let (tx, _rx) = mpsc::unbounded_channel::<AgentEvent>();
         let mut toolset = Toolset::new(Some(tx));
-        toolset
-            .register(mock_registration("test_tool", "A test tool"))
-            .unwrap();
+        register_mock(&mut toolset, MockTool::new("mock result")).unwrap();
 
         let tools = toolset.tools();
         assert_eq!(tools.len(), 1);
@@ -354,9 +401,7 @@ mod tests {
     async fn test_execute_tool() {
         let (tx, _rx) = mpsc::unbounded_channel::<AgentEvent>();
         let mut toolset = Toolset::new(Some(tx));
-        toolset
-            .register(mock_registration("test_tool", "A test tool"))
-            .unwrap();
+        register_mock(&mut toolset, MockTool::new("mock result")).unwrap();
 
         let tool_call = ToolUse {
             id: "tc1".to_string(),
@@ -367,5 +412,37 @@ mod tests {
         let results = toolset.execute(&[tool_call], None, None).await.unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool_use_id, "tc1");
+    }
+
+    #[tokio::test]
+    async fn test_double_phase_tool_execution() {
+        let (tx, _rx) = mpsc::unbounded_channel::<AgentEvent>();
+        let mut toolset = Toolset::new(Some(tx));
+        // register_mock(&mut toolset, MockTool::new("mock result")).unwrap();
+        toolset
+            .register(MockTwophaseTool::new("test").into())
+            .unwrap();
+
+        toolset.register(MockTool::new("test").into()).unwrap();
+
+        let tool_call = ToolUse {
+            id: "tc1".to_string(),
+            name: "test_bg_tool".to_string(),
+            input: json!({ "reason": "test" }),
+        };
+
+        let tool_call_immediate = ToolUse {
+            id: "tc2".to_string(),
+            name: "test_tool".to_string(),
+            input: json!({ "reason": "test" }),
+        };
+
+        let result = toolset
+            .execute(&[tool_call, tool_call_immediate], None, None)
+            .await
+            .unwrap();
+
+        dbg!(&result);
+        assert!(result.len() == 2)
     }
 }

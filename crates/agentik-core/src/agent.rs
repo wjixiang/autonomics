@@ -55,8 +55,10 @@ impl Default for AgentConfig {
 pub enum InternalEvent {
     /// User injected a new message (already in memory via `inject_message`).
     MessageInject(Vec<ContentBlock>),
-    /// A background tool task completed; results already injected into memory.
-    BgTaskComplete,
+    /// A background tool task (with the given `tool_use_id`) finished.
+    /// Its real result stays in the `TaskEntry` and is read on demand via
+    /// `view_task_results` — it is NOT injected into memory.
+    BgTaskComplete(String),
     Done,
     /// A tool requested the current session be aborted (e.g. `abort_task`).
     Abort,
@@ -222,19 +224,34 @@ impl Agent {
                 let _ = self.inject_message(content);
                 true
             }
-            InternalEvent::BgTaskComplete => {
-                let completed = self.toolset.poll_completed_tasks().await;
-                for (id, ok, content) in &completed {
+            InternalEvent::BgTaskComplete(id) => {
+                // A background task finished. Its real result stays in the
+                // `TaskEntry` (read on demand via `view_task_results`) and is
+                // NOT injected into memory, to avoid polluting the LLM context.
+                // We only: surface the result to the TUI, and leave a
+                // lightweight user-message pointer telling the model the task
+                // is done and how to fetch the result. The entry itself is kept
+                // so `view_task_results` can still read it by id.
+                if let Some((name, ok, content)) =
+                    self.toolset.finished_task_notification(&id).await
+                {
                     self.send_event(agentik_sdk::types::AgentEvent::ToolBackgroundComplete {
                         id: id.clone(),
-                        ok: *ok,
-                        content: content.clone(),
+                        ok,
+                        content,
                     });
-                    let _ = self.memory.remember(Message::tool_result(
-                        id.clone(),
-                        content.clone(),
-                        !ok,
-                    ));
+                    let note = if ok {
+                        format!(
+                            "Background task '{name}' (id={id}) finished. \
+                             Call `view_task_results` with task_id={id} to read its result."
+                        )
+                    } else {
+                        format!(
+                            "Background task '{name}' (id={id}) finished with an error. \
+                             Call `view_task_results` with task_id={id} to read the error."
+                        )
+                    };
+                    let _ = self.memory.remember(Message::user(note));
                 }
                 true
             }
@@ -473,6 +490,9 @@ impl Agent {
             )
             .await?;
         tracing::debug!(?tool_results, "tool execution results");
+        if tool_results.len() != toolcalls.len() {
+            panic!()
+        }
 
         for tr in &tool_results {
             // Background transitions are announced by the `Toolset` itself
