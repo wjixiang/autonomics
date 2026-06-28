@@ -8,8 +8,8 @@ members = [
   "crates/agentik-tools",
   "crates/stat-primitives",
   "crates/gwascatalog-sdk",
-  "crates/datalake", "crates/bibliography-tools",
-  "apps/phloem-server", "apps/phloem-tui", "crates/aether-tools", "crates/opengwas-rs", "crates/eutils-rs", "crates/agentik-runtime", "crates/file-base", "crates/data-ingest",
+  "crates/datalake",
+  "apps/phloem-tui", "crates/aether-tools", "crates/opengwas-rs", "crates/eutils-rs", "crates/agentik-runtime", "crates/file-base", "crates/data-ingest",
 ]
 
 [workspace.package]

@@ -25,6 +25,8 @@ pub enum AgentEvent {
     UsageUpdate {
         input_tokens: Option<u64>,
         output_tokens: u64,
+        cache_creation_input_tokens: Option<u64>,
+        cache_read_input_tokens: Option<u64>,
     },
 
     /// The LLM stream started (carries initial message metadata).
@@ -136,6 +138,8 @@ impl AgentEvent {
                 Some(AgentEvent::UsageUpdate {
                     input_tokens: usage.input_tokens,
                     output_tokens: usage.output_tokens,
+                    cache_creation_input_tokens: usage.cache_creation_input_tokens,
+                    cache_read_input_tokens: usage.cache_read_input_tokens,
                 })
             }
 

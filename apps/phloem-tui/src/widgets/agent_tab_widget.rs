@@ -44,6 +44,7 @@ impl Widget for AgentTabWidget<'_> {
             status: &ts.status,
             input_tokens: ts.input_tokens,
             output_tokens: ts.output_tokens,
+            cache_read_tokens: ts.cache_read_tokens,
         };
         status_bar.render(layout[0], buf);
 

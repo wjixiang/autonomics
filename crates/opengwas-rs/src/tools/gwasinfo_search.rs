@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::json_err;
+use crate::format::format_gwasinfo_table;
 use crate::OpengwasClient;
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
@@ -42,12 +43,11 @@ impl ToolFunction for GwasinfoSearchTool {
             .gwasinfo_search(&input.keyword, db_field, limit)
             .await
             .map_err(json_err)?;
-        Ok(AgentToolResult::success_json(serde_json::json!({
-            "count": result.len(),
-            "keyword": input.keyword,
-            "field": field,
-            "datasets": result,
-        })))
+        Ok(AgentToolResult::success(format_gwasinfo_table(
+            &result,
+            Some(&input.keyword),
+            Some(&field),
+        )))
     }
 }
 

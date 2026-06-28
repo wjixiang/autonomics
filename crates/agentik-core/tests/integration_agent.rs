@@ -55,7 +55,7 @@ async fn test_agent_basic_workflow_with_mimo() {
         .await
         .expect("failed to build agent");
 
-    agent.event_tx = Some(tx);
+    agent.agent_event_tx = Some(tx);
     let internal_tx = agent.internal_event_tx.clone();
     let handle = tokio::spawn(async move {
         let _ = agent.run().await;

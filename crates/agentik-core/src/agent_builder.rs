@@ -22,7 +22,7 @@ pub struct AgentBuilder {
     tools: Vec<ToolRegistration>,
     system_prompt_section: Option<String>,
     system_prompt_identity: Option<String>,
-    event_tx: Option<tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentEvent>>,
+    agent_event_tx: Option<tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentEvent>>,
     /// Stable agent UUID. If `None`, a fresh v4 UUID is generated at build time.
     id: Option<Uuid>,
     /// Pre-built memory (used to restore from a snapshot). When set, overrides
@@ -44,7 +44,7 @@ impl Clone for AgentBuilder {
             tools: Vec::new(), // ToolRegistration is not Clone; re-register if needed
             system_prompt_section: self.system_prompt_section.clone(),
             system_prompt_identity: self.system_prompt_identity.clone(),
-            event_tx: self.event_tx.clone(),
+            agent_event_tx: self.agent_event_tx.clone(),
             id: self.id,
             memory: self.memory.clone(),
             skill: self.skill.clone(),
@@ -64,7 +64,7 @@ impl AgentBuilder {
             tools: Vec::new(),
             system_prompt_section: None,
             system_prompt_identity: None,
-            event_tx: None,
+            agent_event_tx: None,
             id: None,
             memory: None,
             skill: None,
@@ -130,11 +130,11 @@ impl AgentBuilder {
     }
 
     /// Wire an event channel for streaming `AgentEvent`s to external observers (e.g. a TUI).
-    pub fn with_event_tx(
+    pub fn with_agent_event_tx(
         mut self,
         tx: tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentEvent>,
     ) -> Self {
-        self.event_tx = Some(tx);
+        self.agent_event_tx = Some(tx);
         self
     }
 
@@ -172,7 +172,7 @@ impl AgentBuilder {
 
         // Register the toolset: lifecycle (abort_task etc.), caller-supplied
         // external tools, and background-task tools.
-        let mut toolset = Toolset::new(self.event_tx.clone());
+        let mut toolset = Toolset::new(self.agent_event_tx.clone());
         toolset.register_all(crate::tools::lifecycle_registrations(
             internal_event_tx.clone(),
         ))?;
@@ -211,7 +211,7 @@ impl AgentBuilder {
             system_prompt_section: self.system_prompt_section,
             system_prompt_identity: self.system_prompt_identity,
             skill_runtime: skill_runtime.map(|(rt, _)| rt),
-            event_tx: self.event_tx,
+            agent_event_tx: self.agent_event_tx,
             current_model_name: None,
             cancel_token,
             internal_event_tx,

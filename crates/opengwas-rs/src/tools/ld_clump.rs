@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::json_err;
+use crate::format::format_ld_clump;
 use crate::{OpengwasClient, types::*};
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
@@ -52,6 +53,6 @@ impl ToolFunction for LdClumpTool {
             })
             .await
             .map_err(json_err)?;
-        Ok(AgentToolResult::success_json(result))
+        Ok(AgentToolResult::success(format_ld_clump(&result)))
     }
 }

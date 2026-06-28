@@ -35,7 +35,7 @@ impl std::fmt::Display for Population {
 // GwasInfo – the canonical metadata model returned by many endpoints
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GwasInfo {
     #[serde(default)]
     pub id: Option<String>,

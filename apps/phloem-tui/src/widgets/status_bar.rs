@@ -13,6 +13,7 @@ pub struct StatusBar<'a> {
     pub status: &'a AgentStatus,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cache_read_tokens: u64,
 }
 
 impl Widget for StatusBar<'_> {
@@ -34,7 +35,7 @@ impl Widget for StatusBar<'_> {
         let in_tok = format_tokens(self.input_tokens);
         let out_tok = format_tokens(self.output_tokens);
 
-        let line = Line::from(vec![
+        let mut spans = vec![
             Span::styled(indicator, Style::default().fg(indicator_color)),
             Span::raw(" "),
             Span::styled(
@@ -45,7 +46,17 @@ impl Widget for StatusBar<'_> {
             Span::styled(format!("in: {}", in_tok), Style::default().fg(Color::Gray)),
             Span::raw("  "),
             Span::styled(format!("out: {}", out_tok), Style::default().fg(Color::Gray)),
-        ]);
+        ];
+        if self.cache_read_tokens > 0 {
+            let cache_tok = format_tokens(self.cache_read_tokens);
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                format!("cache: {}", cache_tok),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+
+        let line = Line::from(spans);
 
         Paragraph::new(line).render(area, buf);
     }

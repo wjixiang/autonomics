@@ -56,6 +56,8 @@ pub struct ToolTaskInfo {
 pub struct TurnUsage {
     pub input_tokens: Option<u64>,
     pub output_tokens: u64,
+    pub cache_creation_input_tokens: Option<u64>,
+    pub cache_read_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +101,7 @@ pub struct AgentTabState {
     pub input: InputArea,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cache_read_tokens: u64,
     pub input_mode: InputMode,
     /// When true, `clamp_scroll` forces offset to the bottom each frame.
     pub auto_scroll: bool,
@@ -128,6 +131,7 @@ impl Default for AgentTabState {
             input: InputArea::new(),
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: 0,
             input_mode: InputMode::Browse,
             auto_scroll: true,
             content_line_count: 0,
@@ -232,6 +236,8 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
         AgentEvent::UsageUpdate {
             input_tokens,
             output_tokens,
+            cache_creation_input_tokens,
+            cache_read_input_tokens,
         } => {
             // Attribute this turn's usage to the assistant line being streamed.
             // Overwriting handles multiple deltas within one stream (output_tokens
@@ -241,13 +247,22 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
                     *usage = Some(TurnUsage {
                         input_tokens,
                         output_tokens,
+                        cache_creation_input_tokens,
+                        cache_read_input_tokens,
                     });
                 }
             }
+            // Cumulative totals for the status bar.
+            // `input_tokens` is `Some` only on the final delta of a turn — at that
+            // point output_tokens and cache_read_input_tokens also hold the complete
+            // per-turn totals, so we accumulate once per turn.
             if let Some(t) = input_tokens {
-                state.input_tokens = t;
+                state.input_tokens += t;
+                state.output_tokens += output_tokens;
+                if let Some(c) = cache_read_input_tokens {
+                    state.cache_read_tokens += c;
+                }
             }
-            state.output_tokens = output_tokens;
         }
         AgentEvent::LlmResponse(_text) => {
             // The full aggregated response — we already have it via TextDelta.

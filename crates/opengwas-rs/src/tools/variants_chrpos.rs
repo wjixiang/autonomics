@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::json_err;
+use crate::format::format_variants;
 use crate::{OpengwasClient, types::*};
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
@@ -38,6 +39,6 @@ impl ToolFunction for VariantsChrposTool {
             })
             .await
             .map_err(json_err)?;
-        Ok(AgentToolResult::success_json(result))
+        Ok(AgentToolResult::success(format_variants(&result)))
     }
 }

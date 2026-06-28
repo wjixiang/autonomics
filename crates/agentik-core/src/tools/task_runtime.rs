@@ -176,6 +176,10 @@ impl TaskEntry {
         self.status.borrow().clone()
     }
 
+    pub fn run_mode(&self) -> &RunMode {
+        &self.run_mode
+    }
+
     /// Wait for the next status change (e.g. `Running` → `Done`).
     pub async fn changed(&mut self) {
         self.status.changed().await.ok();

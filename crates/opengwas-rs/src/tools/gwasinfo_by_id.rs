@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::json_err;
+use crate::format::format_gwasinfo_table;
 use crate::{OpengwasClient, types::*};
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
@@ -34,9 +35,6 @@ impl ToolFunction for GwasinfoByIdTool {
             .gwasinfo(&GwasInfoRequest { id: input.id })
             .await
             .map_err(json_err)?;
-        Ok(AgentToolResult::success_json(serde_json::json!({
-            "count": result.len(),
-            "datasets": result,
-        })))
+        Ok(AgentToolResult::success(format_gwasinfo_table(&result, None, None)))
     }
 }

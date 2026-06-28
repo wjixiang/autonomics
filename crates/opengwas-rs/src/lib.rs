@@ -1,3 +1,4 @@
+pub mod format;
 pub mod opengwas_client;
 pub mod tools;
 pub mod types;

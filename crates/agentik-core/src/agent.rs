@@ -13,7 +13,7 @@ use crate::context::ContextProvider;
 use crate::message_ext::AgentMessageExt;
 use agentik_sdk::model::model_pool::ModelPool;
 use agentik_sdk::types::messages::{ContentBlock, Message, Role};
-use agentik_sdk::types::tools::{ToolResultContent, ToolUse};
+use agentik_sdk::types::tools::ToolUse;
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{Level, event, span};
@@ -81,7 +81,7 @@ pub struct Agent {
     /// progress is injected into the system prompt.
     pub(crate) skill_runtime: Option<SharedSkillRuntime>,
     /// Optional event channel for streaming progress to external observers.
-    pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentEvent>>,
+    pub agent_event_tx: Option<tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentEvent>>,
     /// Currently selected model name. If None, falls back to round-robin.
     pub(crate) current_model_name: Option<String>,
     /// External cancellation signal, Cloned out to callers so they can
@@ -99,7 +99,7 @@ impl Agent {
 
     /// Send an event to the optional observation channel.
     fn send_event(&self, event: agentik_sdk::types::AgentEvent) {
-        if let Some(tx) = &self.event_tx {
+        if let Some(tx) = &self.agent_event_tx {
             let _ = tx.send(event);
         }
     }
@@ -122,11 +122,11 @@ impl Agent {
     }
 
     /// Wire an event channel for external observation (e.g. TUI, tests).
-    pub fn set_event_tx(
+    pub fn set_agent_event_tx(
         &mut self,
         tx: tokio::sync::mpsc::UnboundedSender<agentik_sdk::types::AgentEvent>,
     ) {
-        self.event_tx = Some(tx);
+        self.agent_event_tx = Some(tx);
     }
 
     /// Register a single tool.
@@ -787,7 +787,7 @@ mod tests {
             .await
             .unwrap();
 
-        agent.event_tx = Some(tx);
+        agent.agent_event_tx = Some(tx);
         (agent, rx)
     }
 

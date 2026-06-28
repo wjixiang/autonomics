@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
 
-use crate::tools::task_runtime::{TaskStatus, WaitResultKind};
+use crate::tools::task_runtime::{RunMode, TaskStatus, WaitResultKind};
 
 use super::DynToolFunction;
 use super::error::ToolError;
@@ -96,10 +96,12 @@ impl Toolset {
         self.tasks.clone()
     }
 
+    /// Spawn independent threads to execute tool calls
     pub async fn execute(
         &self,
         toolcalls: &[ToolUse],
         allowed_tools: Option<&[String]>,
+        // This tokio sender is prepared for waking up agent in IDLE status
         notify_tx: Option<super::task_runtime::BgTaskNotifyTx>,
     ) -> Result<Vec<ToolResult>, ToolError> {
         let mut immediate_results: Vec<ToolResult> = Vec::new();
@@ -107,6 +109,11 @@ impl Toolset {
         // We only emit `ToolCallBackground` for newly spawned tasks — retained
         // background tasks from a prior call already announced themselves.
         let mut spawned_names: HashMap<String, String> = HashMap::new();
+
+        // ---- Phase 1: spawn tool tasks WITHOUT holding the tasks lock ----
+        // `tokio::spawn` / `TaskEntry::with_notify` are instantaneous; no need
+        // to hold any lock across them. Collect entries and push once.
+        let mut new_entries: Vec<TaskEntry> = Vec::with_capacity(toolcalls.len());
 
         for tc in toolcalls {
             // 当 allowed_tools 存在时，跳过不在白名单内的工具
@@ -141,8 +148,6 @@ impl Toolset {
 
             let cancel_token = CancellationToken::new();
             let cancel = cancel_token.clone();
-            let tasks_ref = self.tasks.clone();
-            let mut tasks = tasks_ref.write().await;
 
             let task_handle = tokio::spawn(async move {
                 let result = tokio::select! {
@@ -160,7 +165,7 @@ impl Toolset {
                 }
             });
 
-            tasks.push(TaskEntry::with_notify(
+            new_entries.push(TaskEntry::with_notify(
                 tc.id.clone(),
                 tc.name.clone(),
                 task_handle,
@@ -171,15 +176,34 @@ impl Toolset {
             spawned_names.insert(tc.id.clone(), tc.name.clone());
         }
 
-        let tasks_ref = self.tasks.clone();
-        let mut tasks = tasks_ref.write().await;
+        // ---- Phase 2: insert + partition under a SHORT-lived write lock ----
+        // Add the new entries, then move foreground tasks out so we can wait on
+        // them *outside* the lock. Background tasks stay in the vec untouched.
+        let mut to_wait: Vec<TaskEntry> = {
+            let mut tasks = self.tasks.write().await;
+            tasks.extend(new_entries);
+            let mut fg = Vec::new();
+            let mut i = 0;
+            while i < tasks.len() {
+                // swap_remove keeps this O(1); order within the vec is
+                // irrelevant since results are matched by tool_use_id.
+                if matches!(tasks[i].run_mode(), RunMode::Bg) {
+                    i += 1;
+                } else {
+                    fg.push(tasks.swap_remove(i));
+                }
+            }
+            fg
+        };
+        // ^ lock released here — the expensive await below is now lock-free.
 
-        let wait_results = join_all(tasks.iter_mut().map(|t| t.wait())).await;
+        // ---- Phase 3: wait for foreground tasks WITHOUT holding the lock ----
+        let wait_results = join_all(to_wait.iter_mut().map(|t| t.wait())).await;
 
         let mut results: Vec<ToolResult> = Vec::with_capacity(wait_results.len());
         for wait_result in wait_results {
             // When a tool didn't finish within its sync window, it is now
-            // running in the background — notify observers immediately. Only
+            // running in the background — notify frontend observers and agent immediately. Only
             // announce tasks spawned in this call; retained background tasks
             // from a prior turn already announced themselves.
             if let WaitResultKind::StillRunning(ref id) = wait_result.inner
@@ -194,10 +218,18 @@ impl Toolset {
             results.push(wait_result.into());
         }
 
-        results.extend(immediate_results);
+        // ---- Phase 4: reinsert + cleanup under a SHORT-lived write lock ----
+        // `wait()` flips still-running tasks to RunMode::Bg; finished tasks are
+        // marked read via the `WaitResult -> ToolResult` conversion, so the
+        // retain drops exactly the consumed ones.
+        {
+            let mut tasks = self.tasks.write().await;
+            tasks.extend(to_wait);
+            tasks.retain(|t| !t.is_read());
+        }
 
-        // Clear finished tasks
-        tasks.retain(|t| !t.is_read());
+        // NOTE: intermediate result should be pull by agent rather than injected passively
+        // results.extend(immediate_results);
 
         Ok(results)
     }

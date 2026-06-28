@@ -11,12 +11,19 @@ use crate::widgets::status_bar::format_tokens;
 use super::style::MD_OPTIONS;
 use super::table::{is_table_separator, render_table_lines};
 
-/// Format a turn's token usage as a compact dim line, e.g. "↑1.2k ↓340".
+/// Format a turn's token usage as a compact dim line, e.g. "↑1.2k ↓340 cache:800".
 fn format_turn_usage(u: TurnUsage) -> String {
-    match u.input_tokens {
-        Some(inp) => format!("↑{} ↓{}", format_tokens(inp), format_tokens(u.output_tokens)),
-        None => format!("↓{}", format_tokens(u.output_tokens)),
+    let mut parts = Vec::new();
+    if let Some(inp) = u.input_tokens {
+        parts.push(format!("↑{}", format_tokens(inp)));
     }
+    parts.push(format!("↓{}", format_tokens(u.output_tokens)));
+    if let Some(cache) = u.cache_read_input_tokens {
+        if cache > 0 {
+            parts.push(format!("cache:{}", format_tokens(cache)));
+        }
+    }
+    parts.join("  ")
 }
 
 /// Render assistant message text with markdown support.

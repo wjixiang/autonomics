@@ -53,7 +53,7 @@ impl AgentRuntime {
 
             let mut agent = Agent::builder()
                 .with_model_pool(Arc::new(model_pool))
-                .with_event_tx(event_tx)
+                .with_agent_event_tx(event_tx)
                 .with_system_prompt_identity(system_prompt)
                 .with_tools(tools)
                 .build()

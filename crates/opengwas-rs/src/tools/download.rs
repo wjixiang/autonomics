@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use super::json_err;
+use crate::format::format_download;
 use crate::{OpengwasClient, types::GwasInfoFilesRequest};
 use file_base::OpendalFileStorage;
 
@@ -91,9 +92,9 @@ impl ToolFunction for DownloadFilesTool {
             }));
         }
 
-        Ok(AgentToolResult::success_json(serde_json::json!({
+        Ok(AgentToolResult::success(format_download(&serde_json::json!({
             "count": downloaded.len(),
             "files": downloaded,
-        })))
+        }))))
     }
 }
