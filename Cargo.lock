@@ -29,25 +29,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aether-tools"
-version = "0.1.0"
-dependencies = [
- "agentik-core",
- "agentik-proc",
- "agentik-sdk",
- "anyhow",
- "arrow",
- "async-trait",
- "datafusion",
- "datalake",
- "iceberg",
- "serde",
- "serde_json",
- "stat-primitives",
- "tokio",
-]
-
-[[package]]
 name = "agentik-core"
 version = "0.1.0"
 dependencies = [
@@ -83,13 +64,13 @@ dependencies = [
 name = "agentik-runtime"
 version = "0.1.0"
 dependencies = [
- "aether-tools",
  "agentik-core",
  "agentik-sdk",
- "color-eyre",
- "datalake",
+ "anyhow",
+ "data-engine",
  "eutils-rs",
  "file-base",
+ "iceberg-tools",
  "opengwas-rs",
  "tokio",
  "tokio-util",
@@ -1394,6 +1375,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "data-engine"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arrow-array",
+ "arrow-ord",
+ "arrow-schema",
+ "arrow-select",
+ "datafusion",
+ "iceberg",
+ "iceberg-catalog-rest",
+ "iceberg-datafusion",
+ "iceberg-storage-opendal",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "data-ingest"
 version = "0.1.0"
 dependencies = [
@@ -1406,7 +1408,7 @@ dependencies = [
  "arrow-csv",
  "arrow-schema",
  "async-trait",
- "datalake",
+ "data-engine",
  "file-base",
  "serde",
  "serde_json",
@@ -2068,27 +2070,6 @@ dependencies = [
  "recursive",
  "regex",
  "sqlparser",
-]
-
-[[package]]
-name = "datalake"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arrow",
- "arrow-array",
- "arrow-ord",
- "arrow-schema",
- "arrow-select",
- "datafusion",
- "iceberg",
- "iceberg-catalog-rest",
- "iceberg-datafusion",
- "iceberg-storage-opendal",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
 ]
 
 [[package]]
@@ -3146,6 +3127,25 @@ dependencies = [
  "serde",
  "typetag",
  "url",
+]
+
+[[package]]
+name = "iceberg-tools"
+version = "0.1.0"
+dependencies = [
+ "agentik-core",
+ "agentik-proc",
+ "agentik-sdk",
+ "anyhow",
+ "arrow",
+ "async-trait",
+ "data-engine",
+ "datafusion",
+ "iceberg",
+ "serde",
+ "serde_json",
+ "stat-primitives",
+ "tokio",
 ]
 
 [[package]]

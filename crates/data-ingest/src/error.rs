@@ -65,8 +65,8 @@ impl From<arrow::error::ArrowError> for IngestError {
     }
 }
 
-impl From<datalake::DatasetError> for IngestError {
-    fn from(e: datalake::DatasetError) -> Self {
+impl From<data_engine::DatasetError> for IngestError {
+    fn from(e: data_engine::DatasetError) -> Self {
         Self::Build(e.to_string())
     }
 }

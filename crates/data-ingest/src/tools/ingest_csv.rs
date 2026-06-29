@@ -7,7 +7,7 @@ use agentik_core::tools::{ToolError, ToolFunction};
 use agentik_sdk::types::ToolResult;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use datalake::{AetherDataset, DatasetStore, Provenance};
+use data_engine::{AetherDataset, DatasetStore, Provenance};
 use serde::{Deserialize, Serialize};
 
 use crate::registry::IngestRegistry;

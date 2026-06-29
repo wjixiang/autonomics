@@ -7,7 +7,7 @@ rust-version.workspace = true
 description = "Multi-format file ingestion: convert structured files (VCF, CSV, ...) to Arrow RecordBatches for the datalake."
 
 [dependencies]
-datalake = { path = "../datalake" }
+data-engine = { path = "../data-engine" }
 file-base = { path = "../file-base" }
 agentik-core = { path = "../agentik-core" }
 agentik-proc = { path = "../agentik-proc" }

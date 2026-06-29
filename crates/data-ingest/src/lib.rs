@@ -36,7 +36,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use datalake::{AetherDataset, Provenance};
+use data_engine::{AetherDataset, Provenance};
 
 // Public re-exports
 pub use csv::CsvIngestor;

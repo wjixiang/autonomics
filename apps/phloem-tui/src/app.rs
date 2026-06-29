@@ -23,6 +23,8 @@ pub struct App {
     state: AppState,
     tab_state: TabNavState,
     agent_runtime: AgentRuntime,
+    /// Kept alive to drive the agent's background event loop task.
+    _runtime: tokio::runtime::Runtime,
     conn: Connection,
     /// True when state has changed and a re-render is needed.
     dirty: bool,
@@ -41,7 +43,8 @@ impl App {
 
         let model_pool = Self::build_model_pool(&conn).expect("failed to build model pool");
 
-        let agent_runtime = AgentRuntime::new(model_pool, "You are a helpful assistant. ")
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+        let agent_runtime = AgentRuntime::new(&runtime, model_pool, "You are a helpful assistant. ")
             .expect("failed to create agent runtime");
 
         let mut state = AppState::default();
@@ -51,6 +54,7 @@ impl App {
             state,
             tab_state: TabNavState::new(MainTabState::default().index()),
             agent_runtime,
+            _runtime: runtime,
             conn,
             dirty: true, // render the initial frame
             should_quit: false,
