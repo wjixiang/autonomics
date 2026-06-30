@@ -69,7 +69,7 @@ dependencies = [
  "anyhow",
  "data-engine",
  "eutils-rs",
- "file-base",
+ "fs",
  "iceberg-tools",
  "opengwas-rs",
  "tokio",
@@ -1381,14 +1381,18 @@ dependencies = [
  "anyhow",
  "arrow",
  "arrow-array",
+ "arrow-csv",
  "arrow-ord",
  "arrow-schema",
  "arrow-select",
+ "async-trait",
  "datafusion",
+ "fs",
  "iceberg",
  "iceberg-catalog-rest",
  "iceberg-datafusion",
  "iceberg-storage-opendal",
+ "nanoid",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1409,7 +1413,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "data-engine",
- "file-base",
+ "fs",
  "serde",
  "serde_json",
  "tempfile",
@@ -2408,22 +2412,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
-name = "file-base"
-version = "0.1.0"
-dependencies = [
- "agentik-core",
- "agentik-proc",
- "agentik-sdk",
- "async-trait",
- "futures",
- "opendal 0.57.0",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "filedescriptor"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2513,6 +2501,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8878864ba14bb86e818a412bfd6f18f9eabd4ec0f008a28e8f7eb61db532fcf9"
 dependencies = [
  "futures-core",
+]
+
+[[package]]
+name = "fs"
+version = "0.1.0"
+dependencies = [
+ "agentik-core",
+ "agentik-proc",
+ "agentik-sdk",
+ "async-trait",
+ "futures",
+ "opendal 0.57.0",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -3923,6 +3927,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9252111cf132ba0929b6f8e030cac2a24b507f3a4d6db6fb2896f27b354c714b"
 
 [[package]]
+name = "nanoid"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8628de41fe064cc3f0cf07f3d299ee3e73521adaff72278731d5c8cae3797873"
+dependencies = [
+ "rand 0.9.4",
+]
+
+[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4245,7 +4258,7 @@ dependencies = [
  "agentik-sdk",
  "anyhow",
  "async-trait",
- "file-base",
+ "fs",
  "futures",
  "reqwest 0.13.4",
  "rusqlite",

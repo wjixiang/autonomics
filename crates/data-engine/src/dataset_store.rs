@@ -9,14 +9,13 @@ use datafusion::prelude::SessionContext;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use super::AetherDataset;
-use crate::data_session::DataSession;
+use super::Dataset;
 use crate::error::DatasetError;
 
 /// Lightweight metadata for listing datasets.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatasetInfo {
-    pub name: String,
+    pub id: String,
     pub row_count: usize,
     pub column_count: usize,
     pub columns: Vec<ColumnInfo>,
@@ -30,35 +29,32 @@ pub struct ColumnInfo {
     pub nullable: bool,
 }
 
-/// Named registry of in-memory datasets, backed by a shared DataFusion
-/// `SessionContext` for SQL-based transformations.
+/// Named registry of in-memory datasets, owned by the agent.
 ///
-/// This is the agent's **working memory**: datasets created from Iceberg
-/// queries or upstream transformations are registered here so they can be
-/// referenced by name in subsequent SQL operations.
+/// Internally holds a private `SessionContext` used only to execute
+/// DataFusion SQL over the registered in-memory datasets (see
+/// [`Self::map_expr`] and [`Self::sql_query`]). It does **not** carry any
+/// external catalog (e.g. Iceberg) — interaction with persistent storage is
+/// the responsibility of [`crate::data_session::DataSession`].
 pub struct DatasetStore {
-    datasets: RwLock<HashMap<String, Arc<AetherDataset>>>,
+    // TODO: Change to Dashmap to avoid heavy lock during data writing.
+    datasets: RwLock<HashMap<String, Arc<Dataset>>>,
     ctx: SessionContext,
 }
 
 impl DatasetStore {
-    /// Create a new empty store with a DataFusion session context.
-    pub fn new(ctx: SessionContext) -> Self {
+    /// Create a new empty store. The internal `SessionContext` is created
+    /// internally and only ever holds in-memory `MemTable`s.
+    pub fn new() -> Self {
         Self {
             datasets: RwLock::new(HashMap::new()),
-            ctx,
+            ctx: SessionContext::new(),
         }
     }
 
-    /// Create a store reusing the `SessionContext` from an existing
-    /// [`DataSession`].
-    pub fn from_workspace(workspace: &DataSession) -> Self {
-        Self::new(workspace.ctx().clone())
-    }
-
     /// Register a dataset. Errors if the name already exists.
-    pub async fn put(&self, dataset: AetherDataset) -> Result<(), DatasetError> {
-        let name = dataset.name().to_owned();
+    pub async fn put(&self, dataset: Dataset) -> Result<(), DatasetError> {
+        let name = dataset.id().to_owned();
         let mut map = self.datasets.write().await;
         if map.contains_key(&name) {
             return Err(DatasetError::Build {
@@ -70,14 +66,16 @@ impl DatasetStore {
     }
 
     /// Register a dataset, replacing any existing entry with the same name.
-    pub async fn put_overwrite(&self, dataset: AetherDataset) {
-        let name = dataset.name().to_owned();
+    /// Returns the inserted `Arc<Dataset>` for convenience.
+    pub async fn put_overwrite(&self, dataset: Dataset) -> Arc<Dataset> {
+        let wrapped = Arc::new(dataset);
         let mut map = self.datasets.write().await;
-        map.insert(name, Arc::new(dataset));
+        map.insert(wrapped.id().to_owned(), wrapped.clone());
+        wrapped
     }
 
     /// Retrieve a dataset by name.
-    pub async fn get(&self, name: &str) -> Result<Arc<AetherDataset>, DatasetError> {
+    pub async fn get(&self, name: &str) -> Result<Arc<Dataset>, DatasetError> {
         let map = self.datasets.read().await;
         map.get(name)
             .cloned()
@@ -102,7 +100,7 @@ impl DatasetStore {
         let mut infos: Vec<DatasetInfo> = map
             .values()
             .map(|ds| DatasetInfo {
-                name: ds.name().to_owned(),
+                id: ds.id().to_owned(),
                 row_count: ds.row_count(),
                 column_count: ds.column_count(),
                 columns: ds
@@ -118,36 +116,13 @@ impl DatasetStore {
                     .collect(),
             })
             .collect();
-        infos.sort_by(|a, b| a.name.cmp(&b.name));
+        infos.sort_by(|a, b| a.id.cmp(&b.id));
         infos
     }
 
     /// Check whether a dataset with the given name exists.
     pub async fn exists(&self, name: &str) -> bool {
         self.datasets.read().await.contains_key(name)
-    }
-
-    /// Execute a SQL query and register the result as a named dataset.
-    ///
-    /// The SQL may reference:
-    /// - Iceberg tables via the `iceberg` catalog (e.g. `iceberg.ns.table`)
-    /// - Other registered datasets (they are automatically registered as
-    ///   temporary tables before query execution).
-    pub async fn sql_to_dataset(
-        &self,
-        name: &str,
-        sql: &str,
-    ) -> Result<Arc<AetherDataset>, DatasetError> {
-        // Ensure all stored datasets are available as DataFusion tables.
-        self.register_all_as_tables().await?;
-
-        let plan = self.ctx.sql(sql).await?;
-        let ds = self.collect_df(name, plan, super::Provenance::Query {
-            sql: sql.to_owned(),
-        })
-        .await?;
-
-        Ok(self.insert_dataset(ds).await)
     }
 
     /// Apply a DataFusion SQL expression to a column, producing a transformed
@@ -168,7 +143,7 @@ impl DatasetStore {
         column: &str,
         expr: &str,
         output_col: &str,
-    ) -> Result<Arc<AetherDataset>, DatasetError> {
+    ) -> Result<Arc<Dataset>, DatasetError> {
         self.register_all_as_tables().await?;
 
         let all_cols: Vec<String> = {
@@ -189,26 +164,24 @@ impl DatasetStore {
                 })
                 .collect()
         } else {
-            let mut cols: Vec<String> = all_cols
-                .iter()
-                .map(|c| format!("\"{c}\""))
-                .collect();
+            let mut cols: Vec<String> = all_cols.iter().map(|c| format!("\"{c}\"")).collect();
             cols.push(format!("{expr} AS \"{output_col}\""));
             cols
         };
 
-        let sql = format!(
-            "SELECT {} FROM \"{}\"",
-            select_cols.join(", "),
-            source,
-        );
+        let sql = format!("SELECT {} FROM \"{}\"", select_cols.join(", "), source,);
 
         let plan = self.ctx.sql(&sql).await?;
-        let ds = self.collect_df(name, plan, super::Provenance::Transform {
-            op: format!("map({column} → {output_col}, expr={expr})"),
-            parents: vec![source.to_owned()],
-        })
-        .await?;
+        let ds = self
+            .collect_df(
+                name,
+                plan,
+                super::Provenance::Transform {
+                    op: format!("map({column} → {output_col}, expr={expr})"),
+                    parents: vec![source.to_owned()],
+                },
+            )
+            .await?;
 
         // Overwrite if same name as source, otherwise insert new.
         if name == source {
@@ -220,66 +193,9 @@ impl DatasetStore {
         }
     }
 
-    /// Load an Iceberg table into a named `AetherDataset`.
-    ///
-    /// This is the primary ingestion primitive: data flows from a persistent
-    /// Iceberg table (registered in the `iceberg` catalog) into an in-memory
-    /// dataset for analysis. Optionally project `columns`, apply a `filter`
-    /// SQL expression, and cap with `limit`.
-    ///
-    /// `namespace` must be a single top-level segment (DataFusion catalog
-    /// limitation), e.g. `"analytics"`.
-    pub async fn read_table(
-        &self,
-        name: &str,
-        namespace: &str,
-        table: &str,
-        columns: Option<&[String]>,
-        filter: Option<&str>,
-        limit: Option<usize>,
-    ) -> Result<Arc<AetherDataset>, DatasetError> {
-        let sql = build_table_sql(namespace, table, columns, filter, limit);
-        let plan = self.ctx.sql(&sql).await?;
-        let table_ident = format!("{namespace}.{table}");
-        let ds = self.collect_df(name, plan, super::Provenance::Table {
-            table: table_ident,
-        })
-        .await?;
-
-        Ok(self.insert_dataset(ds).await)
-    }
-
-    /// Peek at an Iceberg table **without materializing** it into the store.
-    ///
-    /// This is the L2 inspection counterpart to [`read_table`]: it runs the
-    /// same kind of `SELECT … FROM iceberg.{ns}.{table}` query but returns a
-    /// **transient** [`AetherDataset`] that is never registered. Use it for
-    /// read-only preview/describe operations where the agent just wants to
-    /// look at rows without occupying working memory or polluting the
-    /// namespace of named datasets.
-    ///
-    /// Because it queries the Iceberg catalog directly (like [`read_table`]),
-    /// it does not need to register any in-memory datasets first.
-    pub async fn peek_table(
-        &self,
-        namespace: &str,
-        table: &str,
-        columns: Option<&[String]>,
-        filter: Option<&str>,
-        limit: Option<usize>,
-    ) -> Result<AetherDataset, DatasetError> {
-        let sql = build_table_sql(namespace, table, columns, filter, limit);
-        let plan = self.ctx.sql(&sql).await?;
-        let table_ident = format!("{namespace}.{table}");
-        self.collect_df("peek", plan, super::Provenance::Table {
-            table: table_ident,
-        })
-        .await
-    }
-
     /// Execute a read-only SQL query and return the result as a transient
-    /// `AetherDataset` (not registered in the store).
-    pub async fn sql_query(&self, sql: &str) -> Result<AetherDataset, DatasetError> {
+    /// `Dataset` (not registered in the store).
+    pub async fn sql_query(&self, sql: &str) -> Result<Dataset, DatasetError> {
         self.register_all_as_tables().await?;
 
         let plan = self.ctx.sql(sql).await?;
@@ -287,16 +203,16 @@ impl DatasetStore {
             .await
     }
 
-    /// Collect a DataFusion `DataFrame` into an `AetherDataset` with the
+    /// Collect a DataFusion `DataFrame` into an `Dataset` with the
     /// given name and provenance.
     ///
-    /// Shared by [`sql_to_dataset`], [`read_table`], and [`sql_query`].
+    /// Shared by [`map_expr`] and [`sql_query`].
     async fn collect_df(
         &self,
         name: &str,
         df: datafusion::dataframe::DataFrame,
         provenance: super::Provenance,
-    ) -> Result<AetherDataset, DatasetError> {
+    ) -> Result<Dataset, DatasetError> {
         let schema: Arc<arrow_schema::Schema> = Arc::new(df.schema().as_arrow().clone());
         let batches: Vec<RecordBatch> = df
             .collect()
@@ -304,17 +220,14 @@ impl DatasetStore {
             .into_iter()
             .filter(|b| b.num_rows() > 0)
             .collect();
-        Ok(AetherDataset::with_schema(name, schema, batches).with_provenance(provenance))
+        Ok(Dataset::with_schema(name, schema, batches).with_provenance(provenance))
     }
 
     /// Insert a dataset into the registry, returning a shared `Arc`.
-    async fn insert_dataset(
-        &self,
-        dataset: AetherDataset,
-    ) -> Arc<AetherDataset> {
+    async fn insert_dataset(&self, dataset: Dataset) -> Arc<Dataset> {
         let wrapped = Arc::new(dataset);
         let mut map = self.datasets.write().await;
-        map.insert(wrapped.name().to_owned(), wrapped.clone());
+        map.insert(wrapped.id().to_owned(), wrapped.clone());
         wrapped
     }
 
@@ -333,7 +246,7 @@ impl DatasetStore {
     }
 
     /// Register a single dataset as a DataFusion `MemTable`.
-    fn register_as_table(&self, ds: &AetherDataset) -> Result<(), DatasetError> {
+    fn register_as_table(&self, ds: &Dataset) -> Result<(), DatasetError> {
         let partitions: Vec<Vec<_>> = ds
             .batches()
             .iter()
@@ -353,51 +266,10 @@ impl DatasetStore {
 
         let table = MemTable::try_new(ds.schema().clone(), partitions)?;
         // Ignore error if table doesn't exist yet.
-        let _ = self.ctx.deregister_table(ds.name());
-        self.ctx.register_table(ds.name(), Arc::new(table))?;
+        let _ = self.ctx.deregister_table(ds.id());
+        self.ctx.register_table(ds.id(), Arc::new(table))?;
         Ok(())
     }
-}
-
-/// Quote a SQL identifier with double quotes, escaping embedded quotes.
-fn quote_ident(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
-}
-
-/// Build a `SELECT … FROM iceberg."ns"."table" [WHERE …] [LIMIT …]` query.
-///
-/// Shared by [`DatasetStore::read_table`] (materializing) and
-/// [`DatasetStore::peek_table`] (transient) so the projection/filter/limit
-/// logic stays in one place.
-fn build_table_sql(
-    namespace: &str,
-    table: &str,
-    columns: Option<&[String]>,
-    filter: Option<&str>,
-    limit: Option<usize>,
-) -> String {
-    let projection = match columns {
-        Some(cols) if !cols.is_empty() => cols
-            .iter()
-            .map(|c| quote_ident(c.trim()))
-            .collect::<Vec<_>>()
-            .join(", "),
-        _ => "*".to_string(),
-    };
-
-    let mut sql = format!(
-        "SELECT {projection} FROM iceberg.{}.{}",
-        quote_ident(namespace),
-        quote_ident(table),
-    );
-    if let Some(clause) = filter.map(str::trim).filter(|s| !s.is_empty()) {
-        sql.push_str(" WHERE ");
-        sql.push_str(clause);
-    }
-    if let Some(n) = limit {
-        sql.push_str(&format!(" LIMIT {n}"));
-    }
-    sql
 }
 
 // ---------------------------------------------------------------------------
@@ -412,7 +284,7 @@ mod tests {
     use arrow_array::builder::Float64Builder;
     use arrow_schema::{DataType, Field, Schema};
 
-    fn make_simple_dataset(name: &str) -> AetherDataset {
+    fn make_simple_dataset(name: &str) -> Dataset {
         let mut x = Float64Builder::new();
         let mut y = Float64Builder::new();
         for i in 0..5 {
@@ -428,13 +300,12 @@ mod tests {
             vec![Arc::new(x.finish()), Arc::new(y.finish())],
         )
         .unwrap();
-        AetherDataset::with_schema(name, schema, vec![batch])
+        Dataset::with_schema(name, schema, vec![batch])
     }
 
     #[tokio::test]
     async fn test_put_get_drop() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         let ds = make_simple_dataset("test_ds");
 
         assert!(!store.exists("test_ds").await);
@@ -450,8 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_put_duplicate_rejected() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         store.put(make_simple_dataset("dup")).await.unwrap();
         let result = store.put(make_simple_dataset("dup")).await;
         assert!(result.is_err());
@@ -459,8 +329,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_put_overwrite() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         store.put(make_simple_dataset("ow")).await.unwrap();
         store.put_overwrite(make_simple_dataset("ow")).await;
         assert!(store.exists("ow").await);
@@ -468,24 +337,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_list() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         store.put(make_simple_dataset("a")).await.unwrap();
         store.put(make_simple_dataset("b")).await.unwrap();
 
         let infos = store.list().await;
         assert_eq!(infos.len(), 2);
         // Should be sorted alphabetically
-        assert_eq!(infos[0].name, "a");
-        assert_eq!(infos[1].name, "b");
+        assert_eq!(infos[0].id, "a");
+        assert_eq!(infos[1].id, "b");
         assert_eq!(infos[0].row_count, 5);
         assert_eq!(infos[0].column_count, 2);
     }
 
     #[tokio::test]
     async fn test_sql_query_on_registered_dataset() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         store.put(make_simple_dataset("nums")).await.unwrap();
 
         let result = store
@@ -496,25 +363,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sql_to_dataset() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
-        store.put(make_simple_dataset("nums")).await.unwrap();
-
-        store
-            .sql_to_dataset("filtered", "SELECT * FROM nums WHERE y > 4")
-            .await
-            .unwrap();
-
-        assert!(store.exists("filtered").await);
-        let ds = store.get("filtered").await.unwrap();
-        assert_eq!(ds.row_count(), 2); // y=6, y=8
-    }
-
-    #[tokio::test]
     async fn test_map_expr_add_column() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         store.put(make_simple_dataset("nums")).await.unwrap();
 
         // Add a new column y_squared = y * y
@@ -532,8 +382,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_map_expr_replace_column() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         store.put(make_simple_dataset("nums")).await.unwrap();
 
         // Replace y with y * 10
@@ -550,8 +399,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_map_expr_log() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         store.put(make_simple_dataset("nums")).await.unwrap();
 
         // Log transform: ln(y) — skip y=0 (ln(0) = -inf)
@@ -572,65 +420,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_not_found() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         let err = store.get("nope").await;
         assert!(matches!(err, Err(DatasetError::NotFound { .. })));
     }
 
     #[tokio::test]
     async fn test_drop_not_found() {
-        let ctx = SessionContext::new();
-        let store = DatasetStore::new(ctx);
+        let store = DatasetStore::new();
         let err = store.drop("nope").await;
         assert!(matches!(err, Err(DatasetError::NotFound { .. })));
-    }
-
-    #[test]
-    fn test_build_table_sql_projections() {
-        // Dotted 3-part form: catalog.schema.table — the comma form is a SQL
-        // cross-join and resolves under the wrong catalog.
-        let sql = build_table_sql("analytics", "gwas", None, None, None);
-        assert_eq!(sql, "SELECT * FROM iceberg.\"analytics\".\"gwas\"");
-
-        // Column projection + identifier quoting (embedded quote escaped).
-        let sql = build_table_sql(
-            "analytics",
-            "gwas",
-            Some(&["snp".into(), "be\"ta".into()]),
-            None,
-            None,
-        );
-        assert_eq!(
-            sql,
-            "SELECT \"snp\", \"be\"\"ta\" FROM iceberg.\"analytics\".\"gwas\""
-        );
-
-        // Filter + limit.
-        let sql = build_table_sql(
-            "analytics",
-            "gwas",
-            None,
-            Some("p_value < 5e-8"),
-            Some(100),
-        );
-        assert_eq!(
-            sql,
-            "SELECT * FROM iceberg.\"analytics\".\"gwas\" WHERE p_value < 5e-8 LIMIT 100"
-        );
-
-        // Empty filter string is ignored.
-        let sql = build_table_sql("analytics", "gwas", None, Some("   "), None);
-        assert_eq!(sql, "SELECT * FROM iceberg.\"analytics\".\"gwas\"");
-
-        // Empty column list falls back to *.
-        let sql = build_table_sql(
-            "analytics",
-            "gwas",
-            Some(&[]),
-            None,
-            None,
-        );
-        assert_eq!(sql, "SELECT * FROM iceberg.\"analytics\".\"gwas\"");
     }
 }

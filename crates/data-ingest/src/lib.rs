@@ -1,7 +1,7 @@
 //! `data-ingest` — Multi-format file ingestion for the datalake.
 //!
 //! Converts structured files (VCF, CSV, …) into Arrow [`RecordBatch`]es
-//! that can be loaded into [`AetherDataset`] and written to Iceberg.
+//! that can be loaded into [`Dataset`] and written to Iceberg.
 //!
 //! # Quick start
 //!
@@ -10,7 +10,6 @@
 //!
 //! let dataset = ingest_to_dataset(
 //!     std::path::Path::new("data/sample.vcf.gz"),
-//!     "my_variants",
 //!     Default::default(),
 //! ).await?;
 //! ```
@@ -18,7 +17,7 @@
 //! # Architecture
 //!
 //! ```text
-//! File → FileIngestor → Vec<RecordBatch> → AetherDataset → Iceberg
+//! File → FileIngestor → Vec<RecordBatch> → Dataset → Iceberg
 //!              │
 //!              ├── VcfIngestor  (via vcf-arrow)
 //!              ├── CsvIngestor  (via arrow-csv)
@@ -36,7 +35,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use data_engine::{AetherDataset, Provenance};
+use data_engine::{Dataset, Provenance};
 
 // Public re-exports
 pub use csv::CsvIngestor;
@@ -45,7 +44,7 @@ pub use registry::IngestRegistry;
 pub use trait_def::{FileIngestor, IngestConfig};
 pub use vcf::VcfIngestor;
 
-/// Ingest a file and produce an [`AetherDataset`] ready for use.
+/// Ingest a file and produce an [`Dataset`] ready for use.
 ///
 /// This is the primary integration point with the datalake crate.
 /// The registry automatically picks the correct ingestor based on the
@@ -58,12 +57,7 @@ pub use vcf::VcfIngestor;
 /// - The file cannot be parsed
 /// - No records are found
 /// - The resulting `RecordBatch` cannot be assembled
-pub async fn ingest_to_dataset(
-    path: &Path,
-    name: impl Into<String>,
-    config: IngestConfig,
-) -> Result<AetherDataset> {
-    let name = name.into();
+pub async fn ingest_to_dataset(path: &Path, config: IngestConfig) -> Result<Dataset> {
     let registry = IngestRegistry::with_defaults();
     let batches = registry.ingest_file(path, config).await?;
 
@@ -72,7 +66,7 @@ pub async fn ingest_to_dataset(
         .map(|i| i.format_name().to_owned())
         .unwrap_or_else(|_| "unknown".into());
 
-    let dataset = AetherDataset::new(&name, batches)?;
+    let dataset = Dataset::new(batches)?;
     Ok(dataset.with_provenance(Provenance::FileIngest {
         path: path.display().to_string(),
         format: format_name,

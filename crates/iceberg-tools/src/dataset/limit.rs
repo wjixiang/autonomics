@@ -1,6 +1,6 @@
 //! L3 transform tool: take the first N rows of a dataset.
 //!
-//! Wraps [`AetherDataset::limit`] — a zero-copy slice across Arrow
+//! Wraps [`Dataset::limit`] — a zero-copy slice across Arrow
 //! partitions. Replaces the dataset in the store by default.
 
 use std::sync::Arc;
@@ -47,7 +47,7 @@ impl ToolFunction for DatasetLimitTool {
         let limited = ds.limit(input.n);
 
         let output_name = input.output.as_deref().map(str::trim).unwrap_or(name);
-        let renamed = data_engine::AetherDataset::with_schema(
+        let renamed = data_engine::Dataset::with_schema(
             output_name,
             limited.schema().clone(),
             limited.batches().to_vec(),

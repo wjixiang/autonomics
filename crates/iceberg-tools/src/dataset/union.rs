@@ -1,6 +1,6 @@
 //! L3 transform tool: concatenate (union all) two datasets.
 //!
-//! Wraps [`AetherDataset::union`]. Both datasets must have identical column
+//! Wraps [`Dataset::union`]. Both datasets must have identical column
 //! names and types. The `other` dataset is appended to `name`; the result
 //! replaces `name` (or writes to `output`).
 
@@ -53,7 +53,7 @@ impl ToolFunction for DatasetUnionTool {
         let merged = ds.union(&other_ds).map_err(err)?;
 
         let output_name = input.output.as_deref().map(str::trim).unwrap_or(name);
-        let renamed = data_engine::AetherDataset::with_schema(
+        let renamed = data_engine::Dataset::with_schema(
             output_name,
             merged.schema().clone(),
             merged.batches().to_vec(),

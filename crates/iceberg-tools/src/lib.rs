@@ -29,7 +29,7 @@ pub use dataset::{
     DatasetLoadTableInput, DatasetLoadTableTool, DatasetMapInput, DatasetMapTool,
     DatasetOlsInput, DatasetOlsTool, DatasetPreviewInput, DatasetPreviewTool,
     DatasetSelectInput, DatasetSelectTool, DatasetSortInput, DatasetSortTool,
-    DatasetSqlInput, DatasetSqlTool, DatasetSummarizeInput, DatasetSummarizeTool,
+    DatasetSummarizeInput, DatasetSummarizeTool,
     DatasetUnionInput, DatasetUnionTool,
     dataset_registrations,
 };

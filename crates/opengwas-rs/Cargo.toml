@@ -12,7 +12,7 @@ agentik-sdk = { path = "../agentik-sdk" }
 anyhow.workspace = true
 reqwest = { version = "0.13.4", features = ["json", "multipart", "stream"] }
 rusqlite = { version = "0.40.0", features = ["bundled"] }
-file-base = { path = "../file-base" }
+fs = { path = "../fs" }
 futures = { workspace = true }
 serde.workspace = true
 serde_json.workspace = true

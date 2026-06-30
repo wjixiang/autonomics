@@ -15,7 +15,7 @@ use agentik_core::Agent;
 use agentik_core::agent::InternalEvent;
 use agentik_sdk::model::model_pool::ModelPool;
 use agentik_sdk::types::{AgentEvent, ContentBlock};
-use file_base::OpendalFileStorage;
+use fs::OpendalFileStorage;
 use tokio_util::sync::CancellationToken;
 
 /// Bridges the sync TUI thread to the async agent runtime.

@@ -1,6 +1,6 @@
 //! L3 transform tool: project to a subset of columns.
 //!
-//! Wraps [`AetherDataset::select`] — an in-memory Arrow column projection
+//! Wraps [`Dataset::select`] — an in-memory Arrow column projection
 //! that avoids SQL parsing overhead. Replaces the dataset in the store by
 //! default; pass `output` to write to a different name.
 
@@ -52,7 +52,7 @@ impl ToolFunction for DatasetSelectTool {
         let output_name = input.output.as_deref().map(str::trim).unwrap_or(name);
         if output_name != name {
             // Rename so it registers under the desired name.
-            let ds_with_name = data_engine::AetherDataset::with_schema(
+            let ds_with_name = data_engine::Dataset::with_schema(
                 output_name,
                 projected.schema().clone(),
                 projected.batches().to_vec(),

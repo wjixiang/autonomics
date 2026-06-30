@@ -18,6 +18,9 @@ pub enum DatasetError {
     #[error("empty dataset '{name}'")]
     EmptyDataset { name: String },
 
+    #[error("error occured during building datafusion context")]
+    BuildCtxFaild { message: String },
+
     #[error("cannot build dataset: {message}")]
     Build { message: String },
 

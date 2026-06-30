@@ -8,7 +8,7 @@ description = "Multi-format file ingestion: convert structured files (VCF, CSV, 
 
 [dependencies]
 data-engine = { path = "../data-engine" }
-file-base = { path = "../file-base" }
+fs = { path = "../fs" }
 agentik-core = { path = "../agentik-core" }
 agentik-proc = { path = "../agentik-proc" }
 agentik-sdk = { path = "../agentik-sdk" }

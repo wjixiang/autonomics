@@ -1,6 +1,6 @@
 //! Core dataset model for in-memory analytical data.
 //!
-//! [`AetherDataset`] is an immutable, schema-aware, partitioned columnar
+//! [`Dataset`] is an immutable, schema-aware, partitioned columnar
 //! container analogous to Spark's **RDD** — each transformation produces a
 //! new dataset (immutability), data is split across `RecordBatch` partitions
 //! (parallelism-ready), and the full Arrow type system is exposed through
@@ -8,7 +8,7 @@
 //!
 //! # Design principles (inspired by Spark RDD)
 //!
-//! | RDD property            | AetherDataset equivalent                   |
+//! | RDD property            | Dataset equivalent                   |
 //! |-------------------------|--------------------------------------------|
 //! | Immutable               | Every transform returns a new instance       |
 //! | Partitioned             | `Vec<RecordBatch>` = logical partitions     |
@@ -17,10 +17,8 @@
 //! | Actions (eager)         | `collect()`, `count()`, `extract_f64()` …   |
 //! | Lineage                 | `provenance` tracks derivation chain         |
 
-pub mod store;
-
-use std::fmt;
 use std::sync::Arc;
+use std::{fmt, vec};
 
 use arrow_array::builder::{BooleanBufferBuilder, Float64Builder};
 use arrow_array::{Array, BooleanArray, Float32Array, Float64Array, RecordBatch, StringArray};
@@ -28,6 +26,8 @@ use arrow_ord::sort::lexsort_to_indices;
 use arrow_schema::{DataType, Field, Schema, SchemaRef, SortOptions};
 use arrow_select::filter::filter_record_batch;
 use arrow_select::take::take_record_batch;
+use datafusion::catalog::MemTable;
+use datafusion::prelude::SessionContext;
 use serde::{Deserialize, Serialize};
 
 use crate::error::DatasetError;
@@ -93,14 +93,14 @@ impl fmt::Display for Provenance {
 }
 
 // ---------------------------------------------------------------------------
-// AetherDataset — the core model
+// Dataset — the core model
 // ---------------------------------------------------------------------------
 
 /// An in-memory, schema-aware, partitioned columnar dataset.
 ///
 /// This is the central data abstraction for the agent analytics pipeline —
 /// analogous to Spark's `Dataset[Row]` after `.collect()`. Each instance is
-/// **immutable**; transformations return a new `AetherDataset`.
+/// **immutable**; transformations return a new `Dataset`.
 ///
 /// # Partitioning
 ///
@@ -111,22 +111,24 @@ impl fmt::Display for Provenance {
 /// # Type layout
 ///
 /// ```text
-/// AetherDataset {
-///     name:       "gwas_significant"
+/// Dataset {
+///     id:         "gwas_significant"
 ///     schema:     [snp: Utf8, beta: Float64, se: Float64, p_value: Float64]
 ///     batches:    [RecordBatch(0..999), RecordBatch(1000..1999), ...]
 ///     provenance: Transform { op: "filter", parents: ["gwas_raw"] }
 /// }
 /// ```
 #[derive(Clone)]
-pub struct AetherDataset {
-    name: String,
+pub struct Dataset {
+    id: String,
     schema: SchemaRef,
     batches: Vec<RecordBatch>,
     provenance: Provenance,
 }
 
-impl AetherDataset {
+pub type DatasetRef = Arc<Dataset>;
+
+impl Dataset {
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
@@ -140,7 +142,8 @@ impl AetherDataset {
     ///
     /// Returns `DatasetError::Build` if `batches` is empty and no schema
     /// can be inferred.
-    pub fn new(name: impl Into<String>, batches: Vec<RecordBatch>) -> Result<Self, DatasetError> {
+    pub fn new(batches: Vec<RecordBatch>) -> Result<Self, DatasetError> {
+        let id = nanoid::nanoid!();
         let schema = batches
             .iter()
             .find(|b| b.num_rows() > 0)
@@ -150,21 +153,35 @@ impl AetherDataset {
             })?;
 
         Ok(Self {
-            name: name.into(),
+            id,
             schema,
             batches,
             provenance: Provenance::Manual,
         })
     }
 
+    pub fn get_ctx(&self) -> Result<SessionContext, DatasetError> {
+        let mut ctx = SessionContext::new();
+        let mem_table = MemTable::try_new(self.schema.clone(), vec![self.batches.clone()])
+            .map_err(|e| DatasetError::BuildCtxFaild {
+                message: e.to_string(),
+            })?;
+        ctx.register_table("dataset", Arc::new(mem_table))
+            .map_err(|e| DatasetError::BuildCtxFaild {
+                message: e.to_string(),
+            })?;
+
+        Ok(ctx)
+    }
+
     /// Create a dataset with an explicit schema (may have zero rows).
     pub fn with_schema(
-        name: impl Into<String>,
+        id: impl Into<String>,
         schema: SchemaRef,
         batches: Vec<RecordBatch>,
     ) -> Self {
         Self {
-            name: name.into(),
+            id: id.into(),
             schema,
             batches,
             provenance: Provenance::Manual,
@@ -172,17 +189,17 @@ impl AetherDataset {
     }
 
     /// Create an empty dataset with the given schema and no partitions.
-    pub fn empty(name: impl Into<String>, schema: SchemaRef) -> Self {
-        Self::with_schema(name, schema, Vec::new())
+    pub fn empty(id: impl Into<String>, schema: SchemaRef) -> Self {
+        Self::with_schema(id, schema, Vec::new())
     }
 
     // -----------------------------------------------------------------------
     // Metadata accessors (actions — no transformation)
     // -----------------------------------------------------------------------
 
-    /// Dataset name.
-    pub fn name(&self) -> &str {
-        &self.name
+    /// Dataset id.
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     /// Arrow schema.
@@ -251,7 +268,7 @@ impl AetherDataset {
             .collect();
 
         serde_json::json!({
-            "name": self.name,
+            "id": self.id,
             "row_count": self.row_count(),
             "column_count": self.column_count(),
             "columns": columns,
@@ -288,7 +305,7 @@ impl AetherDataset {
             .column_index(column)
             .ok_or_else(|| DatasetError::ColumnNotFound {
                 column: column.to_owned(),
-                dataset: self.name.clone(),
+                dataset: self.id.clone(),
             })?;
 
         let field = self.schema.field(idx);
@@ -327,7 +344,7 @@ impl AetherDataset {
             .column_index(column)
             .ok_or_else(|| DatasetError::ColumnNotFound {
                 column: column.to_owned(),
-                dataset: self.name.clone(),
+                dataset: self.id.clone(),
             })?;
 
         let field = self.schema.field(idx);
@@ -358,7 +375,7 @@ impl AetherDataset {
             .column_index(column)
             .ok_or_else(|| DatasetError::ColumnNotFound {
                 column: column.to_owned(),
-                dataset: self.name.clone(),
+                dataset: self.id.clone(),
             })?;
 
         let field = self.schema.field(idx);
@@ -405,7 +422,7 @@ impl AetherDataset {
     }
 
     // -----------------------------------------------------------------------
-    // Transformations (return a new AetherDataset — immutability)
+    // Transformations (return a new Dataset — immutability)
     // -----------------------------------------------------------------------
 
     /// Project to a subset of columns.
@@ -419,7 +436,7 @@ impl AetherDataset {
                 self.column_index(c)
                     .ok_or_else(|| DatasetError::ColumnNotFound {
                         column: c.to_string(),
-                        dataset: self.name.clone(),
+                        dataset: self.id.clone(),
                     })
             })
             .collect::<Result<_, _>>()?;
@@ -438,8 +455,8 @@ impl AetherDataset {
             .map_err(|e| DatasetError::Arrow(e))?;
 
         let parents: Vec<String> = columns.iter().map(|s| s.to_string()).collect();
-        Ok(AetherDataset::with_schema_and_provenance(
-            self.name.clone(),
+        Ok(Dataset::with_schema_and_provenance(
+            self.id.clone(),
             new_schema,
             new_batches,
             Provenance::Transform {
@@ -465,7 +482,7 @@ impl AetherDataset {
             .column_index(old)
             .ok_or_else(|| DatasetError::ColumnNotFound {
                 column: old.to_string(),
-                dataset: self.name.clone(),
+                dataset: self.id.clone(),
             })?;
 
         let mut new_fields: Vec<Field> =
@@ -477,13 +494,13 @@ impl AetherDataset {
         );
         let new_schema = Arc::new(Schema::new(new_fields));
 
-        Ok(AetherDataset::with_schema_and_provenance(
-            self.name.clone(),
+        Ok(Dataset::with_schema_and_provenance(
+            self.id.clone(),
             new_schema,
             self.batches.clone(),
             Provenance::Transform {
                 op: format!("rename_column({old}→{new})"),
-                parents: vec![self.name.clone()],
+                parents: vec![self.id.clone()],
             },
         ))
     }
@@ -502,13 +519,13 @@ impl AetherDataset {
             new_batches.push(batch.slice(0, take));
         }
 
-        AetherDataset::with_schema_and_provenance(
-            self.name.clone(),
+        Dataset::with_schema_and_provenance(
+            self.id.clone(),
             self.schema.clone(),
             new_batches,
             Provenance::Transform {
                 op: format!("limit({n})"),
-                parents: vec![self.name.clone()],
+                parents: vec![self.id.clone()],
             },
         )
     }
@@ -532,13 +549,13 @@ impl AetherDataset {
         let mut all_batches = self.batches.clone();
         all_batches.extend(other.batches.clone());
 
-        Ok(AetherDataset::with_schema_and_provenance(
-            self.name.clone(),
+        Ok(Dataset::with_schema_and_provenance(
+            self.id.clone(),
             self.schema.clone(),
             all_batches,
             Provenance::Transform {
                 op: "union".into(),
-                parents: vec![self.name.clone(), other.name.clone()],
+                parents: vec![self.id.clone(), other.id.clone()],
             },
         ))
     }
@@ -554,7 +571,7 @@ impl AetherDataset {
                 self.column_index(col.as_ref())
                     .ok_or_else(|| DatasetError::ColumnNotFound {
                         column: col.as_ref().to_string(),
-                        dataset: self.name.clone(),
+                        dataset: self.id.clone(),
                     })
             })
             .collect::<Result<_, _>>()?;
@@ -586,13 +603,13 @@ impl AetherDataset {
             .iter()
             .map(|(c, _)| c.as_ref().to_string())
             .collect();
-        Ok(AetherDataset::with_schema_and_provenance(
-            self.name.clone(),
+        Ok(Dataset::with_schema_and_provenance(
+            self.id.clone(),
             self.schema.clone(),
             sorted_batches,
             Provenance::Transform {
                 op: format!("sort_by({})", col_names.join(", ")),
-                parents: vec![self.name.clone()],
+                parents: vec![self.id.clone()],
             },
         ))
     }
@@ -620,13 +637,13 @@ impl AetherDataset {
             }
         }
 
-        AetherDataset::with_schema_and_provenance(
-            self.name.clone(),
+        Dataset::with_schema_and_provenance(
+            self.id.clone(),
             self.schema.clone(),
             new_batches,
             Provenance::Transform {
                 op: "filter".into(),
-                parents: vec![self.name.clone()],
+                parents: vec![self.id.clone()],
             },
         )
     }
@@ -659,7 +676,7 @@ impl AetherDataset {
             .column_index(column)
             .ok_or_else(|| DatasetError::ColumnNotFound {
                 column: column.to_owned(),
-                dataset: self.name.clone(),
+                dataset: self.id.clone(),
             })?;
 
         let field = self.schema.field(idx);
@@ -704,13 +721,13 @@ impl AetherDataset {
             .collect::<Result<_, _>>()
             .map_err(|e| DatasetError::Arrow(e))?;
 
-        Ok(AetherDataset::with_schema_and_provenance(
-            self.name.clone(),
+        Ok(Dataset::with_schema_and_provenance(
+            self.id.clone(),
             Arc::new(build_map_schema(&self.schema, idx, output)),
             new_batches,
             Provenance::Transform {
                 op: format!("map({column} → {output})"),
-                parents: vec![self.name.clone()],
+                parents: vec![self.id.clone()],
             },
         ))
     }
@@ -757,13 +774,13 @@ impl AetherDataset {
     // -----------------------------------------------------------------------
 
     fn with_schema_and_provenance(
-        name: String,
+        id: String,
         schema: SchemaRef,
         batches: Vec<RecordBatch>,
         provenance: Provenance,
     ) -> Self {
         Self {
-            name,
+            id,
             schema,
             batches,
             provenance,
@@ -771,7 +788,7 @@ impl AetherDataset {
     }
 
     /// Set the provenance for this dataset (typically called after
-    /// construction via [`AetherDataset::new`]).
+    /// construction via [`Dataset::new`]).
     pub fn with_provenance(mut self, prov: Provenance) -> Self {
         self.provenance = prov;
         self
@@ -801,10 +818,10 @@ impl AetherDataset {
     }
 }
 
-impl fmt::Debug for AetherDataset {
+impl fmt::Debug for Dataset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AetherDataset")
-            .field("name", &self.name)
+        f.debug_struct("Dataset")
+            .field("id", &self.id)
             .field("rows", &self.row_count())
             .field("columns", &self.column_count())
             .field("partitions", &self.num_partitions())
@@ -918,7 +935,7 @@ mod tests {
     use arrow_array::builder::{Float32Builder, Float64Builder, Int64Builder, StringBuilder};
 
     /// Helper: build a simple 3-column test dataset.
-    fn make_test_dataset() -> AetherDataset {
+    fn make_test_dataset() -> Dataset {
         let mut snp = StringBuilder::new();
         let mut beta = Float64Builder::new();
         let mut pval = Float64Builder::new();
@@ -950,13 +967,13 @@ mod tests {
         )
         .unwrap();
 
-        AetherDataset::new("gwas", vec![batch]).unwrap()
+        Dataset::new(vec![batch]).unwrap()
     }
 
     #[test]
     fn test_new_and_metadata() {
         let ds = make_test_dataset();
-        assert_eq!(ds.name(), "gwas");
+        assert_eq!(ds.id(), "gwas");
         assert_eq!(ds.row_count(), 4);
         assert_eq!(ds.column_count(), 3);
         assert_eq!(ds.num_partitions(), 1);
@@ -968,7 +985,7 @@ mod tests {
     #[test]
     fn test_empty_dataset() {
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float64, true)]));
-        let ds = AetherDataset::empty("empty", schema);
+        let ds = Dataset::empty("empty", schema);
         assert!(ds.is_empty());
         assert_eq!(ds.row_count(), 0);
         assert_eq!(ds.column_count(), 1);
@@ -1031,7 +1048,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float64, true)]));
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(beta.finish())]).unwrap();
 
-        let ds = AetherDataset::with_schema("null_test", schema, vec![batch]);
+        let ds = Dataset::with_schema("null_test", schema, vec![batch]);
         let vals = ds.extract_f64("x", NullPolicy::DropNulls).unwrap();
         assert_eq!(vals, vec![1.0, 3.0]);
     }
@@ -1046,7 +1063,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float64, true)]));
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(beta.finish())]).unwrap();
 
-        let ds = AetherDataset::with_schema("null_test", schema, vec![batch]);
+        let ds = Dataset::with_schema("null_test", schema, vec![batch]);
         let vals = ds.extract_f64("x", NullPolicy::Fill(-999.0)).unwrap();
         assert_eq!(vals, vec![1.0, -999.0, 3.0]);
     }
@@ -1061,7 +1078,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float64, true)]));
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(beta.finish())]).unwrap();
 
-        let ds = AetherDataset::with_schema("null_test", schema, vec![batch]);
+        let ds = Dataset::with_schema("null_test", schema, vec![batch]);
         let err = ds.extract_f64("x", NullPolicy::Reject);
         assert!(matches!(err, Err(DatasetError::HasNulls { .. })));
     }
@@ -1132,7 +1149,7 @@ mod tests {
     #[test]
     fn test_collect_empty() {
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float64, true)]));
-        let ds = AetherDataset::empty("empty", schema);
+        let ds = Dataset::empty("empty", schema);
         let batch = ds.collect().unwrap();
         assert_eq!(batch.num_rows(), 0);
     }
@@ -1141,7 +1158,7 @@ mod tests {
     fn test_schema_json() {
         let ds = make_test_dataset();
         let json = ds.schema_json();
-        assert_eq!(json["name"], "gwas");
+        assert_eq!(json["id"], "gwas");
         assert_eq!(json["row_count"], 4);
         assert_eq!(json["column_count"], 3);
     }
@@ -1172,7 +1189,7 @@ mod tests {
 
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Float32, false)]));
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(f32_col.finish())]).unwrap();
-        let ds = AetherDataset::with_schema("f32_test", schema, vec![batch]);
+        let ds = Dataset::with_schema("f32_test", schema, vec![batch]);
 
         let vals = ds.extract_f32("x").unwrap();
         assert_eq!(vals, vec![1.0_f32, 2.0_f32]);
@@ -1186,7 +1203,7 @@ mod tests {
 
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)]));
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(int_col.finish())]).unwrap();
-        let ds = AetherDataset::with_schema("int_test", schema, vec![batch]);
+        let ds = Dataset::with_schema("int_test", schema, vec![batch]);
 
         let vals = ds.extract_f64("x", NullPolicy::default()).unwrap();
         assert_eq!(vals, vec![10.0, 20.0]);
@@ -1220,7 +1237,7 @@ mod tests {
         )
         .unwrap();
 
-        let ds = AetherDataset::with_schema("multi", schema, vec![b1, b2]);
+        let ds = Dataset::with_schema("multi", schema, vec![b1, b2]);
         assert_eq!(ds.num_partitions(), 2);
         assert_eq!(ds.row_count(), 2);
 
@@ -1293,7 +1310,7 @@ mod tests {
 
         let schema = Schema::new(vec![Field::new("beta", DataType::Float64, true)]);
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(beta.finish())]).unwrap();
-        let ds = AetherDataset::new("test", vec![batch]).unwrap();
+        let ds = Dataset::new(vec![batch]).unwrap();
 
         let mapped = ds.map_column("beta", "beta", |x| x * 2.0).unwrap();
         let vals = mapped.extract_f64("beta", NullPolicy::DropNulls).unwrap();
@@ -1311,9 +1328,8 @@ mod tests {
 
         let schema = Schema::new(vec![Field::new("x", DataType::Int32, false)]);
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(b.finish())]).unwrap();
-        let ds = AetherDataset::new("ints", vec![batch]).unwrap();
-
-        let mapped = ds.map_column("x", "x", |v| v as f64 / 10.0).unwrap();
+        let ds = Dataset::new(vec![batch]).unwrap();
+        let mapped = ds.map_column("x", "x", |v| v / 10.0).unwrap();
         let vals = mapped.extract_f64("x", NullPolicy::DropNulls).unwrap();
         assert_eq!(vals, vec![1.0, 2.0, 3.0]);
     }
@@ -1364,7 +1380,7 @@ mod tests {
         )
         .unwrap();
 
-        let ds = AetherDataset::with_schema("mp", schema, vec![b1, b2]);
+        let ds = Dataset::with_schema("mp", schema, vec![b1, b2]);
         let mapped = ds.map_column("val", "val", |x| x * x).unwrap();
 
         assert_eq!(mapped.row_count(), 4);

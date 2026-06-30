@@ -9,7 +9,7 @@ members = [
   "crates/stat-primitives",
   "crates/gwascatalog-sdk",
   "crates/data-engine",
-  "apps/phloem-tui", "crates/iceberg-tools", "crates/opengwas-rs", "crates/eutils-rs", "crates/agentik-runtime", "crates/file-base", "crates/data-ingest",
+  "apps/phloem-tui", "crates/iceberg-tools", "crates/opengwas-rs", "crates/eutils-rs", "crates/agentik-runtime", "crates/fs", "crates/data-ingest",
 ]
 
 [workspace.package]

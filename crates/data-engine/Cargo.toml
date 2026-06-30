@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true
+fs = { path = "../fs" }
 serde = { workspace = true, features = ["derive"] }
 iceberg.workspace = true
 iceberg-catalog-rest.workspace = true
@@ -15,7 +16,10 @@ datafusion = "52.5"
 tokio = { workspace = true }
 arrow = "57.3.0"
 arrow-array = "57.3.0"
+arrow-csv = "57.3.0"
 arrow-schema = "57.3.0"
 arrow-select = "57.3.0"
 arrow-ord = "57.3.0"
 serde_json = { workspace = true }
+nanoid = "0.5.0"
+async-trait.workspace = true

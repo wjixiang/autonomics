@@ -13,7 +13,7 @@ iceberg-tools = { path = "../iceberg-tools" }
 data-engine = { path = "../data-engine" }
 opengwas-rs = { path = "../opengwas-rs" }
 eutils-rs = { path = "../eutils-rs" }
-file-base = { path = "../file-base" }
+fs = { path = "../fs" }
 tokio = { workspace = true }
 tokio-util = "0.7"
 anyhow = { workspace = true }

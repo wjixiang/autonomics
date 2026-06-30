@@ -4,22 +4,17 @@ use serde::{Deserialize, Serialize};
 // Shared enums
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Population {
     EAS,
     SAS,
+    #[default]
     EUR,
     AFR,
     AMR,
     #[serde(untagged)]
     Other(String),
-}
-
-impl Default for Population {
-    fn default() -> Self {
-        Self::EUR
-    }
 }
 
 impl std::fmt::Display for Population {

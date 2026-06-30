@@ -10,7 +10,7 @@ use anyhow::Context;
 use data_engine::data_session::DataSession;
 use data_engine::DatasetStore;
 use eutils_rs::EutilsClient;
-use file_base::OpendalFileStorage;
+use fs::OpendalFileStorage;
 use opengwas_rs::OpengwasClient;
 
 /// Iceberg namespace/table tools + DataFusion dataset tools.
@@ -22,9 +22,9 @@ pub async fn iceberg_and_dataset_tools() -> anyhow::Result<Vec<ToolRegistration>
             .await
             .context("failed to initialise DataSession")?,
     );
-    let store = Arc::new(DatasetStore::from_workspace(&workspace));
-    let mut tools = iceberg_tools::iceberg_registrations(workspace);
-    tools.extend(iceberg_tools::dataset_registrations(store));
+    let store = Arc::new(DatasetStore::new());
+    let mut tools = iceberg_tools::iceberg_registrations(workspace.clone());
+    tools.extend(iceberg_tools::dataset_registrations(workspace, store));
     Ok(tools)
 }
 
@@ -42,12 +42,12 @@ pub fn eutils_tools() -> Vec<ToolRegistration> {
 
 /// The complete default tool set: File + Iceberg + Dataset + OpenGWAS + E-utilities.
 ///
-/// Pass a shared [`OpendalFileStorage`] used by both the file-base tools
+/// Pass a shared [`OpendalFileStorage`] used by both the fs tools
 /// and the OpenGWAS download tool.
 pub async fn default_tool_set(
     file_storage: Arc<OpendalFileStorage>,
 ) -> anyhow::Result<Vec<ToolRegistration>> {
-    let mut tools = file_base::file_base_registrations(file_storage.clone());
+    let mut tools = fs::file_base_registrations(file_storage.clone());
     tools.extend(iceberg_and_dataset_tools().await?);
     tools.extend(opengwas_tools(file_storage));
     tools.extend(eutils_tools());

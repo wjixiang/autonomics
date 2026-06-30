@@ -1,6 +1,6 @@
 //! L4 analysis tool: ordinary least squares (OLS) regression.
 //!
-//! Extracts numeric columns via [`AetherDataset::extract_f64_columns`],
+//! Extracts numeric columns via [`Dataset::extract_f64_columns`],
 //! then calls [`stat_primitives::regression::ols`]. The result dataset
 //! contains one row with the regression coefficients, standard errors, t-stats,
 //! p-values, R², etc.

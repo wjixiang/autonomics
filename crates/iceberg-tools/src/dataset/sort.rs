@@ -1,6 +1,6 @@
 //! L3 transform tool: sort a dataset by one or more columns.
 //!
-//! Wraps [`AetherDataset::sort_by`]. Column names are parsed from the
+//! Wraps [`Dataset::sort_by`]. Column names are parsed from the
 //! `columns` list; prefix with `-` for descending order (e.g. `"p_value,-beta"`).
 //! This is a **per-partition** sort — for a fully global sort use `dataset_sql`
 //! with `ORDER BY`.
@@ -65,7 +65,7 @@ impl ToolFunction for DatasetSortTool {
         let sorted = ds.sort_by(&refs).map_err(err)?;
 
         let output_name = input.output.as_deref().map(str::trim).unwrap_or(name);
-        let renamed = data_engine::AetherDataset::with_schema(
+        let renamed = data_engine::Dataset::with_schema(
             output_name,
             sorted.schema().clone(),
             sorted.batches().to_vec(),

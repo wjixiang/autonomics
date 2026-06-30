@@ -1,6 +1,6 @@
 //! L4 analysis tool: descriptive statistics for a numeric column.
 //!
-//! Extracts a numeric column via [`AetherDataset::extract_f64`] and computes
+//! Extracts a numeric column via [`Dataset::extract_f64`] and computes
 //! descriptive statistics using `stat_primitives`.
 
 use std::sync::Arc;

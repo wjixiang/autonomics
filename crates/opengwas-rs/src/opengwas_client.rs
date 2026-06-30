@@ -6,7 +6,7 @@ use reqwest::{Client, header, multipart};
 use rusqlite::Connection;
 use serde_json::Value;
 
-use file_base::OpendalFileStorage;
+use fs::OpendalFileStorage;
 
 use crate::types::*;
 
@@ -437,10 +437,32 @@ impl OpengwasClient {
         keyword: &str,
         field: &str,
         limit: i64,
+        sort_by: Option<&str>,
+        sort_order: Option<&str>,
     ) -> Result<Vec<GwasInfo>> {
         const ALLOWED: &[&str] = &["trait_", "author", "population"];
+        const ALLOWED_SORT: &[&str] = &[
+            "nsnp", "sample_size", "year", "ncase", "ncontrol",
+            "pmid", "mr", "priority", "sd", "author", "trait_",
+        ];
+        const ALLOWED_ORDER: &[&str] = &["asc", "desc"];
+
         if !ALLOWED.contains(&field) {
             anyhow::bail!("invalid search field: {field} (allowed: trait, author, population)");
+        }
+
+        // Validate sort parameters if provided.
+        if let Some(col) = sort_by {
+            if !ALLOWED_SORT.contains(&col) {
+                anyhow::bail!(
+                    "invalid sort column: {col} (allowed: nsnp, sample_size, year, ncase, ncontrol, pmid, mr, priority, sd, author, trait)"
+                );
+            }
+        }
+        if let Some(order) = sort_order {
+            if !ALLOWED_ORDER.contains(&order) {
+                anyhow::bail!("invalid sort order: {order} (allowed: asc, desc)");
+            }
         }
 
         self.ensure_db_loaded().await?;
@@ -448,12 +470,24 @@ impl OpengwasClient {
         let db = self.db.get().expect("db initialised by ensure_db_loaded");
         let pattern = format!("%{}%", keyword.to_lowercase());
         let field = field.to_string();
+        let sort_by = sort_by.map(|s| s.to_string());
+        let sort_order = sort_order.map(|s| s.to_string());
         let db_clone = Arc::clone(db);
         tokio::task::spawn_blocking(move || {
             let guard = db_clone.lock().unwrap();
-            let sql = format!(
-                "SELECT {SELECT_COLUMNS} FROM gwasinfo WHERE LOWER(\"{field}\") LIKE ?1 LIMIT ?2"
-            );
+            let sql = match (&sort_by, &sort_order) {
+                (Some(col), Some(order)) => format!(
+                    "SELECT {SELECT_COLUMNS} FROM gwasinfo WHERE LOWER(\"{field}\") LIKE ?1 \
+                     ORDER BY CASE WHEN \"{col}\" IS NULL THEN 1 ELSE 0 END, \"{col}\" {order} LIMIT ?2"
+                ),
+                (Some(col), None) => format!(
+                    "SELECT {SELECT_COLUMNS} FROM gwasinfo WHERE LOWER(\"{field}\") LIKE ?1 \
+                     ORDER BY CASE WHEN \"{col}\" IS NULL THEN 1 ELSE 0 END, \"{col}\" DESC LIMIT ?2"
+                ),
+                _ => format!(
+                    "SELECT {SELECT_COLUMNS} FROM gwasinfo WHERE LOWER(\"{field}\") LIKE ?1 LIMIT ?2"
+                ),
+            };
             let mut stmt = guard.prepare(&sql)?;
             let rows = stmt.query_map(rusqlite::params![pattern, limit], row_to_gwasinfo)?;
             rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -780,7 +814,7 @@ mod tests {
         let client = get_client();
 
         let result = client
-            .gwasinfo_search("tension", "trait_", 10)
+            .gwasinfo_search("tension", "trait_", 10, None, None)
             .await
             .unwrap();
 

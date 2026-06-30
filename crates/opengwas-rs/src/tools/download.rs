@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::json_err;
 use crate::format::format_download;
 use crate::{OpengwasClient, types::GwasInfoFilesRequest};
-use file_base::OpendalFileStorage;
+use fs::OpendalFileStorage;
 
 #[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(

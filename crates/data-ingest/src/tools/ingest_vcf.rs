@@ -7,7 +7,7 @@ use agentik_core::tools::{ToolError, ToolFunction};
 use agentik_sdk::types::ToolResult;
 use anyhow::anyhow;
 use async_trait::async_trait;
-use data_engine::{AetherDataset, DatasetStore, Provenance};
+use data_engine::{Dataset, DatasetStore, Provenance};
 use serde::{Deserialize, Serialize};
 
 use crate::registry::IngestRegistry;
@@ -73,15 +73,13 @@ impl ToolFunction for IngestVcfTool {
             .map_err(|e| ToolError::from(anyhow!("{e}")))?;
 
         if batches.is_empty() {
-            return Ok(ToolResult::error(format!(
-                "no records found in '{path}'"
-            )));
+            return Ok(ToolResult::error(format!("no records found in '{path}'")));
         }
 
         let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
         let column_count = batches[0].schema().fields().len();
 
-        let dataset = AetherDataset::new(name, batches)
+        let dataset = Dataset::new(batches)
             .map_err(err)?
             .with_provenance(Provenance::FileIngest {
                 path: path.to_owned(),

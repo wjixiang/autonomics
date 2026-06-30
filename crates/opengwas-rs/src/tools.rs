@@ -18,7 +18,7 @@ mod variants_rsid;
 use std::sync::Arc;
 
 use agentik_core::tools::ToolRegistration;
-use file_base::OpendalFileStorage;
+use fs::OpendalFileStorage;
 
 pub(crate) use self::helpers::json_err;
 use crate::OpengwasClient;

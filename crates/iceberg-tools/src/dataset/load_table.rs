@@ -1,7 +1,7 @@
 //! L1 ingestion tool: load an Iceberg table into a named in-memory dataset.
 //!
 //! `dataset_load_table` is the primary entry point for getting persistent data
-//! into an [`AetherDataset`]. Data flows from a registered Iceberg table
+//! into an [`Dataset`]. Data flows from a registered Iceberg table
 //! (accessed through the `iceberg` DataFusion catalog) into the
 //! [`DatasetStore`]'s working memory.
 
@@ -10,6 +10,7 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction};
 use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
+use data_engine::data_session::DataSession;
 use data_engine::DatasetStore;
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +37,7 @@ pub struct DatasetLoadTableInput {
 }
 
 pub struct DatasetLoadTableTool {
+    pub workspace: Arc<DataSession>,
     pub store: Arc<DatasetStore>,
 }
 
@@ -64,8 +66,9 @@ impl ToolFunction for DatasetLoadTableTool {
         let columns_ref: Option<&[String]> = columns.as_deref();
 
         let ds = self
-            .store
+            .workspace
             .read_table(
+                &self.store,
                 name,
                 namespace,
                 table,

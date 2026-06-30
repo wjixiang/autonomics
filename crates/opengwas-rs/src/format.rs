@@ -116,7 +116,7 @@ pub fn value_to_table(rows: &[Value]) -> String {
     out.push_str(" |\n");
 
     // Separator
-    out.push_str("|");
+    out.push('|');
     for _ in &columns {
         out.push_str("------|");
     }
@@ -543,7 +543,7 @@ fn format_keyed_groups(value: &Value, label: &str) -> String {
     for (key, val) in map {
         let rows: Vec<Value> = val
             .as_array()
-            .map(|a| a.iter().cloned().collect())
+            .map(|a| a.to_vec())
             .unwrap_or_default();
         total += rows.len();
 

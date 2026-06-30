@@ -2,7 +2,7 @@ use agentik_core::tools::ToolFunction;
 use opengwas_rs::tools::download::{DownloadFilesInput, DownloadFilesTool};
 use std::sync::Arc;
 
-use file_base::OpendalFileStorage;
+use fs::OpendalFileStorage;
 use opengwas_rs::OpengwasClient;
 
 /// Integration test — hits the live OpenGWAS API and downloads to memory storage.
@@ -25,5 +25,5 @@ async fn test_download_ieu_a_2() {
 
     let file_list = storage.op.list("/").await.unwrap();
     dbg!(&file_list);
-    assert!(file_list.len() > 0, "expected at least one file in storage");
+    assert!(!file_list.is_empty(), "expected at least one file in storage");
 }
