@@ -42,11 +42,6 @@ pub enum DagError {
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
 
-    /// Fallback for dataset errors that escape a node without being wrapped
-    /// (e.g. returned directly from a helper that does not own a node error).
-    #[error(transparent)]
-    Dataset(#[from] crate::DatasetError),
-
     /// Propagates any [`datafusion::error::DataFusionError`] that escapes a
     /// node body (e.g. register_table, sql).
     #[error("datafusion: {0}")]
@@ -71,7 +66,7 @@ impl DagError {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::ExecutionError { kind, .. } => kind,
-            Self::Dataset(_) => "dataset",
+
             Self::DataFusion(_) => "datafusion",
         }
     }

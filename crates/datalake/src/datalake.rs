@@ -1,6 +1,5 @@
 use crate::config;
 use crate::config::IcebergConfig;
-use anyhow::{Ok, Result};
 use datafusion::prelude::SessionContext;
 use iceberg::{Catalog, CatalogBuilder, NamespaceIdent, TableIdent, table};
 use iceberg_catalog_rest::RestCatalog;
@@ -32,7 +31,7 @@ impl Datalake {
         }
     }
 
-    pub async fn get_catalog(&self) -> Result<Arc<RestCatalog>> {
+    pub async fn get_catalog(&self) -> crate::error::Result<Arc<RestCatalog>> {
         self.catalog
             .get_or_try_init(|| async {
                 let builder = iceberg_catalog_rest::RestCatalogBuilder::default()
@@ -40,15 +39,17 @@ impl Datalake {
                         configured_scheme: "s3".to_string(),
                         customized_credential_load: None,
                     }));
-                Ok(Arc::new(
-                    builder.load("rest", self.config.to_properties()).await?,
-                ))
+                let catalog = builder
+                    .load("rest", self.config.to_properties())
+                    .await
+                    .map_err(|e| format!("build RestCatalog failed: {e}"))?;
+                Ok::<_, crate::error::Error>(Arc::new(catalog))
             })
             .await?;
         Ok(self.catalog.get().unwrap().clone())
     }
 
-    pub async fn list_all_tables(&self) -> Result<Vec<(Vec<String>, String)>> {
+    pub async fn list_all_tables(&self) -> crate::error::Result<Vec<(Vec<String>, String)>> {
         let catalog = self.get_catalog().await.unwrap();
         let namespaces = catalog.list_namespaces(None).await?;
         let mut result = Vec::new();
@@ -65,11 +66,19 @@ impl Datalake {
     pub async fn list_tables_in_namespace(
         &self,
         namespace: &NamespaceIdent,
-    ) -> Result<Vec<TableIdent>> {
+    ) -> crate::error::Result<Vec<TableIdent>> {
         Ok(self.get_catalog().await?.list_tables(namespace).await?)
     }
 
-    pub async fn get_ctx(&self) -> Result<SessionContext> {
+    pub async fn get_provider(&self) -> crate::error::Result<IcebergCatalogProvider> {
+        let rest_catalog = self.get_catalog().await?;
+
+        let catalog_provider: IcebergCatalogProvider =
+            IcebergCatalogProvider::try_new(rest_catalog.clone()).await?;
+        Ok(catalog_provider)
+    }
+
+    pub async fn get_ctx(&self) -> crate::error::Result<SessionContext> {
         let rest_catalog = self.get_catalog().await?;
 
         let catalog_provider: IcebergCatalogProvider =
@@ -84,7 +93,7 @@ impl Datalake {
     pub async fn create_namespace_if_not_exist(
         &self,
         namespace: &NamespaceIdent,
-    ) -> Result<iceberg::Namespace> {
+    ) -> crate::error::Result<iceberg::Namespace> {
         let catalog = self.get_catalog().await?;
         let namespace_exist = catalog.namespace_exists(namespace).await?;
         if namespace_exist {
@@ -100,7 +109,7 @@ impl Datalake {
         &self,
         namespace: &NamespaceIdent,
         creation: iceberg::TableCreation,
-    ) -> Result<iceberg::table::Table> {
+    ) -> crate::error::Result<iceberg::table::Table> {
         let rest_catalog = self.get_catalog().await?;
         let table: table::Table = rest_catalog.create_table(namespace, creation).await?;
         Ok(table)
@@ -110,7 +119,7 @@ impl Datalake {
         &self,
         namespace: &NamespaceIdent,
         creation: iceberg::TableCreation,
-    ) -> Result<iceberg::table::Table> {
+    ) -> crate::error::Result<iceberg::table::Table> {
         let rest_catalog = self.get_catalog().await?;
         let tableident: iceberg::TableIdent =
             iceberg::TableIdent::new(namespace.clone(), creation.name.clone());

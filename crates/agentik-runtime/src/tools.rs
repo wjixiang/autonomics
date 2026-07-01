@@ -2,31 +2,19 @@
 //!
 //! Each function returns a [`Vec<ToolRegistration>`]. Compose them
 //! to build custom tool sets.
+//!
+//! Iceberg + in-memory dataset tools previously lived here behind
+//! `iceberg_and_dataset_tools`. Those crates (`iceberg-tools`,
+//! `data-ingest`, plus `data-engine::dataset*`) have been removed as
+//! part of the engine rewrite; only file / OpenGWAS / E-utilities
+//! tools remain in the default set.
 
 use std::sync::Arc;
 
 use agentik_core::tools::ToolRegistration;
-use anyhow::Context;
-use data_engine::data_session::DataSession;
-use data_engine::DatasetStore;
 use eutils_rs::EutilsClient;
 use fs::OpendalFileStorage;
 use opengwas_rs::OpengwasClient;
-
-/// Iceberg namespace/table tools + DataFusion dataset tools.
-///
-/// Requires async initialisation of the Aether workspace.
-pub async fn iceberg_and_dataset_tools() -> anyhow::Result<Vec<ToolRegistration>> {
-    let workspace = Arc::new(
-        DataSession::new()
-            .await
-            .context("failed to initialise DataSession")?,
-    );
-    let store = Arc::new(DatasetStore::new());
-    let mut tools = iceberg_tools::iceberg_registrations(workspace.clone());
-    tools.extend(iceberg_tools::dataset_registrations(workspace, store));
-    Ok(tools)
-}
 
 /// OpenGWAS tools (GWAS catalog lookup).
 pub fn opengwas_tools(file_storage: Arc<OpendalFileStorage>) -> Vec<ToolRegistration> {
@@ -40,15 +28,14 @@ pub fn eutils_tools() -> Vec<ToolRegistration> {
     eutils_rs::eutils_registrations(eutils)
 }
 
-/// The complete default tool set: File + Iceberg + Dataset + OpenGWAS + E-utilities.
+/// The complete default tool set: File + OpenGWAS + E-utilities.
 ///
 /// Pass a shared [`OpendalFileStorage`] used by both the fs tools
 /// and the OpenGWAS download tool.
-pub async fn default_tool_set(
+pub fn default_tool_set(
     file_storage: Arc<OpendalFileStorage>,
 ) -> anyhow::Result<Vec<ToolRegistration>> {
     let mut tools = fs::file_base_registrations(file_storage.clone());
-    tools.extend(iceberg_and_dataset_tools().await?);
     tools.extend(opengwas_tools(file_storage));
     tools.extend(eutils_tools());
     Ok(tools)

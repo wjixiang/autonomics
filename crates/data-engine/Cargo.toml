@@ -6,12 +6,11 @@ edition = "2024"
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true
+datalake = { path = "../datalake" }
 fs = { path = "../fs" }
 serde = { workspace = true, features = ["derive"] }
 iceberg.workspace = true
 iceberg-catalog-rest.workspace = true
-iceberg-storage-opendal.workspace = true
-iceberg-datafusion = "0.9.0"
 datafusion.workspace = true
 tokio = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
@@ -23,3 +22,7 @@ arrow-ord = "57.3.0"
 serde_json = { workspace = true }
 nanoid = "0.5.0"
 async-trait.workspace = true
+
+[dev-dependencies]
+datalake = { path = "../datalake" }
+iceberg.workspace = true

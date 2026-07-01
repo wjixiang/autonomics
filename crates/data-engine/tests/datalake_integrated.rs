@@ -1,4 +1,4 @@
-use data_engine::datalake::Datalake;
+use datalake::Datalake;
 
 #[tokio::test]
 #[ignore]

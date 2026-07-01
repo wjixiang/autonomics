@@ -67,10 +67,8 @@ dependencies = [
  "agentik-core",
  "agentik-sdk",
  "anyhow",
- "data-engine",
  "eutils-rs",
  "fs",
- "iceberg-tools",
  "opengwas-rs",
  "tokio",
  "tokio-util",
@@ -1409,40 +1407,15 @@ dependencies = [
  "arrow-select",
  "async-trait",
  "datafusion",
+ "datalake",
  "fs",
  "iceberg",
  "iceberg-catalog-rest",
- "iceberg-datafusion",
- "iceberg-storage-opendal",
  "nanoid",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
-]
-
-[[package]]
-name = "data-ingest"
-version = "0.1.0"
-dependencies = [
- "agentik-core",
- "agentik-proc",
- "agentik-sdk",
- "anyhow",
- "arrow",
- "arrow-array",
- "arrow-csv",
- "arrow-schema",
- "async-trait",
- "data-engine",
- "fs",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "vcf-arrow",
 ]
 
 [[package]]
@@ -2096,6 +2069,19 @@ dependencies = [
  "recursive",
  "regex",
  "sqlparser",
+]
+
+[[package]]
+name = "datalake"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "datafusion",
+ "iceberg",
+ "iceberg-catalog-rest",
+ "iceberg-datafusion",
+ "iceberg-storage-opendal",
+ "tokio",
 ]
 
 [[package]]
@@ -3157,25 +3143,6 @@ dependencies = [
  "serde",
  "typetag",
  "url",
-]
-
-[[package]]
-name = "iceberg-tools"
-version = "0.1.0"
-dependencies = [
- "agentik-core",
- "agentik-proc",
- "agentik-sdk",
- "anyhow",
- "arrow",
- "async-trait",
- "data-engine",
- "datafusion",
- "iceberg",
- "serde",
- "serde_json",
- "stat-primitives",
- "tokio",
 ]
 
 [[package]]
@@ -6915,18 +6882,6 @@ name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
-
-[[package]]
-name = "vcf-arrow"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eec2ee28c7d857919265334137934d0ee0359e0d99b997fd9c933a2e73564688"
-dependencies = [
- "arrow",
- "bytes",
- "flate2",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "vcpkg"

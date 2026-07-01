@@ -1,7 +1,16 @@
-use thiserror::Error;
+pub type Result<T> = std::result::Result<T, Error>;
 
-/// Errors produced by dataset operations.
-#[derive(Error, Debug)]
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("{0}")]
+    Custom(String),
+
+    #[error("Datalake error")]
+    DatalakeError(#[from] datalake::error::Error),
+}
+
+#[deprecated]
+#[derive(thiserror::Error, Debug)]
 pub enum DatasetError {
     #[error("dataset '{name}' not found")]
     NotFound { name: String },

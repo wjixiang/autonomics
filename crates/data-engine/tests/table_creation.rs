@@ -1,4 +1,4 @@
-use data_engine::datalake::Datalake;
+use datalake::Datalake;
 use iceberg::{
     NamespaceIdent, TableCreation,
     spec::{NestedField, PrimitiveType, Schema, Type},
