@@ -1,18 +1,10 @@
-use std::io::Cursor;
-use std::sync::Arc;
-
-use arrow_csv::{ReaderBuilder, reader::Format};
-use arrow_schema::SchemaRef;
 use async_trait::async_trait;
-use datafusion::common::HashSet;
-use fs::OpendalFileStorage;
+use datafusion::prelude::CsvReadOptions;
+use datafusion::prelude::DataFrame;
 use thiserror::Error;
 
-use crate::Dataset;
-use crate::DatasetStore;
 use crate::data_engine::dag::NodeMeta;
-use crate::data_engine::dag::{DagError, DagNode, DagNodeStatus};
-use crate::dataset::DatasetRef;
+use crate::data_engine::dag::{DagError, DagNode};
 
 /// Errors specific to [`LoadCsvNode`].
 ///
@@ -37,9 +29,6 @@ pub enum LoadCsvError {
 
     #[error("read csv batch failed")]
     ReadBatch(#[source] arrow_schema::ArrowError),
-
-    #[error(transparent)]
-    Dataset(#[from] crate::DatasetError),
 }
 
 impl LoadCsvError {
@@ -52,7 +41,6 @@ impl LoadCsvError {
             Self::InferSchema(_) => "csv.infer_schema",
             Self::BuildReader(_) => "csv.build_reader",
             Self::ReadBatch(_) => "csv.read_batch",
-            Self::Dataset(_) => "csv.dataset",
         }
     }
 }
@@ -66,29 +54,14 @@ impl From<LoadCsvError> for DagError {
 /// Load full dataset into memory as RecordBatchs
 pub struct LoadCsvNode {
     meta: NodeMeta,
-    fs_ref: Arc<OpendalFileStorage>,
-    dataset_store_ref: Arc<DatasetStore>,
     csv_file_path: String,
-    output_ids: HashSet<String>,
 }
 
 impl LoadCsvNode {
-    pub fn new(
-        id: &str,
-        fs_ref: Arc<OpendalFileStorage>,
-        dataset_store_ref: Arc<DatasetStore>,
-        csv_path: &str,
-    ) -> Self {
+    pub fn new(meta: NodeMeta, csv_path: &str) -> Self {
         Self {
-            meta: NodeMeta::new(
-                id.to_string(),
-                "load_csv_node".to_string(),
-                DagNodeStatus::Idle,
-            ),
-            fs_ref,
-            dataset_store_ref,
+            meta,
             csv_file_path: csv_path.to_string(),
-            output_ids: HashSet::default(),
         }
     }
 }
@@ -98,55 +71,31 @@ impl DagNode for LoadCsvNode {
     fn meta(&self) -> &NodeMeta {
         &self.meta
     }
-    async fn execute(&mut self, _inputs: &[DatasetRef]) -> Result<(), DagError> {
-        let op = self.fs_ref.op.clone();
-        let path = self.csv_file_path.clone();
-
-        let bytes = op.read(&path).await.map_err(|source| LoadCsvError::Read {
-            path: path.clone(),
-            source,
-        })?;
-        let bytes = bytes.to_vec();
-
-        let format = Format::default().with_header(true).with_delimiter(b',');
-        let (schema, _) = format
-            .infer_schema(Cursor::new(&bytes), Some(1000))
-            .map_err(LoadCsvError::InferSchema)?;
-        let schema: SchemaRef = Arc::new(schema);
-
-        let reader = ReaderBuilder::new(schema)
-            .with_header(true)
-            .with_delimiter(b',')
-            .build(Cursor::new(&bytes))
-            .map_err(LoadCsvError::BuildReader)?;
-
-        let mut batches = Vec::new();
-        for batch in reader {
-            let batch = batch.map_err(LoadCsvError::ReadBatch)?;
-            batches.push(batch);
-        }
-
+    async fn execute(&mut self, _inputs: &[DataFrame]) -> Result<Vec<DataFrame>, DagError> {
         // Wrap explicitly so the error is categorized under `LoadCsvError::Dataset`
         // (kind = "csv.dataset") rather than falling through to `DagError::Dataset`.
-        let dataset = Dataset::new(batches).map_err(LoadCsvError::from)?;
-        let store = self.dataset_store_ref.clone();
 
-        // Store dataset reference id
-        self.output_ids.insert(dataset.id().to_string());
+        let ctx = self.meta.ctx().clone();
+        let df = ctx
+            .read_csv(self.csv_file_path.clone(), CsvReadOptions::default())
+            .await
+            .map_err(|e| DagError::ExecutionError {
+                kind: "load_csv_error",
+                source: Box::new(e),
+            })?;
 
-        store.put_overwrite(dataset).await;
-        Ok(())
-    }
-
-    fn get_output_ids(&self) -> Result<&HashSet<String>, DagError> {
-        Ok(&self.output_ids)
+        Ok(vec![df])
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
-    use crate::data_engine::dag::DagNode;
+    use crate::data_engine::dag::{DagNode, DagNodeStatus};
+    use arrow_array::{Int64Array, StringArray};
+    use datafusion::prelude::SessionContext;
 
     #[tokio::test]
     async fn test_csv_load() {
@@ -154,36 +103,36 @@ mod tests {
         let csv_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("test_datasets")
             .join("insurance.csv");
-        let csv_bytes = std::fs::read(&csv_path).unwrap();
 
-        let opendal_path = "/test.csv";
-        let fs_ref = Arc::new(OpendalFileStorage::new());
-
-        // Write test CSV into in-memory storage
-        fs_ref.op.write(opendal_path, csv_bytes).await.unwrap();
-
-        let dataset_store_ref = Arc::new(DatasetStore::new());
-        let mut csv_load_node =
-            LoadCsvNode::new(id, fs_ref, dataset_store_ref.clone(), opendal_path);
-        csv_load_node.execute(&[]).await.unwrap();
+        let ctx = Arc::new(SessionContext::new());
+        let meta = NodeMeta::new(
+            id.to_string(),
+            "load_csv_node".to_string(),
+            DagNodeStatus::Idle,
+            ctx.clone(),
+        );
+        let mut csv_load_node = LoadCsvNode::new(meta, csv_path.to_str().unwrap());
+        let res = csv_load_node.execute(&[]).await.unwrap();
 
         // Verify node metadata
         assert_eq!(csv_load_node.meta().id(), "test_id");
         assert_eq!(csv_load_node.meta().name(), "load_csv_node");
 
-        // Verify dataset was registered in store
-        let ids = csv_load_node.get_output_ids().unwrap();
-        assert!(!ids.is_empty());
+        assert!(!res.is_empty());
 
-        let dataset_id = ids.iter().next().unwrap();
-        let dataset = dataset_store_ref.get(dataset_id).await.unwrap();
+        let df = res.first().unwrap();
 
         // Verify shape: 1338 rows, 7 columns
-        assert_eq!(dataset.row_count(), 1338);
-        assert_eq!(dataset.column_count(), 7);
+        assert_eq!(df.clone().count().await.unwrap(), 1338);
+        assert_eq!(df.schema().fields().len(), 7);
 
         // Verify column names
-        let columns: Vec<&str> = dataset.column_names().collect();
+        let columns: Vec<&str> = df
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect();
         assert_eq!(
             columns,
             vec![
@@ -191,15 +140,23 @@ mod tests {
             ]
         );
 
-        // Verify numeric column extraction works
-        let ages = dataset
-            .extract_f64("age", crate::NullPolicy::default())
-            .unwrap();
-        assert_eq!(ages.len(), 1338);
-        assert_eq!(ages[0], 19.0);
+        // Verify first row values
+        let batches = df.clone().collect().await.unwrap();
+        assert!(!batches.is_empty());
 
-        // Verify string column extraction works
-        let sexes = dataset.extract_string("sex").unwrap();
-        assert_eq!(sexes[0], Some("female".to_string()));
+        let batch = &batches[0];
+        let age = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap();
+        assert_eq!(age.value(0), 19);
+
+        let sex = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(sex.value(0), "female");
     }
 }

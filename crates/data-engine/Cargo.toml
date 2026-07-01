@@ -12,9 +12,9 @@ iceberg.workspace = true
 iceberg-catalog-rest.workspace = true
 iceberg-storage-opendal.workspace = true
 iceberg-datafusion = "0.9.0"
-datafusion = "52.5"
+datafusion.workspace = true
 tokio = { workspace = true }
-arrow = "57.3.0"
+arrow = { workspace = true, features = ["prettyprint"] }
 arrow-array = "57.3.0"
 arrow-csv = "57.3.0"
 arrow-schema = "57.3.0"

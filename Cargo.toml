@@ -38,7 +38,7 @@ arrow-csv = "57.3.0"
 parquet = "57.3.0"
 rayon = "1.12.0"
 futures = "0.3"
-datafusion = "52.2.0"
+datafusion = "52.5"
 
 # Suppress unused-warnings for the public-API workspace.dependencies that
 # the umbrella doesn't directly import. Keep this list as a hint for

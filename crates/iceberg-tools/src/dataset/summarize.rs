@@ -44,7 +44,7 @@ impl ToolFunction for DatasetSummarizeTool {
 
         let ds = self.store.get(name).await.map_err(err)?;
         let total = ds.row_count();
-        let vals = ds.extract_f64(column, NullPolicy::DropNulls).map_err(err)?;
+        let vals = ds.extract_f64(column, &NullPolicy::DropNulls).map_err(err)?;
         let n = vals.len();
         let nulls_dropped = total - n;
 

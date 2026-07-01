@@ -58,9 +58,9 @@ impl ToolFunction for DatasetIvwTool {
         let output_name = input.output.as_deref().map(str::trim).unwrap_or("ivw");
 
         let ds = self.store.get(name).await.map_err(err)?;
-        let beta_exp_vals = ds.extract_f64(beta_exp, NullPolicy::DropNulls).map_err(err)?;
-        let beta_out_vals = ds.extract_f64(beta_out, NullPolicy::DropNulls).map_err(err)?;
-        let se_out_vals = ds.extract_f64(se_out, NullPolicy::DropNulls).map_err(err)?;
+        let beta_exp_vals = ds.extract_f64(beta_exp, &NullPolicy::DropNulls).map_err(err)?;
+        let beta_out_vals = ds.extract_f64(beta_out, &NullPolicy::DropNulls).map_err(err)?;
+        let se_out_vals = ds.extract_f64(se_out, &NullPolicy::DropNulls).map_err(err)?;
 
         let n = beta_exp_vals.len();
         if beta_out_vals.len() != n || se_out_vals.len() != n {

@@ -66,7 +66,7 @@ impl ToolFunction for DatasetOlsTool {
         let all_cols: Vec<&str> = std::iter::once(y_col)
             .chain(input.predictors.iter().map(|s| s.trim()))
             .collect();
-        let columns = ds.extract_f64_columns(&all_cols, NullPolicy::DropNulls).map_err(err)?;
+        let columns = ds.extract_f64_columns(&all_cols, &NullPolicy::DropNulls).map_err(err)?;
 
         if columns.is_empty() || columns.iter().any(|c| c.is_empty()) {
             return Ok(ToolResult::error(

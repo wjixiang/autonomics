@@ -375,7 +375,7 @@ mod tests {
 
         let ds = store.get("nums").await.unwrap();
         assert!(ds.has_column("y_squared"));
-        let vals = ds.extract_f64("y_squared", NullPolicy::DropNulls).unwrap();
+        let vals = ds.extract_f64("y_squared", &NullPolicy::DropNulls).unwrap();
         // make_simple_dataset has y = [0.0, 2.0, 4.0, 6.0, 8.0]
         assert_eq!(vals, vec![0.0, 4.0, 16.0, 36.0, 64.0]);
     }
@@ -393,7 +393,7 @@ mod tests {
 
         let ds = store.get("nums").await.unwrap();
         assert_eq!(ds.column_count(), 2); // still 2 columns, not 3
-        let vals = ds.extract_f64("y", NullPolicy::DropNulls).unwrap();
+        let vals = ds.extract_f64("y", &NullPolicy::DropNulls).unwrap();
         assert_eq!(vals, vec![0.0, 20.0, 40.0, 60.0, 80.0]);
     }
 
@@ -409,7 +409,7 @@ mod tests {
             .unwrap();
 
         let ds = store.get("nums").await.unwrap();
-        let vals = ds.extract_f64("log_y", NullPolicy::DropNulls).unwrap();
+        let vals = ds.extract_f64("log_y", &NullPolicy::DropNulls).unwrap();
         // y = [0.0, 2.0, 4.0, 6.0, 8.0] → ln = [-inf, 0.693.., 1.386.., 1.791.., 2.079..]
         assert_eq!(vals.len(), 5);
         assert!(vals[0].is_infinite() && vals[0].is_sign_negative()); // ln(0) = -inf

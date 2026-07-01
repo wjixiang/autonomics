@@ -1,13 +1,15 @@
-use async_trait::async_trait;
-use datafusion::common::HashMap;
-use datafusion::common::HashSet;
-use thiserror::Error;
+use std::sync::Arc;
 
-use crate::dataset::DatasetRef;
+use async_trait::async_trait;
+use datafusion::{
+    common::HashMap,
+    prelude::{DataFrame, SessionContext},
+};
+use thiserror::Error;
 
 type NodeId = String;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum DependencyKind {
     OneToOne,
     Shuffle,
@@ -19,12 +21,13 @@ pub struct Edge {
     pub kind: DependencyKind,
 }
 
+#[derive(Default)]
 pub struct DAG {
     pub nodes: HashMap<NodeId, Box<dyn DagNode>>,
     pub edges: Vec<Edge>,
 }
 
-pub struct DagScheduler {}
+impl DAG {}
 
 #[derive(Debug, Error)]
 pub enum DagError {
@@ -43,6 +46,11 @@ pub enum DagError {
     /// (e.g. returned directly from a helper that does not own a node error).
     #[error(transparent)]
     Dataset(#[from] crate::DatasetError),
+
+    /// Propagates any [`datafusion::error::DataFusionError`] that escapes a
+    /// node body (e.g. register_table, sql).
+    #[error("datafusion: {0}")]
+    DataFusion(#[from] datafusion::error::DataFusionError),
 }
 
 impl DagError {
@@ -64,11 +72,12 @@ impl DagError {
         match self {
             Self::ExecutionError { kind, .. } => kind,
             Self::Dataset(_) => "dataset",
+            Self::DataFusion(_) => "datafusion",
         }
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub enum DagNodeStatus {
     #[default]
     Idle,
@@ -81,11 +90,17 @@ pub struct NodeMeta {
     id: String,
     name: String,
     status: DagNodeStatus,
+    ctx: Arc<SessionContext>,
 }
 
 impl NodeMeta {
-    pub fn new(id: String, name: String, status: DagNodeStatus) -> Self {
-        Self { id, name, status }
+    pub fn new(id: String, name: String, status: DagNodeStatus, ctx: Arc<SessionContext>) -> Self {
+        Self {
+            id,
+            name,
+            status,
+            ctx,
+        }
     }
 
     pub fn id(&self) -> &str {
@@ -96,8 +111,14 @@ impl NodeMeta {
         &self.name
     }
 
-    pub fn status(&self) -> DagNodeStatus {
-        self.status.clone()
+    /// Status borrowed by reference — caller must not outlive the meta node.
+    pub fn status(&self) -> &DagNodeStatus {
+        &self.status
+    }
+
+    /// Returns an `Arc::clone` of the shared SessionContext.
+    pub fn ctx(&self) -> Arc<SessionContext> {
+        self.ctx.clone()
     }
 }
 
@@ -105,7 +126,5 @@ impl NodeMeta {
 pub trait DagNode {
     fn meta(&self) -> &NodeMeta;
     /// Input data injected by system when executed
-    async fn execute(&mut self, inputs: &[DatasetRef]) -> Result<(), DagError>;
-    // TODO: Remove this field, get output ids directly from exeucte result (Change to use Arc<Dataset> is better)
-    fn get_output_ids(&self) -> Result<&HashSet<String>, DagError>;
+    async fn execute(&mut self, inputs: &[DataFrame]) -> Result<Vec<DataFrame>, DagError>;
 }

@@ -9,6 +9,7 @@ rust-version.workspace = true
 agentik-core = { path = "../agentik-core" }
 agentik-proc = { path = "../agentik-proc" }
 agentik-sdk = { path = "../agentik-sdk" }
+datafusion = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 opendal = "0.57"
@@ -16,6 +17,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 uuid = "1.23"
+async-stream = "0.3"
+bytes = "1"
+chrono = "0.4"
 
 [lints]
 workspace = true

@@ -37,7 +37,7 @@ use crate::error::DatasetError;
 // ---------------------------------------------------------------------------
 
 /// Policy for handling null values when extracting numeric columns.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Default)]
 pub enum NullPolicy {
     /// Drop null values, returning only non-null elements.
     #[default]
@@ -53,7 +53,7 @@ pub enum NullPolicy {
 // ---------------------------------------------------------------------------
 
 /// Describes how a dataset was derived.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Provenance {
     /// Created from a SQL query against an external source.
     Query { sql: String },
@@ -118,7 +118,6 @@ impl fmt::Display for Provenance {
 ///     provenance: Transform { op: "filter", parents: ["gwas_raw"] }
 /// }
 /// ```
-#[derive(Clone)]
 pub struct Dataset {
     id: String,
     schema: SchemaRef,
@@ -161,7 +160,7 @@ impl Dataset {
     }
 
     pub fn get_ctx(&self) -> Result<SessionContext, DatasetError> {
-        let mut ctx = SessionContext::new();
+        let ctx = SessionContext::new();
         let mem_table = MemTable::try_new(self.schema.clone(), vec![self.batches.clone()])
             .map_err(|e| DatasetError::BuildCtxFaild {
                 message: e.to_string(),
@@ -299,7 +298,7 @@ impl Dataset {
     pub fn extract_f64(
         &self,
         column: &str,
-        null_policy: NullPolicy,
+        null_policy: &NullPolicy,
     ) -> Result<Vec<f64>, DatasetError> {
         let idx = self
             .column_index(column)
@@ -331,7 +330,7 @@ impl Dataset {
                 .as_any()
                 .downcast_ref::<Float64Array>()
                 .expect("cast to Float64 must succeed");
-            collect_f64(arr, &mut result, column, null_policy)?;
+            collect_f64(arr, &mut result, column, &null_policy)?;
         }
         Ok(result)
     }
@@ -413,7 +412,7 @@ impl Dataset {
     pub fn extract_f64_columns(
         &self,
         columns: &[&str],
-        null_policy: NullPolicy,
+        null_policy: &NullPolicy,
     ) -> Result<Vec<Vec<f64>>, DatasetError> {
         columns
             .iter()
@@ -802,7 +801,7 @@ impl Dataset {
     fn extract_float64_column(
         &self,
         idx: usize,
-        null_policy: NullPolicy,
+        null_policy: &NullPolicy,
     ) -> Result<Vec<f64>, DatasetError> {
         let column_name = self.schema.field(idx).name().clone();
         let mut result = Vec::with_capacity(self.row_count());
@@ -839,14 +838,14 @@ fn collect_f64(
     arr: &Float64Array,
     out: &mut Vec<f64>,
     column: &str,
-    policy: NullPolicy,
+    policy: &NullPolicy,
 ) -> Result<(), DatasetError> {
     for v in arr.iter() {
         match (v, policy) {
             (Some(val), _) => out.push(val),
-            (None, NullPolicy::DropNulls) => {}
-            (None, NullPolicy::Fill(f)) => out.push(f),
-            (None, NullPolicy::Reject) => {
+            (None, &NullPolicy::DropNulls) => {}
+            (None, &NullPolicy::Fill(f)) => out.push(f),
+            (None, &NullPolicy::Reject) => {
                 return Err(DatasetError::HasNulls {
                     column: column.to_owned(),
                 });
@@ -925,6 +924,12 @@ fn build_map_columns(
     out
 }
 
+impl From<datafusion::dataframe::DataFrame> for Dataset {
+    fn from(_value: datafusion::dataframe::DataFrame) -> Self {
+        todo!()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -994,21 +999,21 @@ mod tests {
     #[test]
     fn test_extract_f64_zero_copy() {
         let ds = make_test_dataset();
-        let beta = ds.extract_f64("beta", NullPolicy::default()).unwrap();
+        let beta = ds.extract_f64("beta", &NullPolicy::default()).unwrap();
         assert_eq!(beta, vec![0.5, -0.3, 1.2, 0.0]);
     }
 
     #[test]
     fn test_extract_f64_column_not_found() {
         let ds = make_test_dataset();
-        let err = ds.extract_f64("nonexistent", NullPolicy::default());
+        let err = ds.extract_f64("nonexistent", &NullPolicy::default());
         assert!(matches!(err, Err(DatasetError::ColumnNotFound { .. })));
     }
 
     #[test]
     fn test_extract_f64_not_numeric() {
         let ds = make_test_dataset();
-        let err = ds.extract_f64("snp", NullPolicy::default());
+        let err = ds.extract_f64("snp", &NullPolicy::default());
         assert!(matches!(err, Err(DatasetError::NotNumeric { .. })));
     }
 
@@ -1031,7 +1036,7 @@ mod tests {
     fn test_extract_f64_columns() {
         let ds = make_test_dataset();
         let cols = ds
-            .extract_f64_columns(&["beta", "p_value"], NullPolicy::default())
+            .extract_f64_columns(&["beta", "p_value"], &NullPolicy::default())
             .unwrap();
         assert_eq!(cols.len(), 2);
         assert_eq!(cols[0], vec![0.5, -0.3, 1.2, 0.0]);
@@ -1049,7 +1054,7 @@ mod tests {
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(beta.finish())]).unwrap();
 
         let ds = Dataset::with_schema("null_test", schema, vec![batch]);
-        let vals = ds.extract_f64("x", NullPolicy::DropNulls).unwrap();
+        let vals = ds.extract_f64("x", &NullPolicy::DropNulls).unwrap();
         assert_eq!(vals, vec![1.0, 3.0]);
     }
 
@@ -1064,7 +1069,7 @@ mod tests {
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(beta.finish())]).unwrap();
 
         let ds = Dataset::with_schema("null_test", schema, vec![batch]);
-        let vals = ds.extract_f64("x", NullPolicy::Fill(-999.0)).unwrap();
+        let vals = ds.extract_f64("x", &NullPolicy::Fill(-999.0)).unwrap();
         assert_eq!(vals, vec![1.0, -999.0, 3.0]);
     }
 
@@ -1079,7 +1084,7 @@ mod tests {
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(beta.finish())]).unwrap();
 
         let ds = Dataset::with_schema("null_test", schema, vec![batch]);
-        let err = ds.extract_f64("x", NullPolicy::Reject);
+        let err = ds.extract_f64("x", &NullPolicy::Reject);
         assert!(matches!(err, Err(DatasetError::HasNulls { .. })));
     }
 
@@ -1134,8 +1139,9 @@ mod tests {
     #[test]
     fn test_union() {
         let ds1 = make_test_dataset();
-        let ds2 = ds1.clone();
-        let merged = ds1.union(&ds2).unwrap();
+        // Dataset no longer derives Clone; the union function is exercised by
+        // copying each partition explicitly through `union` itself.
+        let merged = ds1.union(&ds1).unwrap();
         assert_eq!(merged.row_count(), 8);
     }
 
@@ -1205,7 +1211,7 @@ mod tests {
         let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(int_col.finish())]).unwrap();
         let ds = Dataset::with_schema("int_test", schema, vec![batch]);
 
-        let vals = ds.extract_f64("x", NullPolicy::default()).unwrap();
+        let vals = ds.extract_f64("x", &NullPolicy::default()).unwrap();
         assert_eq!(vals, vec![10.0, 20.0]);
     }
 
@@ -1241,7 +1247,7 @@ mod tests {
         assert_eq!(ds.num_partitions(), 2);
         assert_eq!(ds.row_count(), 2);
 
-        let beta = ds.extract_f64("beta", NullPolicy::default()).unwrap();
+        let beta = ds.extract_f64("beta", &NullPolicy::default()).unwrap();
         assert_eq!(beta, vec![0.5, -0.3]);
 
         let collected = ds.collect().unwrap();
@@ -1268,7 +1274,7 @@ mod tests {
         assert!(mapped.has_column("p_value"));
 
         let vals = mapped
-            .extract_f64("p_value", NullPolicy::DropNulls)
+            .extract_f64("p_value", &NullPolicy::DropNulls)
             .unwrap();
         assert_eq!(vals[0], 9.0); // -log10(1e-9)
         let expected = vec![9.0, -0.05f64.log10(), -(3e-8f64).log10(), -(0.5f64).log10()];
@@ -1290,13 +1296,13 @@ mod tests {
 
         // Original column untouched
         let orig = mapped
-            .extract_f64("p_value", NullPolicy::DropNulls)
+            .extract_f64("p_value", &NullPolicy::DropNulls)
             .unwrap();
         assert_eq!(orig[0], 1e-9);
 
         // New column has transformed values
         let new = mapped
-            .extract_f64("neg_log_p", NullPolicy::DropNulls)
+            .extract_f64("neg_log_p", &NullPolicy::DropNulls)
             .unwrap();
         assert_eq!(new[0], 9.0);
     }
@@ -1313,7 +1319,7 @@ mod tests {
         let ds = Dataset::new(vec![batch]).unwrap();
 
         let mapped = ds.map_column("beta", "beta", |x| x * 2.0).unwrap();
-        let vals = mapped.extract_f64("beta", NullPolicy::DropNulls).unwrap();
+        let vals = mapped.extract_f64("beta", &NullPolicy::DropNulls).unwrap();
         assert_eq!(vals.len(), 2);
         assert_eq!(vals[0], 2.0);
         assert_eq!(vals[1], 6.0);
@@ -1330,7 +1336,7 @@ mod tests {
         let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(b.finish())]).unwrap();
         let ds = Dataset::new(vec![batch]).unwrap();
         let mapped = ds.map_column("x", "x", |v| v / 10.0).unwrap();
-        let vals = mapped.extract_f64("x", NullPolicy::DropNulls).unwrap();
+        let vals = mapped.extract_f64("x", &NullPolicy::DropNulls).unwrap();
         assert_eq!(vals, vec![1.0, 2.0, 3.0]);
     }
 
@@ -1385,7 +1391,7 @@ mod tests {
 
         assert_eq!(mapped.row_count(), 4);
         assert_eq!(mapped.num_partitions(), 2);
-        let vals = mapped.extract_f64("val", NullPolicy::DropNulls).unwrap();
+        let vals = mapped.extract_f64("val", &NullPolicy::DropNulls).unwrap();
         assert_eq!(vals, vec![1.0, 4.0, 9.0, 16.0]);
     }
 }
