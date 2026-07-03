@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
-use datafusion::{catalog, execution::object_store::ObjectStoreUrl, prelude::SessionContext};
+use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
 
 use crate::data_engine::dag::DAG;
 use datalake::Datalake;
+
 pub mod dag;
 pub mod nodes;
+pub mod readers;
 
 /// `DataEngine` is the core object that implements the data analysis engine.
 /// It orchestrates ingestion, transformation, and querying of datasets

@@ -5,8 +5,9 @@ use bytes::Bytes;
 use chrono::{TimeZone, Utc};
 use datafusion::object_store::Error as ObjectStoreError;
 use datafusion::object_store::{
-    Attributes, GetOptions, GetRange, GetResult, GetResultPayload, ListResult, MultipartUpload,
-    ObjectMeta, ObjectStore, PutMultipartOptions, PutOptions, PutPayload, PutResult, path::Path,
+    Attributes, CopyMode, CopyOptions, GetOptions, GetRange, GetResult, GetResultPayload,
+    ListResult, MultipartUpload, ObjectMeta, ObjectStore, PutMultipartOptions, PutOptions,
+    PutPayload, PutResult, path::Path,
 };
 use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
@@ -179,30 +180,6 @@ impl ObjectStore for OpendalFileStorage {
         })
     }
 
-    fn delete<'life0, 'life1, 'async_trait>(
-        &'life0 self,
-        location: &'life1 Path,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<(), ObjectStoreError>>
-                + std::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-        Self: 'async_trait,
-    {
-        let path = location.to_string();
-        let op = self.op.clone();
-        Box::pin(async move {
-            op.delete(&path)
-                .await
-                .map_err(opendal_to_object_store_error)
-        })
-    }
-
     fn list(
         &self,
         prefix: Option<&Path>,
@@ -282,14 +259,36 @@ impl ObjectStore for OpendalFileStorage {
         })
     }
 
-    fn copy<'life0, 'life1, 'life2, 'async_trait>(
+    fn delete_stream(
+        &self,
+        locations: BoxStream<'static, Result<Path, ObjectStoreError>>,
+    ) -> BoxStream<'static, Result<Path, ObjectStoreError>> {
+        let op = self.op.clone();
+        locations
+            .map(move |location| {
+                let op = op.clone();
+                async move {
+                    let location = location?;
+                    let path = location.to_string();
+                    op.delete(&path)
+                        .await
+                        .map_err(opendal_to_object_store_error)?;
+                    Ok(location)
+                }
+            })
+            .buffered(10)
+            .boxed()
+    }
+
+    fn copy_opts<'life0, 'life1, 'life2, 'async_trait>(
         &'life0 self,
         from: &'life1 Path,
         to: &'life2 Path,
-    ) -> std::pin::Pin<
+        options: CopyOptions,
+    ) -> ::core::pin::Pin<
         Box<
-            dyn std::future::Future<Output = Result<(), ObjectStoreError>>
-                + std::marker::Send
+            dyn ::core::future::Future<Output = Result<(), ObjectStoreError>>
+                + ::core::marker::Send
                 + 'async_trait,
         >,
     >
@@ -303,62 +302,20 @@ impl ObjectStore for OpendalFileStorage {
         let to_path = to.to_string();
         let op = self.op.clone();
         Box::pin(async move {
-            op.copy(&from_path, &to_path)
-                .await
-                .map_err(opendal_to_object_store_error)?;
+            match options.mode {
+                CopyMode::Overwrite => {
+                    op.copy(&from_path, &to_path)
+                        .await
+                        .map_err(opendal_to_object_store_error)?;
+                }
+                CopyMode::Create => {
+                    op.copy_with(&from_path, &to_path)
+                        .if_not_exists(true)
+                        .await
+                        .map_err(opendal_to_object_store_error)?;
+                }
+            }
             Ok(())
-        })
-    }
-
-    fn copy_if_not_exists<'life0, 'life1, 'life2, 'async_trait>(
-        &'life0 self,
-        from: &'life1 Path,
-        to: &'life2 Path,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<(), ObjectStoreError>>
-                + std::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-        'life2: 'async_trait,
-        Self: 'async_trait,
-    {
-        let from_path = from.to_string();
-        let to_path = to.to_string();
-        let op = self.op.clone();
-        Box::pin(async move {
-            op.copy_with(&from_path, &to_path)
-                .if_not_exists(true)
-                .await
-                .map_err(opendal_to_object_store_error)?;
-            Ok(())
-        })
-    }
-
-    fn rename<'life0, 'life1, 'life2, 'async_trait>(
-        &'life0 self,
-        from: &'life1 Path,
-        to: &'life2 Path,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<(), ObjectStoreError>> + Send + 'async_trait>,
-    >
-    where
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-        'life2: 'async_trait,
-        Self: 'async_trait,
-    {
-        let from_path = from.to_string();
-        let to_path = to.to_string();
-        let op = self.op.clone();
-        Box::pin(async move {
-            op.rename(&from_path, &to_path)
-                .await
-                .map_err(opendal_to_object_store_error)
         })
     }
 }

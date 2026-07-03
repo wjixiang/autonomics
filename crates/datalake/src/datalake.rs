@@ -36,7 +36,6 @@ impl Datalake {
             .get_or_try_init(|| async {
                 let builder = iceberg_catalog_rest::RestCatalogBuilder::default()
                     .with_storage_factory(Arc::new(OpenDalStorageFactory::S3 {
-                        configured_scheme: "s3".to_string(),
                         customized_credential_load: None,
                     }));
                 let catalog = builder

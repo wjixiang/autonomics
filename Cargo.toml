@@ -31,19 +31,24 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 async-trait = "0.1"
-
-iceberg = "0.9.0"
-iceberg-catalog-rest = "0.9.0"
-iceberg-storage-opendal = "0.9.0"
-iceberg-datafusion = "0.9.0"
-arrow = "57.3.0"
-arrow-array = "57.3.0"
-arrow-schema = "57.3.0"
-arrow-csv = "57.3.0"
-parquet = "57.3.0"
+derive_more = { version = "2.1.1", features = ["from"] }
 rayon = "1.12.0"
 futures = "0.3"
-datafusion = "52.5"
+
+iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016" }
+iceberg-catalog-rest = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016" }
+iceberg-storage-opendal = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016" }
+iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016" }
+arrow = "58.3.0"
+arrow-array = "58.3.0"
+arrow-schema = "58.3.0"
+arrow-csv = "58.3.0"
+arrow-select = "58.3.0"
+arrow-ord = "58.3.0"
+parquet = "58.3.0"
+datafusion = "53"
+noodles = { version = "0.107.0", features = ["vcf"] }
+oxbow = "0.8.0"
 
 # Suppress unused-warnings for the public-API workspace.dependencies that
 # the umbrella doesn't directly import. Keep this list as a hint for

@@ -1,55 +1,56 @@
 use async_trait::async_trait;
 use datafusion::prelude::CsvReadOptions;
 use datafusion::prelude::DataFrame;
-use thiserror::Error;
+// use thiserror::Error;
 
 use crate::data_engine::dag::NodeMeta;
 use crate::data_engine::dag::{DagError, DagNode};
 
-/// Errors specific to [`LoadCsvNode`].
-///
-/// Concrete and structured (carrying the offending path or the underlying
-/// arrow/opendal error) instead of a flattened `String` like the previous
-/// `DagError::Csv(...)` design. Unified into [`DagError::ExecutionError`]
-/// via the `From<LoadCsvError> for DagError` impl below.
-#[derive(Debug, Error)]
-pub enum LoadCsvError {
-    #[error("read csv file '{path}' failed")]
-    Read {
-        path: String,
-        #[source]
-        source: fs::opendal::Error,
-    },
-
-    #[error("infer csv schema failed")]
-    InferSchema(#[source] arrow_schema::ArrowError),
-
-    #[error("build csv reader failed")]
-    BuildReader(#[source] arrow_schema::ArrowError),
-
-    #[error("read csv batch failed")]
-    ReadBatch(#[source] arrow_schema::ArrowError),
-}
-
-impl LoadCsvError {
-    /// Stable classification tag for [`DagError::ExecutionError`]. Mirrors the
-    /// shape of `csv.<stage>` so callers can switch on stage without
-    /// downcasting.
-    fn kind(&self) -> &'static str {
-        match self {
-            Self::Read { .. } => "csv.read",
-            Self::InferSchema(_) => "csv.infer_schema",
-            Self::BuildReader(_) => "csv.build_reader",
-            Self::ReadBatch(_) => "csv.read_batch",
-        }
-    }
-}
-
-impl From<LoadCsvError> for DagError {
-    fn from(e: LoadCsvError) -> Self {
-        DagError::execution(e.kind(), e)
-    }
-}
+// /// Errors specific to [`LoadCsvNode`].
+// ///
+// /// Concrete and structured (carrying the offending path or the underlying
+// /// arrow/opendal error) instead of a flattened `String` like the previous
+// /// `DagError::Csv(...)` design. Unified into [`DagError::ExecutionError`]
+// /// via the `From<LoadCsvError> for DagError` impl below.
+// #[derive(Debug, Error)]
+// pub enum LoadCsvError {
+//     #[error("read csv file '{path}' failed")]
+//     Read {
+//         path: String,
+//         #[source]
+//         source: fs::opendal::Error,
+//     },
+//
+//     #[error("infer csv schema failed")]
+//     InferSchema(#[source] arrow_schema::ArrowError),
+//
+//     #[error("build csv reader failed")]
+//     BuildReader(#[source] arrow_schema::ArrowError),
+//
+//     #[error("read csv batch failed")]
+//     ReadBatch(#[source] arrow_schema::ArrowError),
+// }
+//
+// impl LoadCsvError {
+//     /// Stable classification tag for [`DagError::ExecutionError`]. Mirrors the
+//     /// shape of `csv.<stage>` so callers can switch on stage without
+//     /// downcasting.
+//     fn kind(&self) -> &'static str {
+//         match self {
+//             Self::Read { .. } => "csv.read",
+//             Self::InferSchema(_) => "csv.infer_schema",
+//             Self::BuildReader(_) => "csv.build_reader",
+//             Self::ReadBatch(_) => "csv.read_batch",
+//         }
+//     }
+// }
+//
+// impl From<LoadCsvError> for DagError {
+//     fn from(e: LoadCsvError) -> Self {
+//         DagError::execution(e.kind(), e)
+//     }
+// }
+//
 
 /// Load full dataset into memory as RecordBatchs
 pub struct LoadCsvNode {
