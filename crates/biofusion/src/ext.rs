@@ -1,115 +1,136 @@
 //! Single extension trait adding bioinformatics file readers to DataFusion's
 //! [`SessionContext`].
 //!
-//! Previously each format module declared its own `DataFusionReadExt`. They are
-//! merged here into one trait so there is a single, coherent surface for
-//! `read_vcf` / `read_bcf` (and any future formats).
+//! Every `read_<format>` helper is a thin wrapper over the generic
+//! [`read_bio`](crate::datasource::read_bio), specialized on the matching
+//! [`BioDriver`](crate::datasource::drivers). This mirrors DataFusion's own
+//! `read_csv` / `read_parquet` surface.
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-use datafusion::common::{DataFusionError, Result};
-use datafusion::datasource::listing::{ListingTable, ListingTableConfig, ListingTableUrl};
 use datafusion::execution::context::DataFilePaths;
-use datafusion::prelude::*;
+use datafusion::prelude::{DataFrame, SessionContext};
 
-use crate::datasource_bcf::BcfReadOptions;
-use crate::datasource_vcf::VcfReadOptions;
+use crate::datasource::drivers::{
+    BamDriver, BcfDriver, BedDriver, BigBedDriver, BigWigDriver, CramDriver, FastaDriver,
+    FastqDriver, GffDriver, GtfDriver, SamDriver, VcfDriver,
+};
+use crate::datasource::{read_bio, BioReadOptions};
+use datafusion::common::Result;
 
-/// Extension trait that adds typed readers (`read_vcf`, `read_bcf`, ...) to a
+/// Extension trait that adds typed readers (`read_vcf`, `read_bam`, …) to a
 /// [`SessionContext`], mirroring DataFusion's own `read_csv` / `read_parquet`.
-#[async_trait]
 pub trait DataFusionReadExt {
-    /// Register VCF file(s) as a queryable [`DataFrame`].
-    async fn read_vcf<'a, P: DataFilePaths + Send>(
+    /// Read VCF file(s) as a queryable [`DataFrame`].
+    fn read_vcf<P: DataFilePaths + Send>(
         &self,
         table_paths: P,
-        options: VcfReadOptions<'a>,
-    ) -> Result<DataFrame>;
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
 
-    /// Register BCF file(s) as a queryable [`DataFrame`].
-    async fn read_bcf<'a, P: DataFilePaths + Send>(
+    /// Read BCF file(s).
+    fn read_bcf<P: DataFilePaths + Send>(
         &self,
         table_paths: P,
-        options: BcfReadOptions<'a>,
-    ) -> Result<DataFrame>;
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read FASTA file(s).
+    fn read_fasta<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read FASTQ file(s).
+    fn read_fastq<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read BED file(s).
+    fn read_bed<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read GTF file(s).
+    fn read_gtf<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read GFF file(s).
+    fn read_gff<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read SAM file(s).
+    fn read_sam<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read BAM file(s).
+    fn read_bam<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read CRAM file(s).
+    fn read_cram<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read BigWig file(s).
+    fn read_bigwig<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
+
+    /// Read BigBed file(s).
+    fn read_bigbed<P: DataFilePaths + Send>(
+        &self,
+        table_paths: P,
+        options: BioReadOptions,
+    ) -> impl std::future::Future<Output = Result<DataFrame>> + Send;
 }
 
-/// Build a [`DataFrame`] from already-resolved URLs + [`ReadOptions`],
-/// mirroring DataFusion's private `_read_type` helper (which external crates
-/// cannot call directly): turn the options into `ListingOptions`, resolve the
-/// schema, and wrap a [`ListingTable`] via [`SessionContext::read_table`].
-///
-/// [`ReadOptions`]: datafusion::execution::options::ReadOptions
-async fn read_listing_type<'a, O>(
-    ctx: &SessionContext,
-    table_paths: Vec<ListingTableUrl>,
-    options: O,
-) -> Result<DataFrame>
-where
-    O: datafusion::execution::options::ReadOptions<'a>,
-{
-    let session_config = ctx.copied_config();
-    let listing_options = options.to_listing_options(&session_config, ctx.copied_table_options());
-
-    let resolved_schema = options
-        .get_resolved_schema(&session_config, ctx.state(), table_paths[0].clone())
-        .await?;
-
-    let config = ListingTableConfig::new_with_multi_paths(table_paths)
-        .with_listing_options(listing_options)
-        .with_schema(resolved_schema);
-    let provider = ListingTable::try_new(config)?;
-    ctx.read_table(Arc::new(provider))
+macro_rules! impl_readers {
+    ($($method:ident => $driver:ty),* $(,)?) => {
+        impl DataFusionReadExt for SessionContext {
+            $(
+                fn $method<P: DataFilePaths + Send>(
+                    &self,
+                    table_paths: P,
+                    options: BioReadOptions,
+                ) -> impl std::future::Future<Output = Result<DataFrame>> + Send {
+                    read_bio::<$driver, _>(self, table_paths, options)
+                }
+            )*
+        }
+    };
 }
 
-/// Derive the ListingTable file extension for a format from the input URL.
-///
-/// ListingTable filters discovered files by this extension, so it must reflect
-/// the actual file (including a `.gz` suffix) — otherwise a `foo.vcf.gz` input
-/// is silently dropped and schema inference reports "no objects". If the user
-/// already set an explicit extension we keep it; otherwise we infer
-/// `<base_ext>` or `<base_ext>.gz` from the path.
-fn infer_file_extension(url: &ListingTableUrl, explicit: Option<&str>, base_ext: &str) -> String {
-    if let Some(ext) = explicit {
-        return ext.to_string();
-    }
-    if url.as_str().ends_with(".gz") {
-        format!("{base_ext}.gz")
-    } else {
-        base_ext.to_string()
-    }
-}
-
-#[async_trait]
-impl DataFusionReadExt for SessionContext {
-    async fn read_vcf<'a, P: DataFilePaths + Send>(
-        &self,
-        table_paths: P,
-        mut options: VcfReadOptions<'a>,
-    ) -> Result<DataFrame> {
-        let urls = table_paths.to_urls()?;
-        let url = urls
-            .first()
-            .ok_or_else(|| DataFusionError::Plan("read_vcf: no table path provided".into()))?;
-        // Auto-detect the file extension (incl. `.gz`) so ListingTable matches
-        // compressed inputs when the caller didn't set one explicitly.
-        let ext = infer_file_extension(url, options.file_extension(), "vcf");
-        options = options.with_file_extension(ext);
-        read_listing_type(self, urls, options).await
-    }
-
-    async fn read_bcf<'a, P: DataFilePaths + Send>(
-        &self,
-        table_paths: P,
-        mut options: BcfReadOptions<'a>,
-    ) -> Result<DataFrame> {
-        let urls = table_paths.to_urls()?;
-        let url = urls
-            .first()
-            .ok_or_else(|| DataFusionError::Plan("read_bcf: no table path provided".into()))?;
-        let ext = infer_file_extension(url, options.file_extension(), "bcf");
-        options = options.with_file_extension(ext);
-        read_listing_type(self, urls, options).await
-    }
+impl_readers! {
+    read_vcf => VcfDriver,
+    read_bcf => BcfDriver,
+    read_fasta => FastaDriver,
+    read_fastq => FastqDriver,
+    read_bed => BedDriver,
+    read_gtf => GtfDriver,
+    read_gff => GffDriver,
+    read_sam => SamDriver,
+    read_bam => BamDriver,
+    read_cram => CramDriver,
+    read_bigwig => BigWigDriver,
+    read_bigbed => BigBedDriver,
 }

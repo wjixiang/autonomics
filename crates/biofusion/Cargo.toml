@@ -14,7 +14,21 @@ arrow-array.workspace = true
 arrow-schema.workspace = true
 async-trait.workspace = true
 oxbow = { workspace = true }
-noodles = { workspace = true, features = ["vcf", "bgzf", "bcf"] }
+noodles = { workspace = true, features = [
+    "vcf",
+    "bgzf",
+    "bcf",
+    "fasta",
+    "fastq",
+    "bed",
+    "gtf",
+    "gff",
+    "sam",
+    "bam",
+    "cram",
+] }
+bigtools = { version = "0.5", default-features = false, features = ["read"] }
+flate2 = "1.1"
 derive_more = { workspace = true }
 futures.workspace = true
 tokio.workspace = true
