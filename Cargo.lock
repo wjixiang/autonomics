@@ -814,6 +814,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "biofusion"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow-array",
+ "arrow-schema",
+ "async-trait",
+ "bytes",
+ "datafusion",
+ "datafusion-common-runtime",
+ "datafusion-datasource",
+ "derive_more",
+ "futures",
+ "noodles",
+ "oxbow",
+ "tokio",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1593,15 +1612,13 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "async-trait",
+ "biofusion",
  "datafusion",
  "datalake",
- "derive_more",
  "fs",
  "iceberg",
  "iceberg-catalog-rest",
  "nanoid",
- "noodles",
- "oxbow",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use biofusion::ext::DataFusionReadExt;
 use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
 
@@ -8,7 +9,6 @@ use datalake::Datalake;
 
 pub mod dag;
 pub mod nodes;
-pub mod readers;
 
 /// `DataEngine` is the core object that implements the data analysis engine.
 /// It orchestrates ingestion, transformation, and querying of datasets
@@ -73,7 +73,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dataengine_opendal_datafusion() {
-        let file_session = Arc::new(OpendalFileStorage::new_in_memory());
+        let file_session = Arc::new(OpendalFileStorage::new_in_fs());
         let test_data_file = std::fs::read("test_datasets/Iris.csv").unwrap();
         let _write_res = file_session
             .op

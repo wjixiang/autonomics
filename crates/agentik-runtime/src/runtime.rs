@@ -22,7 +22,7 @@ impl AgentRuntime {
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let cancel_token = CancellationToken::new();
 
-        let file_storage = Arc::new(OpendalFileStorage::new());
+        let file_storage = Arc::new(OpendalFileStorage::new_in_fs());
 
         let internal_tx = runtime.block_on(async {
             let tool_list = crate::tools::default_tool_set(file_storage)?;

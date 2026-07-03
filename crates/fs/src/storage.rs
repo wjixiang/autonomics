@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Display};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use bytes::Bytes;
@@ -11,22 +12,33 @@ use datafusion::object_store::{
 };
 use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
-use opendal::{Operator, services::Memory};
+use opendal::Operator;
+use opendal::services::Fs;
 
 pub struct OpendalFileStorage {
     pub op: Operator,
+    root: PathBuf,
 }
 
 impl OpendalFileStorage {
-    /// TODO: change to use fs
-    pub fn new() -> Self {
-        let op = Operator::new(Memory::default()).unwrap().finish();
-        Self { op }
+    /// Create a new storage backed by the local filesystem at the given root.
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
+        let op = Operator::new(Fs::default().root(root.to_str().unwrap_or("/tmp/opendal")))
+            .unwrap()
+            .finish();
+        Self { op, root }
     }
 
-    pub fn new_in_memory() -> Self {
-        let op = Operator::new(Memory::default()).unwrap().finish();
-        Self { op }
+    pub fn new_in_fs() -> Self {
+        Self::new("/tmp/opendal")
+    }
+
+    /// Convert an ObjectStore path to a local filesystem path.
+    fn to_local_path(&self, location: &Path) -> PathBuf {
+        let path_str = location.to_string();
+        let relative = path_str.strip_prefix('/').unwrap_or(&path_str);
+        self.root.join(relative)
     }
 }
 
@@ -65,11 +77,10 @@ impl ObjectStore for OpendalFileStorage {
         let path = location.to_string();
         let op = self.op.clone();
         Box::pin(async move {
-            // Collect all Bytes chunks from PutPayload into a single contiguous buffer
             let total_len = payload.content_length();
             let mut buf = Vec::with_capacity(total_len);
             for chunk in payload.iter() {
-                buf.extend_from_slice(&chunk);
+                buf.extend_from_slice(chunk);
             }
             let buffer = opendal::Buffer::from(buf);
             op.write(&path, buffer)
@@ -126,8 +137,9 @@ impl ObjectStore for OpendalFileStorage {
         'life1: 'async_trait,
         Self: 'async_trait,
     {
-        let path = location.to_string();
+        let local_path = self.to_local_path(location);
         let op = self.op.clone();
+        let path = location.to_string();
         Box::pin(async move {
             let meta = op
                 .stat(&path)
@@ -136,24 +148,10 @@ impl ObjectStore for OpendalFileStorage {
             let object_meta = opendal_meta_to_object_meta(&path, &meta);
             let size = meta.content_length();
 
-            if options.head {
-                return Ok(GetResult {
-                    payload: GetResultPayload::Stream(futures::stream::empty().boxed()),
-                    meta: object_meta,
-                    range: 0..size,
-                    attributes: Attributes::default(),
-                });
-            }
-
             let range = match options.range {
                 Some(r) => r,
                 None => GetRange::Bounded(0..size),
             };
-
-            let reader = op
-                .reader(&path)
-                .await
-                .map_err(opendal_to_object_store_error)?;
 
             let byte_range = match range {
                 GetRange::Bounded(r) => r,
@@ -161,18 +159,14 @@ impl ObjectStore for OpendalFileStorage {
                 GetRange::Suffix(suffix) => size.saturating_sub(suffix)..size,
             };
 
-            let byte_stream = reader
-                .into_bytes_stream(byte_range.clone())
-                .await
-                .map_err(opendal_to_object_store_error)?;
-            let stream: BoxStream<'static, Result<Bytes, ObjectStoreError>> =
-                Box::pin(byte_stream.map_err(|e| ObjectStoreError::Generic {
-                    store: "opendal",
-                    source: e.into(),
-                }));
-
             Ok(GetResult {
-                payload: GetResultPayload::Stream(stream),
+                payload: GetResultPayload::File(
+                    std::fs::File::open(&local_path).map_err(|e| ObjectStoreError::NotFound {
+                        path: local_path.to_string_lossy().into_owned(),
+                        source: e.into(),
+                    })?,
+                    local_path,
+                ),
                 meta: object_meta,
                 range: byte_range,
                 attributes: Attributes::default(),
@@ -325,11 +319,11 @@ fn opendal_to_object_store_error(err: opendal::Error) -> ObjectStoreError {
     let msg = err.message().to_string();
     match err.kind() {
         opendal::ErrorKind::NotFound => ObjectStoreError::NotFound {
-            path: msg.into(),
+            path: msg,
             source: err.into(),
         },
         opendal::ErrorKind::AlreadyExists => ObjectStoreError::AlreadyExists {
-            path: msg.into(),
+            path: msg,
             source: err.into(),
         },
         opendal::ErrorKind::PermissionDenied => {
