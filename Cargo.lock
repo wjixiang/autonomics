@@ -91,6 +91,7 @@ dependencies = [
  "agentik-core",
  "agentik-sdk",
  "anyhow",
+ "data-engine",
  "eutils-rs",
  "fs",
  "opengwas-rs",
@@ -1633,6 +1634,12 @@ dependencies = [
 [[package]]
 name = "data-engine-tools"
 version = "0.1.0"
+dependencies = [
+ "agentik-proc",
+ "agentik-sdk",
+ "data-engine",
+ "serde",
+]
 
 [[package]]
 name = "datafusion"

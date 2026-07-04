@@ -6,6 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+agentik-proc = { path = "../agentik-proc" }
+agentik-sdk = { path = "../agentik-sdk" }
+data-engine = { path = "../data-engine" }
+serde = { workspace = true }
 
 [lints]
 workspace = true

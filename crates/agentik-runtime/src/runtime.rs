@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use agentik_core::Agent;
 use agentik_core::agent::InternalEvent;
@@ -10,6 +10,8 @@ use tokio_util::sync::CancellationToken;
 pub struct AgentRuntime {
     internal_tx: tokio::sync::mpsc::UnboundedSender<InternalEvent>,
     event_rx: tokio::sync::mpsc::UnboundedReceiver<AgentEvent>,
+    data_engine: Arc<RwLock<DataEngine>>,
+    // data_engine_tx: tokio::sync::mpsc::UnboundedSender,
     cancel_token: CancellationToken,
 }
 
@@ -68,3 +70,4 @@ impl AgentRuntime {
         self.event_rx.try_recv().ok()
     }
 }
+

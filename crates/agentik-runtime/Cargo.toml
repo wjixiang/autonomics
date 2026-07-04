@@ -11,6 +11,7 @@ agentik-core = { path = "../agentik-core" }
 agentik-sdk = { path = "../agentik-sdk" }
 opengwas-rs = { path = "../opengwas-rs" }
 eutils-rs = { path = "../eutils-rs" }
+data-engine = { path = "../data-engine" }
 fs = { path = "../fs" }
 tokio = { workspace = true }
 tokio-util = "0.7"
