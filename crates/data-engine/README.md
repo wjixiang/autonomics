@@ -18,3 +18,5 @@ model for the agent analytics pipeline.
   stat-primitives bridge, agent tools, and the L1–L5 tool roadmap.
 
 ## Test Datasets
+
+## Node types

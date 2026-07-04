@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use datafusion::prelude::DataFrame;
 use thiserror::Error;
 
-use crate::data_engine::dag::{DagError, DagNode, NodeMeta};
+use crate::data_engine::dag::DagError;
+use super::meta::{DagNode, NodeInput, NodeMeta};
 
 #[derive(Debug, Error)]
 pub enum SqlNodeError {
@@ -30,6 +31,8 @@ impl From<SqlNodeError> for DagError {
     }
 }
 
+/// A transform node: registers each upstream input as a named table/view
+/// (the edge `port`) and runs a SQL query over them. Single output.
 pub struct SqlNode {
     meta: NodeMeta,
     sql_query: String,
@@ -37,10 +40,7 @@ pub struct SqlNode {
 
 impl SqlNode {
     pub fn new(meta: NodeMeta, query: String) -> Self {
-        Self {
-            meta,
-            sql_query: query,
-        }
+        Self { meta, sql_query: query }
     }
 
     pub fn set_sql_query(&mut self, query: &str) {
@@ -54,14 +54,24 @@ impl DagNode for SqlNode {
         &self.meta
     }
 
-    async fn execute(&mut self, inputs: &[DataFrame]) -> Result<Vec<DataFrame>, DagError> {
-        let df = inputs.first().ok_or(SqlNodeError::InvalidInput {
-            message: "Input is empty".to_string(),
-        })?;
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
+        if inputs.is_empty() {
+            return Err(SqlNodeError::InvalidInput {
+                message: "SqlNode requires at least one upstream input".to_string(),
+            }
+            .into());
+        }
 
-        let view = df.clone().into_view();
         let ctx = self.meta.ctx();
-        ctx.register_table("src", view)?;
+        for inp in inputs {
+            // register_table errors if the name already exists, so deregister
+            // first. NOTE: SqlNodes share the engine's SessionContext, so a port
+            // name is a single shared slot — give each upstream a distinct port
+            // name when they carry different data.
+            let _ = ctx.deregister_table(&inp.port);
+            let view = inp.data.clone().into_view();
+            ctx.register_table(&inp.port, view).map_err(SqlNodeError::RegisterView)?;
+        }
         let out = ctx.sql(&self.sql_query).await?;
         Ok(vec![out])
     }
@@ -76,7 +86,7 @@ mod tests {
     use arrow_schema::{DataType, Field, Schema};
     use datafusion::prelude::SessionContext;
 
-    use crate::data_engine::dag::NodeMeta;
+    use super::super::meta::NodeMeta;
 
     #[tokio::test]
     async fn test_smoke_register_table() {
@@ -90,23 +100,12 @@ mod tests {
             RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();
         let df = ctx.read_batch(batch).unwrap();
         let node = SqlNode::new(
-            NodeMeta::new(
-                "sql".into(),
-                "sql_node".into(),
-                Default::default(),
-                ctx.clone(),
-            ),
+            NodeMeta::new("sql".into(), "sql_node".into(), Default::default(), ctx.clone()),
             "SELECT * FROM src WHERE x > 1".into(),
         );
         let view = df.into_view();
         ctx.register_table("src", view).unwrap();
-        let result = ctx
-            .sql(&node.sql_query)
-            .await
-            .unwrap()
-            .collect()
-            .await
-            .unwrap();
+        let result = ctx.sql(&node.sql_query).await.unwrap().collect().await.unwrap();
         assert_eq!(result[0].num_rows(), 2);
         let _ = node;
     }

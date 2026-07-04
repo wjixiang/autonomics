@@ -14,7 +14,7 @@ members = [
   "crates/eutils-rs",
   "crates/agentik-runtime",
   "crates/fs",
-  "crates/datalake", "crates/biofusion",
+  "crates/datalake", "crates/biofusion", "crates/data-engine-tools",
 ]
 
 [workspace.package]

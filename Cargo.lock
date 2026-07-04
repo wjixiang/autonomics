@@ -1618,14 +1618,21 @@ dependencies = [
  "datafusion",
  "datalake",
  "fs",
+ "futures",
  "iceberg",
  "iceberg-catalog-rest",
  "nanoid",
+ "petgraph",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
+
+[[package]]
+name = "data-engine-tools"
+version = "0.1.0"
 
 [[package]]
 name = "datafusion"
