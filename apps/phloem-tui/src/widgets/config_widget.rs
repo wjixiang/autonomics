@@ -2,7 +2,7 @@
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    prelude::Buffer,
+    prelude::{Buffer, StatefulWidget},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Widget},
@@ -13,6 +13,39 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::state::{
     ConfigMode, ConfigPane, ConfigTabState, ModelForm, ProviderForm,
 };
+
+// ── Shared style helpers ────────────────────────────────
+
+/// Selection highlight applied to the active list row and focused form fields.
+fn highlight_style() -> Style {
+    Style::default()
+        .fg(Color::Black)
+        .bg(Color::Yellow)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Symbol prepended to the highlighted list row.
+const HIGHLIGHT_SYMBOL: &str = "▶ ";
+
+/// Build a Block border for a list pane. Active panes get a thick yellow border,
+/// inactive panes get a plain dark-gray border.
+fn pane_block(title: &str, count: usize, active: bool) -> Block<'_> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(if active { BorderType::Thick } else { BorderType::Plain })
+        .border_style(if active {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })
+        .title(Line::from(vec![
+            Span::raw(format!(" {title} ")),
+            Span::styled(
+                format!("({count}) "),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]))
+}
 
 /// Public entry point used by the render path.
 pub fn render_config(state: &ConfigTabState, area: Rect, buf: &mut Buffer) {
@@ -49,28 +82,39 @@ fn render_browsing(state: &ConfigTabState, area: Rect, buf: &mut Buffer) {
     render_hint(&state.message, chunks[1], buf);
 }
 
-fn render_provider_list(state: &ConfigTabState, area: Rect, buf: &mut Buffer) {
-    let active = state.pane == ConfigPane::Providers;
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(if active { BorderType::Thick } else { BorderType::Plain })
-        .border_style(if active {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        })
-        .title(Line::from(vec![
-            Span::raw(" Providers "),
-            Span::styled(
-                format!("({}) ", state.providers.len()),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
+/// Render a selectable list pane (providers or models).
+fn render_selectable_list<T>(
+    title: &str,
+    count: usize,
+    active: bool,
+    rows: &[T],
+    selected: usize,
+    area: Rect,
+    buf: &mut Buffer,
+    map_item: impl Fn(&T) -> ListItem,
+) {
+    let items: Vec<ListItem> = rows.iter().map(map_item).collect();
 
-    let items: Vec<ListItem> = state
-        .providers
-        .iter()
-        .map(|p| {
+    let list = List::new(items)
+        .block(pane_block(title, count, active))
+        .highlight_style(highlight_style())
+        .highlight_symbol(HIGHLIGHT_SYMBOL);
+
+    let mut list_state = ListState::default();
+    list_state.select(if rows.is_empty() { None } else { Some(selected) });
+    StatefulWidget::render(list, area, buf, &mut list_state);
+}
+
+fn render_provider_list(state: &ConfigTabState, area: Rect, buf: &mut Buffer) {
+    render_selectable_list(
+        "Providers",
+        state.providers.len(),
+        state.pane == ConfigPane::Providers,
+        &state.providers,
+        state.selected_provider,
+        area,
+        buf,
+        |p| {
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("{:<14} ", p.name),
@@ -81,43 +125,11 @@ fn render_provider_list(state: &ConfigTabState, area: Rect, buf: &mut Buffer) {
                     Style::default().fg(Color::DarkGray),
                 ),
             ]))
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
-
-    let mut list_state = ListState::default();
-    list_state.select(Some(state.selected_provider));
-    Widget::render(list, area, buf);
-    let _ = &mut list_state;
+        },
+    );
 }
 
 fn render_model_list(state: &ConfigTabState, area: Rect, buf: &mut Buffer) {
-    let active = state.pane == ConfigPane::Models;
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(if active { BorderType::Thick } else { BorderType::Plain })
-        .border_style(if active {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        })
-        .title(Line::from(vec![
-            Span::raw(" Models "),
-            Span::styled(
-                format!("({}) ", state.models.len()),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
-
     let provider_name = |pid: i64| -> String {
         state
             .providers
@@ -126,35 +138,27 @@ fn render_model_list(state: &ConfigTabState, area: Rect, buf: &mut Buffer) {
             .map(|p| p.name.clone())
             .unwrap_or_else(|| format!("#{pid}"))
     };
-
-    let items: Vec<ListItem> = state
-        .models
-        .iter()
-        .map(|m| {
+    render_selectable_list(
+        "Models",
+        state.models.len(),
+        state.pane == ConfigPane::Models,
+        &state.models,
+        state.selected_model,
+        area,
+        buf,
+        |m| {
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("{:<28} ", m.model_name),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(provider_name(m.provider_id), Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    provider_name(m.provider_id),
+                    Style::default().fg(Color::Cyan),
+                ),
             ]))
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▶ ");
-
-    let mut list_state = ListState::default();
-    list_state.select(Some(state.selected_model));
-    Widget::render(list, area, buf);
-    let _ = &mut list_state;
+        },
+    );
 }
 
 fn render_hint(message: &str, area: Rect, buf: &mut Buffer) {
@@ -198,7 +202,6 @@ fn render_provider_form(form: &ProviderForm, message: &str, area: Rect, buf: &mu
 
     for (i, label) in ProviderForm::FIELDS.iter().enumerate() {
         render_field_line(
-            area,
             rows[i],
             label,
             form.fields()[i].value(),
@@ -250,7 +253,6 @@ fn render_model_form(
     let text_to_row = [0usize, 2, 3, 4, 5];
     for (form_idx, &row_idx) in text_to_row.iter().enumerate() {
         render_field_line(
-            area,
             rows[row_idx],
             labels[row_idx],
             form.text_fields()[form_idx].value(),
@@ -265,7 +267,7 @@ fn render_model_form(
         .get(form.provider_index)
         .map(|p| format!("{} (#{})", p.name, p.id))
         .unwrap_or_else(|| "<no provider>".to_string());
-    render_field_line(area, rows[1], "Provider", &pv, provider_focus, buf);
+    render_field_line(rows[1], "Provider", &pv, provider_focus, buf);
 
     // Toggles row
     let toggle_focus = form.focus == ModelForm::TEXT_FIELD_COUNT + 1;
@@ -277,7 +279,7 @@ fn render_model_form(
         yn(form.vision_ability)
     );
     let style = if toggle_focus {
-        Style::default().fg(Color::Black).bg(Color::Yellow)
+        highlight_style()
     } else {
         Style::default()
     };
@@ -291,7 +293,6 @@ fn yn(b: bool) -> &'static str {
 }
 
 fn render_field_line(
-    _area: Rect,
     row: Rect,
     label: &str,
     value: &str,
@@ -302,23 +303,17 @@ fn render_field_line(
         format!(" {:<11}: ", label),
         Style::default().fg(Color::Cyan),
     );
-    let value_style = if focused {
-        Style::default().fg(Color::Black).bg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::White)
-    };
     let mut spans = vec![label_span];
     if value.is_empty() {
         spans.push(Span::styled(
             " ",
-            if focused {
-                Style::default().fg(Color::Black).bg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            },
+            if focused { highlight_style() } else { Style::default().fg(Color::DarkGray) },
         ));
     } else {
-        spans.push(Span::styled(value.to_string(), value_style));
+        spans.push(Span::styled(
+            value.to_string(),
+            if focused { highlight_style() } else { Style::default().fg(Color::White) },
+        ));
     }
     Paragraph::new(Line::from(spans)).render(row, buf);
 }
@@ -376,8 +371,6 @@ pub fn handle_config_key(state: &mut ConfigTabState, key: KeyEvent) -> bool {
     }
 }
 
-/// Placeholder to keep the unused `state` param meaningful in signatures.
-#[allow(unused_variables)]
 fn handle_browse_key(state: &mut ConfigTabState, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => {
