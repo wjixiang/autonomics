@@ -3,13 +3,13 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+
 
 use super::json_err;
 use crate::format::format_associations;
 use crate::{OpengwasClient, types::*};
+use agentik_proc::tool;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "opengwas_associations",
     description = "Get specific variant associations from specific GWAS datasets. \

@@ -110,9 +110,9 @@ mod tests {
     use super::*;
     use agentik_sdk::types::tools::{ToolResult, ToolResultContent};
     use async_trait::async_trait;
-    use serde::{Deserialize, Serialize};
 
-    #[derive(Deserialize, Serialize, agentik_proc::ToolInput)]
+    use agentik_proc::tool;
+
     #[tool(name = "dummy_tool", description = "A dummy tool for testing")]
     struct DummyInput {
         #[desc = "reason"]

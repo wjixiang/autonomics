@@ -305,13 +305,12 @@ mod tests {
     use agentik_sdk::types::tools::ToolUse;
     use agentik_types::AgentEvent;
     use async_trait::async_trait;
-    use serde::{Deserialize, Serialize};
     use serde_json::json;
     use tokio::sync::mpsc;
 
     use super::Toolset;
+    use agentik_proc::tool;
 
-    #[derive(Deserialize, Serialize, agentik_proc::ToolInput)]
     #[tool(name = "test_tool", description = "A test tool")]
     struct MockInput {
         reason: String,
@@ -329,7 +328,6 @@ mod tests {
         }
     }
 
-    #[derive(Deserialize, Serialize, agentik_proc::ToolInput)]
     #[tool(name = "test_bg_tool", description = "A bg tool")]
     struct MockTwophaseInput {
         reason: String,

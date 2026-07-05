@@ -261,10 +261,10 @@ mod tests {
     use super::super::{ToolBuilder, ToolFunction, ToolResultContent};
     use super::*;
     use async_trait::async_trait;
-    use serde::{Deserialize, Serialize};
     use serde_json::json;
 
-    #[derive(Deserialize, Serialize, agentik_proc::ToolInput)]
+    use agentik_proc::tool;
+
     #[tool(name = "echo", description = "Echo test tool")]
     struct EchoInput {
         message: String,

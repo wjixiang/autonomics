@@ -1,12 +1,12 @@
 use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use agentik_proc::tool;
 
 use agentik_core::tools::{ToolError, ToolFunction};
 
 const MAX_RESULTS: usize = 100;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
+
 #[tool(
     name = "glob",
     description = "Finds files whose path matches a glob pattern (e.g. '**/*.rs'). Returns up to 100 matching paths."

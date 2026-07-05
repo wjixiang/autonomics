@@ -2,12 +2,11 @@ use std::path::Path;
 
 use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use tokio::fs;
 
 use agentik_core::tools::{ToolError, ToolFunction};
+use agentik_proc::tool;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "write",
     description = "Creates or overwrites a file with the given content. Parent directories are created if missing."

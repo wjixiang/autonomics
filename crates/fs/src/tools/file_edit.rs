@@ -3,11 +3,12 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+
 
 use crate::storage::OpendalFileStorage;
+use agentik_proc::tool;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
+
 #[tool(
     name = "file_edit",
     description = "Perform exact string replacement in a file. \

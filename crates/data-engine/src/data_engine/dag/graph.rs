@@ -176,12 +176,7 @@ mod tests {
     fn dummy_meta(id: &str) -> super::super::NodeMeta {
         use datafusion::prelude::SessionContext;
         use std::sync::Arc;
-        super::super::NodeMeta::new(
-            id.into(),
-            id.into(),
-            super::super::DagNodeStatus::Idle,
-            Arc::new(SessionContext::new()),
-        )
+        super::super::NodeMeta::new(id, Arc::new(SessionContext::new()))
     }
 
     // A no-op node so tests can build a real DAG without touching IO.

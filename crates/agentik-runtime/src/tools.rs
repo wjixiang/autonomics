@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 use agentik_core::tools::ToolRegistration;
+use data_engine::runtime::DataEngineClient;
 use eutils_rs::EutilsClient;
 use fs::OpendalFileStorage;
 use opengwas_rs::OpengwasClient;
@@ -28,15 +29,17 @@ pub fn eutils_tools() -> Vec<ToolRegistration> {
     eutils_rs::eutils_registrations(eutils)
 }
 
-/// The complete default tool set: File + OpenGWAS + E-utilities.
+/// The complete default tool set: File + OpenGWAS + E-utilities + DataEngine.
 ///
 /// Pass a shared [`OpendalFileStorage`] used by both the fs tools
 /// and the OpenGWAS download tool.
 pub fn default_tool_set(
     file_storage: Arc<OpendalFileStorage>,
+    data_engine_client: Arc<DataEngineClient>,
 ) -> anyhow::Result<Vec<ToolRegistration>> {
     let mut tools = fs::file_base_registrations(file_storage.clone());
     tools.extend(opengwas_tools(file_storage));
     tools.extend(eutils_tools());
+    tools.extend(data_engine_tools::registrations(data_engine_client));
     Ok(tools)
 }

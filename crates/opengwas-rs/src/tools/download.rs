@@ -3,14 +3,12 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-
 use super::json_err;
 use crate::format::format_download;
 use crate::{OpengwasClient, types::GwasInfoFilesRequest};
+use agentik_proc::tool;
 use fs::OpendalFileStorage;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "opengwas_download_files",
     description = "Download dataset files (summary stats .vcf.gz, index .vcf.gz.tbi, \

@@ -2,14 +2,12 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-
 use agentik_sdk::types::ToolResult as AgentToolResult;
+use agentik_proc::tool;
 
 use crate::tools::task_runtime::{TaskEntry, TaskStatus};
 use crate::tools::{ToolError, ToolFunction};
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "view_task_status",
     description = "View the status of all background tasks, including currently \

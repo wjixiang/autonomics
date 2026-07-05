@@ -3,11 +3,11 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-
 use crate::{EutilsClient, format::format_einfo};
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
+use agentik_proc::tool;
+
+#[derive(Debug)]
 #[tool(
     name = "einfo",
     description = "Get information about NCBI Entrez databases. If db is not specified, \

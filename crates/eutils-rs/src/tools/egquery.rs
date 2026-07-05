@@ -3,11 +3,10 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use agentik_proc::tool;
 
 use crate::{EutilsClient, format::format_egquery};
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "egquery",
     description = "Search all NCBI Entrez databases simultaneously with a text query. \

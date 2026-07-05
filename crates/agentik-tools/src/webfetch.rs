@@ -3,9 +3,8 @@ use std::time::Duration;
 
 use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-
 use agentik_core::tools::{ToolError, ToolFunction};
+use agentik_proc::tool;
 
 /// Per-request fetch timeout. The framework ceiling (`timeout_seconds`) is set
 /// above this so a legitimate slow fetch is never pre-empted by the wrapper.
@@ -21,7 +20,6 @@ const BROWSER_UA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
      Chrome/143.0.0.0 Safari/537.36";
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "webfetch",
     description = "Fetches an HTTP(S) URL and returns its content as plain text. HTML pages are converted to text; the fetched content is returned for the model to analyze."

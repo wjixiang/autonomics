@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use agentik_proc::tool;
 use tokio::sync::Mutex;
 
 use agentik_sdk::types::tools::{ToolResult, ToolResultContent};
@@ -19,7 +19,6 @@ use crate::tools::{ToolError, ToolFunction};
 use super::runtime::{SkillRuntime, StepTransition, TodoStatus};
 
 /// Input for [`TodoUpdateTool`].
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "update_todo",
     description = "Update the status of a todo in the current skill step. \

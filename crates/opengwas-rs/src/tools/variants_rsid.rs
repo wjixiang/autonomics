@@ -3,13 +3,13 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+
 
 use super::json_err;
 use crate::format::format_variants;
 use crate::{OpengwasClient, types::*};
+use agentik_proc::tool;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "opengwas_variants_rsid",
     description = "Obtain variant information by rs IDs. Returns chromosome, \

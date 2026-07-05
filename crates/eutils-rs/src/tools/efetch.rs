@@ -3,11 +3,9 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-
 use crate::{EutilsClient, format::format_efetch};
+use agentik_proc::tool;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "pubmed_fetch",
     description = "Fetch PubMed articles by PMID(s). Returns article records in the \

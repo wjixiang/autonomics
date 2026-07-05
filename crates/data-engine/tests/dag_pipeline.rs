@@ -7,9 +7,9 @@
 use std::sync::Arc;
 
 use data_engine::data_engine::{
+    DataEngine, Sink, Source, WriteFormat,
     dag::{DagError, RuntimeStatus, SchedulerConfig},
     nodes::{DagNode, NodeInput, NodeMeta},
-    DataEngine, Sink, Source, WriteFormat,
 };
 use datafusion::prelude::{DataFrame, SessionContext};
 
@@ -82,9 +82,15 @@ async fn fanout_branch() {
         .unwrap()
         // Note: DataFusion lowercases unquoted identifiers, so quote the
         // mixed-case column name "Species".
-        .sql_node("setosa", r#"SELECT * FROM src WHERE "Species" = 'Iris-setosa'"#)
+        .sql_node(
+            "setosa",
+            r#"SELECT * FROM src WHERE "Species" = 'Iris-setosa'"#,
+        )
         .unwrap()
-        .sql_node("virginica", r#"SELECT * FROM src WHERE "Species" = 'Iris-virginica'"#)
+        .sql_node(
+            "virginica",
+            r#"SELECT * FROM src WHERE "Species" = 'Iris-virginica'"#,
+        )
         .unwrap()
         .add_edge("load", "setosa")
         .unwrap()
@@ -92,7 +98,11 @@ async fn fanout_branch() {
         .unwrap();
 
     let report = engine.run().await.expect("run should succeed");
-    assert!(report.ok, "statuses: {:?}; errors: {:?}", report.statuses, report.errors);
+    assert!(
+        report.ok,
+        "statuses: {:?}; errors: {:?}",
+        report.statuses, report.errors
+    );
     for n in ["load", "setosa", "virginica"] {
         assert_eq!(report.status(n), Some(RuntimeStatus::Success), "{n}");
     }
@@ -157,9 +167,9 @@ impl DagNode for BoomNode {
 #[tokio::test]
 async fn failure_cascades() {
     let ctx = Arc::new(SessionContext::new());
-    let mut engine = DataEngine::new(ctx);
+    let mut engine = DataEngine::new(ctx.clone());
     // Custom node: build meta in a separate statement (avoids self-borrow).
-    let boom_meta = engine.node_meta("boom", "boom");
+    let boom_meta = NodeMeta::new("boom", ctx.clone());
     engine.add_node("boom", BoomNode(boom_meta)).unwrap();
     engine
         .sql_node("child", "SELECT 1")
@@ -197,11 +207,12 @@ async fn scheduler_runs_in_parallel() {
     // 4 independent sleep nodes, concurrency 4 → ~100ms; concurrency 1 → ~400ms.
     for &concurrency in &[4usize, 1] {
         let ctx = Arc::new(SessionContext::new());
-        let mut engine =
-            DataEngine::new(ctx).with_config(SchedulerConfig { max_concurrency: concurrency });
+        let mut engine = DataEngine::new(ctx.clone()).with_config(SchedulerConfig {
+            max_concurrency: concurrency,
+        });
         for i in 0..4 {
             let id = format!("s{i}");
-            let meta = engine.node_meta(&id, &id);
+            let meta = NodeMeta::new(&id, ctx.clone());
             engine.add_node(id, SleepNode(meta)).unwrap();
         }
         let start = Instant::now();

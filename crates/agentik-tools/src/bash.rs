@@ -3,12 +3,13 @@ use std::time::Duration;
 
 use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+
 use tokio::process::Command;
 use tokio::time::timeout;
 
 use agentik_core::tools::truncation::{TruncationConfig, truncate_tool_output};
 use agentik_core::tools::{ToolError, ToolFunction};
+use agentik_proc::tool;
 
 /// Hard ceiling enforced by the framework wrapper. The real per-command
 /// timeout comes from `BashInput::timeout` and is enforced inside `run()`,
@@ -23,7 +24,6 @@ const BASH_MAX_LINES: usize = 2_000;
 /// command output that the agent may need for debugging.
 const BASH_MAX_BYTES: usize = 100 * 1_024; // 100 KB
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "bash",
     description = "Executes a bash command and returns its stdout, stderr, and exit code."

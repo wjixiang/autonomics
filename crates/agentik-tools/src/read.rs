@@ -2,12 +2,12 @@ use std::path::Path;
 
 use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+
 use tokio::fs;
 
 use agentik_core::tools::{ToolError, ToolFunction};
+use agentik_proc::tool;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "read",
     description = "Reads a UTF-8 text file and returns it with line numbers (cat -n style). Supports offset/limit for partial reads."

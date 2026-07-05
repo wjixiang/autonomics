@@ -4,11 +4,12 @@ use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContex
 use fs::OpendalFileStorage;
 
 use crate::data_engine::dag::{DAG, Edge, RunReport, SchedulerConfig, run_dag};
-use crate::data_engine::nodes::{DagNode, DagNodeStatus, NodeMeta};
-use crate::error::Error;
+use crate::data_engine::error::{Error, Result};
+use crate::data_engine::nodes::{DagNode, NodeMeta};
 use datalake::Datalake;
 
 pub mod dag;
+pub mod error;
 pub mod nodes;
 
 pub use nodes::{FileFormat, Sink, SinkNode, Source, SourceNode, SqlNode, WriteFormat};
@@ -42,13 +43,10 @@ impl DataEngine {
 
     /// Build a [`NodeMeta`] bound to this engine's shared context. Nodes must be
     /// constructed with this so they read through the registered stores/catalogs.
-    pub fn node_meta(&self, id: impl Into<String>, name: impl Into<String>) -> NodeMeta {
-        NodeMeta::new(
-            id.into(),
-            name.into(),
-            DagNodeStatus::Idle,
-            self.ctx.clone(),
-        )
+    ///
+    /// Note that this is a helper function
+    fn crate_node_meta(&self, id: impl Into<String>) -> NodeMeta {
+        NodeMeta::new(id.into(), self.ctx.clone())
     }
 
     /// Register a node under `id`.
@@ -60,26 +58,22 @@ impl DataEngine {
     /// avoid a self-borrow conflict:
     ///
     /// ```ignore
-    /// let meta = engine.node_meta("x", "x");
+    /// let meta = engine.node_meta("x");
     /// engine.add_node("x", MyNode::new(meta, ...))?;
     /// ```
     pub fn add_node<N: DagNode + 'static>(
         &mut self,
         id: impl Into<String>,
         node: N,
-    ) -> Result<&mut Self, Error> {
+    ) -> Result<&mut Self> {
         self.dag.add_node(id.into(), Box::new(node))?;
         Ok(self)
     }
 
     /// Convenience: add a [`SourceNode`] (chaining-safe — meta built internally).
-    pub fn source_node(
-        &mut self,
-        id: impl Into<String>,
-        source: Source,
-    ) -> Result<&mut Self, Error> {
+    pub fn source_node(&mut self, id: impl Into<String>, source: Source) -> Result<&mut Self> {
         let id = id.into();
-        let meta = self.node_meta(id.clone(), id.clone());
+        let meta = self.crate_node_meta(id.clone());
         self.dag
             .add_node(id, Box::new(SourceNode::new(meta, source)))?;
         Ok(self)
@@ -90,18 +84,18 @@ impl DataEngine {
         &mut self,
         id: impl Into<String>,
         query: impl Into<String>,
-    ) -> Result<&mut Self, Error> {
+    ) -> Result<&mut Self> {
         let id = id.into();
-        let meta = self.node_meta(id.clone(), id.clone());
+        let meta = self.crate_node_meta(id.clone());
         self.dag
             .add_node(id, Box::new(SqlNode::new(meta, query.into())))?;
         Ok(self)
     }
 
     /// Convenience: add a [`SinkNode`] (chaining-safe).
-    pub fn sink_node(&mut self, id: impl Into<String>, sink: Sink) -> Result<&mut Self, Error> {
+    pub fn sink_node(&mut self, id: impl Into<String>, sink: Sink) -> Result<&mut Self> {
         let id = id.into();
-        let meta = self.node_meta(id.clone(), id.clone());
+        let meta = self.crate_node_meta(id.clone());
         self.dag.add_node(id, Box::new(SinkNode::new(meta, sink)))?;
         Ok(self)
     }
@@ -112,7 +106,7 @@ impl DataEngine {
         &mut self,
         from: impl Into<String>,
         to: impl Into<String>,
-    ) -> Result<&mut Self, Error> {
+    ) -> Result<&mut Self> {
         let edge = Edge::new(from, to);
         self.dag.add_edge(edge)?;
         Ok(self)
@@ -125,7 +119,7 @@ impl DataEngine {
         from: impl Into<String>,
         to: impl Into<String>,
         port: impl Into<String>,
-    ) -> Result<&mut Self, Error> {
+    ) -> Result<&mut Self> {
         let edge = Edge::new(from, to).with_port(port);
         self.dag.add_edge(edge)?;
         Ok(self)
@@ -138,9 +132,8 @@ impl DataEngine {
     }
 
     /// Validate and run every node of the DAG.
-    pub async fn run(&mut self) -> Result<RunReport, Error> {
-        let report = run_dag(&mut self.dag, &self.config).await?;
-        Ok(report)
+    pub async fn run(&mut self) -> Result<RunReport> {
+        Ok(run_dag(&mut self.dag, &self.config).await?)
     }
 }
 
@@ -155,15 +148,15 @@ impl DataEngineBuilder {
         }
     }
 
-    pub fn register_opendal_fs(self, file_session: Arc<OpendalFileStorage>) -> crate::Result<Self> {
+    pub fn register_opendal_fs(self, file_session: Arc<OpendalFileStorage>) -> Result<Self> {
         let object_url = ObjectStoreUrl::parse("file://")
-            .map_err(|e| crate::Error::Custom(format!("cannot parse datafusion url: {e}")))?;
+            .map_err(|e| Error::Custom(format!("cannot parse datafusion url: {e}")))?;
         self.ctx
             .register_object_store(object_url.as_ref(), file_session.clone());
         Ok(self)
     }
 
-    pub async fn register_iceberg(self) -> crate::Result<Self> {
+    pub async fn register_iceberg(self) -> Result<Self> {
         let datalake = Datalake::default();
         let provider = datalake.get_provider().await?;
         self.ctx.register_catalog("iceberg", Arc::new(provider));

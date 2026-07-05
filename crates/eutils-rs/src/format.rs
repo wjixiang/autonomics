@@ -86,19 +86,27 @@ pub fn format_esummary(data: &Value) -> String {
             out.push('\n');
         }
 
-        // DOI
-        let doi = str_field(article, "elocationid")
-            .replace("doi: ", "");
-        if !doi.is_empty() && !doi.starts_with("doi:") {
-            out.push_str(&format!("**DOI:** {doi}\n"));
-        }
-        // Also check articleids array
-        if let Some(ids) = article.get("articleids").and_then(|v| v.as_array()) {
-            for id_entry in ids {
-                let id_type = str_field(id_entry, "idtype");
-                if id_type == "doi" {
-                    out.push_str(&format!("**DOI:** {}\n", str_field(id_entry, "value")));
-                    break;
+        // DOI — prefer elocationid, fall back to articleids array
+        let doi_from_location = str_field(article, "elocationid")
+            .replace("doi: ", "")
+            .trim()
+            .to_string();
+        let doi_printed = if !doi_from_location.is_empty()
+            && !doi_from_location.starts_with("doi:")
+        {
+            out.push_str(&format!("**DOI:** {doi_from_location}\n"));
+            true
+        } else {
+            false
+        };
+        if !doi_printed {
+            if let Some(ids) = article.get("articleids").and_then(|v| v.as_array()) {
+                for id_entry in ids {
+                    let id_type = str_field(id_entry, "idtype");
+                    if id_type == "doi" {
+                        out.push_str(&format!("**DOI:** {}\n", str_field(id_entry, "value")));
+                        break;
+                    }
                 }
             }
         }

@@ -3,13 +3,12 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 use super::json_err;
 use crate::format::format_gwasinfo_table;
 use crate::OpengwasClient;
+use agentik_proc::tool;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "opengwas_gwasinfo_search",
     description = "Search cached GWAS datasets by keyword. Uses SQL LIKE \

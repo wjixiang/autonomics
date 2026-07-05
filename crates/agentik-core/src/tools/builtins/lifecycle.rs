@@ -1,13 +1,12 @@
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
+use agentik_proc::tool;
 
 use crate::agent::InternalEvent;
 use agentik_sdk::types::tools::{ToolResult, ToolResultContent};
 
 use crate::tools::{ToolError, ToolFunction, ToolRegistration};
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "abort_task",
     description = "Signal that the current task cannot or should not be completed. \

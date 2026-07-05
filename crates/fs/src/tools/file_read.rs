@@ -3,11 +3,11 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+
+use agentik_proc::tool;
 
 use crate::storage::OpendalFileStorage;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "file_read",
     description = "Read a file's content. Returns the text content and byte size."

@@ -31,7 +31,7 @@ impl OpendalFileStorage {
     }
 
     pub fn new_in_fs() -> Self {
-        Self::new("/tmp/opendal")
+        Self::new("/mnt/disk3/test")
     }
 
     /// Convert an ObjectStore path to a local filesystem path.

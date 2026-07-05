@@ -2,14 +2,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 use agentik_sdk::types::ToolResult as AgentToolResult;
 
 use crate::tools::task_runtime::TaskEntry;
 use crate::tools::{ToolError, ToolFunction};
+use agentik_proc::tool;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "view_task_results",
     description = "View the stored result of a single background task by its tool call id. \

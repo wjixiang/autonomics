@@ -92,6 +92,7 @@ dependencies = [
  "agentik-sdk",
  "anyhow",
  "data-engine",
+ "data-engine-tools",
  "eutils-rs",
  "fs",
  "opengwas-rs",
@@ -1635,10 +1636,16 @@ dependencies = [
 name = "data-engine-tools"
 version = "0.1.0"
 dependencies = [
+ "agentik-core",
  "agentik-proc",
  "agentik-sdk",
+ "anyhow",
+ "async-trait",
  "data-engine",
+ "fs",
  "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

@@ -4,11 +4,11 @@ use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
+use agentik_proc::tool;
 
 use crate::storage::OpendalFileStorage;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
+#[derive(Debug)]
 #[tool(
     name = "file_list",
     description = "List entries under a path. Returns names, types (file/dir), and sizes."

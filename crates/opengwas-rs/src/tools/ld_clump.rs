@@ -3,13 +3,13 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use agentik_proc::tool;
 
 use super::json_err;
 use crate::format::format_ld_clump;
 use crate::{OpengwasClient, types::*};
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
+#[derive(Debug)]
 #[tool(
     name = "opengwas_ld_clump",
     description = "Perform LD clumping on a set of rs IDs using 1000 Genomes \

@@ -1,12 +1,12 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+
 use tokio::fs;
 
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
+use agentik_proc::tool;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "edit",
     description = "Performs an exact string replacement in a file. Fails if old_string is absent or ambiguous (unless replace_all is set)."

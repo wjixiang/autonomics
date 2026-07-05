@@ -3,13 +3,12 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use agentik_proc::tool;
 
 use super::json_err;
 use crate::format::format_ld_matrix;
 use crate::{OpengwasClient, types::*};
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "opengwas_ld_matrix",
     description = "Get the LD R-value matrix for a list of SNPs. \

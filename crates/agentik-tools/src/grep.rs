@@ -3,13 +3,13 @@ use std::path::Path;
 use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+
 
 use agentik_core::tools::{ToolError, ToolFunction};
+use agentik_proc::tool;
 
 const MAX_LINES: usize = 250;
 
-#[derive(Debug, Deserialize, Serialize, agentik_proc::ToolInput)]
 #[tool(
     name = "grep",
     description = "Searches file contents with a regular expression. Respects .gitignore. Returns matching lines, files, or counts."

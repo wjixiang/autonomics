@@ -43,27 +43,21 @@ pub struct NodeInput {
 /// same engine context (registered object stores, catalogs, …).
 pub struct NodeMeta {
     id: NodeId,
-    name: String,
     status: DagNodeStatus,
     ctx: Arc<SessionContext>,
 }
 
 impl NodeMeta {
-    pub fn new(id: NodeId, name: String, status: DagNodeStatus, ctx: Arc<SessionContext>) -> Self {
+    pub fn new(id: impl Into<String>, ctx: Arc<SessionContext>) -> Self {
         Self {
-            id,
-            name,
-            status,
+            id: id.into(),
+            status: DagNodeStatus::default(),
             ctx,
         }
     }
 
     pub fn id(&self) -> &str {
         &self.id
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
     }
 
     /// Status borrowed by reference — caller must not outlive the meta node.
