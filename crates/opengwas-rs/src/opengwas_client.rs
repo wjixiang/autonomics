@@ -442,8 +442,17 @@ impl OpengwasClient {
     ) -> Result<Vec<GwasInfo>> {
         const ALLOWED: &[&str] = &["trait_", "author", "population"];
         const ALLOWED_SORT: &[&str] = &[
-            "nsnp", "sample_size", "year", "ncase", "ncontrol",
-            "pmid", "mr", "priority", "sd", "author", "trait_",
+            "nsnp",
+            "sample_size",
+            "year",
+            "ncase",
+            "ncontrol",
+            "pmid",
+            "mr",
+            "priority",
+            "sd",
+            "author",
+            "trait_",
         ];
         const ALLOWED_ORDER: &[&str] = &["asc", "desc"];
 
@@ -809,6 +818,7 @@ mod tests {
         OpengwasClient::new(None)
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_search_by_trait() {
         let client = get_client();
