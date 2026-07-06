@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use datafusion::prelude::DataFrame;
 use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
 
@@ -68,12 +67,23 @@ impl DataEngine {
     }
 
     /// Convenience: add a [`SourceNode`] (chaining-safe — meta built internally).
-    pub fn source_node(&mut self, id: impl Into<String>, source: Source) -> Result<&mut Self> {
+    pub fn source_node(
+        &mut self,
+        id: impl Into<String>,
+        source: Source,
+        output_df_name: impl Into<String>,
+    ) -> Result<&mut Self> {
         let id = id.into();
+        let output_df_name = output_df_name.into();
         let meta = self.crate_node_meta(id.clone());
         self.dag.add_node(
             id,
-            Box::new(SourceNode::new(meta, source, self.ctx.clone())),
+            Box::new(SourceNode::new(
+                meta,
+                source,
+                self.ctx.clone(),
+                output_df_name,
+            )),
         )?;
         Ok(self)
     }
@@ -83,12 +93,19 @@ impl DataEngine {
         &mut self,
         id: impl Into<String>,
         query: impl Into<String>,
+        output_df_name: impl Into<String>,
     ) -> Result<&mut Self> {
         let id = id.into();
+        let output_df_name = output_df_name.into();
         let meta = self.crate_node_meta(id.clone());
         self.dag.add_node(
             id,
-            Box::new(SqlNode::new(meta, query.into(), self.ctx.clone())),
+            Box::new(SqlNode::new(
+                meta,
+                query.into(),
+                self.ctx.clone(),
+                output_df_name,
+            )),
         )?;
         Ok(self)
     }
@@ -102,26 +119,13 @@ impl DataEngine {
     }
 
     /// Add a dependency `from -> to`. The downstream node receives the upstream
-    /// output under the default port name `"src"`.
+    /// output registered under the upstream node's output DataFrame name.
     pub fn add_edge(
         &mut self,
         from: impl Into<String>,
         to: impl Into<String>,
     ) -> Result<&mut Self> {
         let edge = Edge::new(from, to);
-        self.dag.add_edge(edge)?;
-        Ok(self)
-    }
-
-    /// Add a dependency with an explicit port name (e.g. the table name a
-    /// `SqlNode` references).
-    pub fn add_named_edge(
-        &mut self,
-        from: impl Into<String>,
-        to: impl Into<String>,
-        port: impl Into<String>,
-    ) -> Result<&mut Self> {
-        let edge = Edge::new(from, to).with_port(port);
         self.dag.add_edge(edge)?;
         Ok(self)
     }
@@ -137,7 +141,10 @@ impl DataEngine {
         Ok(self.dag.run(&self.config).await?)
     }
 
-    pub async fn get_output(&self, node_id: impl Into<String>) -> Option<Vec<DataFrame>> {
+    pub async fn get_output(
+        &self,
+        node_id: impl Into<String>,
+    ) -> Option<crate::data_engine::dag::graph::NamedDataFrames> {
         self.dag.output(node_id.into().as_ref())
     }
 }

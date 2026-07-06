@@ -1,11 +1,11 @@
 use async_trait::async_trait;
-use datafusion::prelude::{DataFrame, SessionContext};
+use datafusion::{common::HashMap, prelude::SessionContext};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
 use std::sync::Arc;
 
-use crate::data_engine::dag::DagError;
+use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
 
 #[derive(Debug, Error)]
 pub enum SqlNodeError {
@@ -40,14 +40,21 @@ pub struct SqlNode {
     meta: NodeMeta,
     sql_query: String,
     ctx: Arc<SessionContext>,
+    output_df_name: String,
 }
 
 impl SqlNode {
-    pub fn new(meta: NodeMeta, query: String, ctx: Arc<SessionContext>) -> Self {
+    pub fn new(
+        meta: NodeMeta,
+        query: String,
+        ctx: Arc<SessionContext>,
+        output_df_name: String,
+    ) -> Self {
         Self {
             meta,
             sql_query: query,
             ctx,
+            output_df_name,
         }
     }
 
@@ -66,7 +73,7 @@ impl DagNode for SqlNode {
         Box::new((*self).clone())
     }
 
-    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         if inputs.is_empty() {
             return Err(SqlNodeError::InvalidInput {
                 message: "SqlNode requires at least one upstream input".to_string(),
@@ -77,16 +84,20 @@ impl DagNode for SqlNode {
         let ctx = self.ctx.clone();
         for inp in inputs {
             // register_table errors if the name already exists, so deregister
-            // first. NOTE: SqlNodes share the engine's SessionContext, so a port
+            // first.
+            //
+            // NOTE: SqlNodes share the engine's SessionContext, so a port
             // name is a single shared slot — give each upstream a distinct port
             // name when they carry different data.
-            let _ = ctx.deregister_table(&inp.port);
+            let _ = ctx.deregister_table(&inp.df_name);
             let view = inp.data.clone().into_view();
-            ctx.register_table(&inp.port, view)
+            ctx.register_table(&inp.df_name, view)
                 .map_err(SqlNodeError::RegisterView)?;
         }
         let out = ctx.sql(&self.sql_query).await?;
-        Ok(vec![out])
+        let mut res: NamedDataFrames = HashMap::new();
+        res.insert(self.output_df_name.clone(), out);
+        Ok(res)
     }
 }
 
@@ -116,6 +127,7 @@ mod tests {
             NodeMeta::new("sql"),
             "SELECT * FROM src WHERE x > 1".into(),
             ctx.clone(),
+            "out".into(),
         );
         let view = df.into_view();
         ctx.register_table("src", view).unwrap();

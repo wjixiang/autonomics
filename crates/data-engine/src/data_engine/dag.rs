@@ -11,6 +11,7 @@
 pub mod error;
 pub mod graph;
 pub mod runtime;
+pub mod utils;
 
 // Re-export node abstractions from the nodes module for backward compatibility
 // and so that dag internals (graph.rs, runtime.rs) can use `super::DagNode` etc.

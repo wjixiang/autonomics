@@ -5,6 +5,7 @@
 //! [`Sink`] — a file (CSV / Parquet) or an Iceberg table.
 
 use async_trait::async_trait;
+use datafusion::common::HashMap;
 use datafusion::common::config::{CsvOptions, TableParquetOptions};
 use datafusion::dataframe::DataFrameWriteOptions;
 use datafusion::prelude::DataFrame;
@@ -12,6 +13,7 @@ use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
 use crate::data_engine::dag::DagError;
+use crate::data_engine::dag::graph::NamedDataFrames;
 
 /// Where a [`SinkNode`] writes to.
 #[derive(Debug, Clone)]
@@ -82,7 +84,7 @@ impl DagNode for SinkNode {
         Box::new(cp_node)
     }
 
-    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         let input = inputs.first().ok_or(SinkError::InvalidInput {
             message: "SinkNode requires exactly one upstream input".to_string(),
         })?;
@@ -122,6 +124,6 @@ impl DagNode for SinkNode {
                 .into());
             }
         }
-        Ok(vec![])
+        Ok(HashMap::new())
     }
 }

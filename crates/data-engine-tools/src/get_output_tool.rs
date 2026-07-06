@@ -3,6 +3,8 @@ use std::sync::Arc;
 use agentik_core::tools::{ToolError, ToolFunction};
 use agentik_proc::tool;
 use agentik_sdk::types::ToolResult;
+
+use crate::ExecError;
 use async_trait::async_trait;
 use data_engine::runtime::DataEngineClient;
 
@@ -36,7 +38,7 @@ impl ToolFunction for GetOutputTool {
             .client
             .get_output(input.id.clone())
             .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .map_err(ExecError::from)?
         else {
             return Ok(ToolResult::error(format!(
                 "no output found for node '{}'",
@@ -45,7 +47,7 @@ impl ToolFunction for GetOutputTool {
         };
 
         let mut outputs_info = Vec::with_capacity(dfs.len());
-        for (i, df) in dfs.iter().enumerate() {
+        for (name, df) in dfs.iter() {
             let schema = df.schema();
             let fields: Vec<serde_json::Value> = schema
                 .fields()
@@ -58,7 +60,7 @@ impl ToolFunction for GetOutputTool {
 
             let count = df.clone().count().await.unwrap_or(0);
             outputs_info.push(serde_json::json!({
-                "index": i,
+                "name": name,
                 "columns": fields.len(),
                 "rows": count,
                 "fields": fields,

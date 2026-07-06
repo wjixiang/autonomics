@@ -6,10 +6,12 @@
 //! [`DataFrame`] itself. The trait is `Send` so node payloads can be moved into
 //! spawned scheduler tasks.
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use datafusion::prelude::DataFrame;
 
-use crate::data_engine::dag::DagError;
+use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
 
 /// Unique identifier for a node in the DAG.
 pub type NodeId = String;
@@ -20,14 +22,19 @@ pub struct NodeInput {
     /// Name under which `data` is registered for the consuming node
     /// (e.g. the table name a `SqlNode` references). Positional default is
     /// `"src"`, `"src_2"`, … assigned by the scheduler.
-    pub port: String,
+    pub df_name: String,
     pub data: DataFrame,
 }
+
+/// Modeling the interface of
+#[derive(Clone)]
+pub struct NodeInterface {}
 
 /// Static per-node metadata.
 #[derive(Clone)]
 pub struct NodeMeta {
     id: NodeId,
+    // inlets: HashSet<String>,
 }
 
 impl NodeMeta {
@@ -48,7 +55,9 @@ impl NodeMeta {
 pub trait DagNode: Send + Sync {
     fn meta(&self) -> &NodeMeta;
     /// Input data injected by the scheduler when the node runs.
-    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError>;
+    /// - Use self.input to get required dataframes
+    /// - Use self.output to write outputed dataframes
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError>;
     fn clone_box(&self) -> Box<dyn DagNode>;
 }
 

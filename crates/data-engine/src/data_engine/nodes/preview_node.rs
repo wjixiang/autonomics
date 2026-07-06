@@ -3,7 +3,7 @@ use std::fmt::Display;
 use async_trait::async_trait;
 use datafusion::prelude::DataFrame;
 
-use crate::data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta};
+use crate::data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::NamedDataFrames};
 
 #[derive(Clone)]
 pub struct PreviewNode {
@@ -49,7 +49,7 @@ impl DagNode for PreviewNode {
     }
 
     /// Input data injected by the scheduler when the node runs.
-    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         todo!()
     }
 }

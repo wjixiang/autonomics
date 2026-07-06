@@ -1,7 +1,5 @@
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use datafusion::prelude::DataFrame;
-
 use crate::data_engine::DataEngine;
 use crate::runtime::error::Result;
 use crate::runtime::types::DataEngineCmd;
@@ -24,25 +22,21 @@ impl DataEngineServer {
 
     async fn handle(&mut self, cmd: DataEngineCmd) {
         match cmd {
-            DataEngineCmd::AddSourceNode { id, source, reply } => {
-                let _ = reply.send(self.engine.source_node(id, source).map(|_| ()));
+            DataEngineCmd::AddSourceNode { id, source, output_df_name, reply } => {
+                let _ = reply.send(self.engine.source_node(id, source, output_df_name).map(|_| ()));
             }
-            DataEngineCmd::AddSqlNode { id, query, reply } => {
-                let _ = reply.send(self.engine.sql_node(id, query).map(|_| ()));
+            DataEngineCmd::AddSqlNode { id, query, output_df_name, reply } => {
+                let _ = reply.send(self.engine.sql_node(id, query, output_df_name).map(|_| ()));
             }
             DataEngineCmd::AddSinkNode { id, sink, reply } => {
                 let _ = reply.send(self.engine.sink_node(id, sink).map(|_| ()));
             }
-            DataEngineCmd::AddEdge { from, to, reply } => {
-                let _ = reply.send(self.engine.add_edge(from, to).map(|_| ()));
-            }
-            DataEngineCmd::AddNamedEdge {
+            DataEngineCmd::AddEdge {
                 from,
                 to,
-                port,
                 reply,
             } => {
-                let _ = reply.send(self.engine.add_named_edge(from, to, port).map(|_| ()));
+                let _ = reply.send(self.engine.add_edge(from, to).map(|_| ()));
             }
             DataEngineCmd::RunDag { reply } => {
                 let _ = reply.send(self.engine.run().await);
@@ -80,12 +74,14 @@ impl DataEngineClient {
         &self,
         id: String,
         source: crate::data_engine::Source,
+        output_df_name: String,
     ) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::AddSourceNode {
                 id,
                 source,
+                output_df_name,
                 reply: reply_tx,
             },
             reply_rx,
@@ -93,12 +89,13 @@ impl DataEngineClient {
         .await
     }
 
-    pub async fn add_sql_node(&self, id: String, query: String) -> Result<()> {
+    pub async fn add_sql_node(&self, id: String, query: String, output_df_name: String) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::AddSqlNode {
                 id,
                 query,
+                output_df_name,
                 reply: reply_tx,
             },
             reply_rx,
@@ -132,27 +129,13 @@ impl DataEngineClient {
         .await
     }
 
-    pub async fn add_named_edge(&self, from: String, to: String, port: String) -> Result<()> {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        self.request(
-            DataEngineCmd::AddNamedEdge {
-                from,
-                to,
-                port,
-                reply: reply_tx,
-            },
-            reply_rx,
-        )
-        .await
-    }
-
     pub async fn run_dag(&self) -> Result<crate::data_engine::dag::RunReport> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(DataEngineCmd::RunDag { reply: reply_tx }, reply_rx)
             .await
     }
 
-    pub async fn get_output(&self, id: String) -> Result<Option<Vec<DataFrame>>> {
+    pub async fn get_output(&self, id: String) -> Result<Option<crate::data_engine::dag::graph::NamedDataFrames>> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::GetOutput {

@@ -1639,7 +1639,6 @@ dependencies = [
  "agentik-core",
  "agentik-proc",
  "agentik-sdk",
- "anyhow",
  "async-trait",
  "data-engine",
  "fs",
@@ -2768,6 +2767,7 @@ dependencies = [
  "opendal",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
 ]

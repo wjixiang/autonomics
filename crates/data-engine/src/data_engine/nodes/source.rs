@@ -12,11 +12,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use biofusion::datasource::BioReadOptions;
 use biofusion::ext::DataFusionReadExt;
-use datafusion::prelude::{CsvReadOptions, DataFrame, ParquetReadOptions, SessionContext};
+use datafusion::{
+    common::HashMap,
+    prelude::{CsvReadOptions, DataFrame, ParquetReadOptions, SessionContext},
+};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
-use crate::data_engine::dag::DagError;
+use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
 
 /// Where a [`SourceNode`] reads from.
 #[derive(Debug, Clone)]
@@ -131,11 +134,22 @@ pub struct SourceNode {
     meta: NodeMeta,
     source: Source,
     ctx: Arc<SessionContext>,
+    output_df_name: String,
 }
 
 impl SourceNode {
-    pub fn new(meta: NodeMeta, source: Source, ctx: Arc<SessionContext>) -> Self {
-        Self { meta, source, ctx }
+    pub fn new(
+        meta: NodeMeta,
+        source: Source,
+        ctx: Arc<SessionContext>,
+        output_df_name: String,
+    ) -> Self {
+        Self {
+            meta,
+            source,
+            ctx,
+            output_df_name,
+        }
     }
 }
 
@@ -149,7 +163,7 @@ impl DagNode for SourceNode {
         Box::new((*self).clone())
     }
 
-    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
+    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         let ctx = self.ctx.clone();
         let df = match &self.source {
             Source::File { path, format } => {
@@ -164,7 +178,9 @@ impl DagNode for SourceNode {
                 ctx.sql(&format!("SELECT * FROM iceberg.{ident}")).await?
             }
         };
-        Ok(vec![df])
+        let mut res: NamedDataFrames = HashMap::new();
+        res.insert(self.output_df_name.clone(), df);
+        Ok(res)
     }
 }
 

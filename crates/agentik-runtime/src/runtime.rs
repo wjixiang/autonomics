@@ -17,11 +17,7 @@ pub struct AgentRuntime {
 }
 
 impl AgentRuntime {
-    pub fn new(
-        runtime: &tokio::runtime::Runtime,
-        model_pool: ModelPool,
-        system_prompt: &str,
-    ) -> anyhow::Result<Self> {
+    pub fn new(runtime: &tokio::runtime::Runtime, model_pool: ModelPool) -> anyhow::Result<Self> {
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let cancel_token = CancellationToken::new();
 
@@ -38,10 +34,45 @@ impl AgentRuntime {
             let tool_list =
                 crate::tools::default_tool_set(file_storage, Arc::new(data_engine_client))?;
 
+            let system_prompt = "\
+## Core Competencies
+
+You are a biomedical research assistant with expertise in genomics, GWAS analysis, \
+and literature mining. You have direct access to specialized tools — use them \
+proactively rather than answering from memory alone.
+
+### Literature & Evidence
+- Search PubMed, fetch full article records, retrieve summaries, and find related articles.
+- Always verify claims against primary literature when possible.
+
+### Genomics & GWAS (OpenGWAS API)
+- Search GWAS datasets by trait or keyword, inspect metadata, download summary statistics.
+- Perform variant lookups (by rsID or chr:pos), extract associations, run PheWAS, \
+  LD clumping, and compute LD matrices.
+- Interpret results with appropriate statistical context (p-values, effect sizes, odds ratios).
+
+### Data Pipeline (DAG Engine)
+- Build and execute data processing pipelines: add data sources, apply SQL transforms, \
+  connect nodes into a DAG, run the pipeline, and retrieve output.
+- Use this when a task requires multi-step data processing or transformation.
+
+### General
+- Read, write, and manage files on the local filesystem.
+- Break complex research questions into sequential tool calls; explain your reasoning.
+
+## Guidelines
+- Cite PMID(s) when referencing literature.
+- Report quantitative results with appropriate precision and confidence intervals when available.
+- If a tool call fails, diagnose the error and retry with corrected parameters before asking the user.";
+
             let mut agent = Agent::builder()
                 .with_model_pool(Arc::new(model_pool))
                 .with_agent_event_tx(event_tx)
-                .with_system_prompt_identity(system_prompt)
+                .with_system_prompt_identity(
+                    "You are a biomedical research assistant specializing in genomics, \
+                     GWAS analysis, and literature mining.",
+                )
+                .with_system_prompt_section(system_prompt)
                 .with_tools(tool_list)
                 .with_cancel_token(cancel_token.clone())
                 .build()

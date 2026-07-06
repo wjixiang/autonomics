@@ -9,9 +9,11 @@ use std::sync::Arc;
 use data_engine::data_engine::{
     DataEngine, Sink, Source, WriteFormat,
     dag::{DagError, RuntimeStatus, SchedulerConfig},
+    dag::graph::NamedDataFrames,
     nodes::{DagNode, NodeInput, NodeMeta},
 };
-use datafusion::prelude::{DataFrame, SessionContext};
+use datafusion::common::HashMap;
+use datafusion::prelude::SessionContext;
 
 fn datasets_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_datasets")
@@ -32,12 +34,14 @@ async fn insurance_pipeline_runs() {
                 path: csv_path.to_str().unwrap().to_string(),
                 format: None,
             },
+            "load",
         )
         .unwrap()
         .sql_node(
             "agg",
             "SELECT region, CAST(AVG(charges) AS BIGINT) AS avg_chg \
              FROM src GROUP BY region",
+            "agg",
         )
         .unwrap()
         .sink_node(
@@ -78,6 +82,7 @@ async fn fanout_branch() {
                 path: iris.to_str().unwrap().to_string(),
                 format: None,
             },
+            "load",
         )
         .unwrap()
         // Note: DataFusion lowercases unquoted identifiers, so quote the
@@ -85,11 +90,13 @@ async fn fanout_branch() {
         .sql_node(
             "setosa",
             r#"SELECT * FROM src WHERE "Species" = 'Iris-setosa'"#,
+            "setosa",
         )
         .unwrap()
         .sql_node(
             "virginica",
-            r#"SELECT * FROM src WHERE "Species" = 'Iris-virginica'"#,
+            r#"SELECT * FROM src_2 WHERE "Species" = 'Iris-virginica'"#,
+            "virginica",
         )
         .unwrap()
         .add_edge("load", "setosa")
@@ -122,6 +129,7 @@ async fn bio_source_reads_vcf() {
                 path: vcf.to_str().unwrap().to_string(),
                 format: None,
             },
+            "vcf",
         )
         .unwrap();
 
@@ -135,9 +143,9 @@ async fn cycle_is_rejected() {
     let ctx = Arc::new(SessionContext::new());
     let mut engine = DataEngine::new(ctx);
     engine
-        .sql_node("a", "SELECT 1")
+        .sql_node("a", "SELECT 1", "a")
         .unwrap()
-        .sql_node("b", "SELECT 1")
+        .sql_node("b", "SELECT 1", "b")
         .unwrap()
         .add_edge("a", "b")
         .unwrap()
@@ -160,7 +168,7 @@ impl DagNode for BoomNode {
     fn clone_box(&self) -> Box<dyn DagNode> {
         Box::new((*self).clone())
     }
-    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
+    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         Err(DagError::execution(
             "test.boom",
             std::io::Error::other("kaboom"),
@@ -176,7 +184,7 @@ async fn failure_cascades() {
     let boom_meta = NodeMeta::new("boom");
     engine.add_node("boom", BoomNode(boom_meta)).unwrap();
     engine
-        .sql_node("child", "SELECT 1")
+        .sql_node("child", "SELECT 1", "child")
         .unwrap()
         .add_edge("boom", "child")
         .unwrap();
@@ -202,9 +210,9 @@ impl DagNode for SleepNode {
     fn clone_box(&self) -> Box<dyn DagNode> {
         Box::new((*self).clone())
     }
-    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
+    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        Ok(vec![])
+        Ok(HashMap::new())
     }
 }
 

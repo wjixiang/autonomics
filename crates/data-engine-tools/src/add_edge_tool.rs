@@ -5,14 +5,15 @@ use async_trait::async_trait;
 use data_engine::runtime::DataEngineClient;
 
 use agentik_core::tools::{ToolError, ToolFunction};
-
 use agentik_proc::tool;
+
+use crate::ExecError;
 
 #[tool(
     name = "add_edge",
-    description = "Connect two DAG nodes: data flows from the 'from' node's \
-                  default output port to the 'to' node's default input port. \
-                  Use add_named_edge if you need to target a specific input port."
+    description = "Connect two DAG nodes: data flows from the 'from' node to \
+                  the 'to' node under the given port name (e.g. a table name \
+                  a SqlNode can reference)."
 )]
 pub struct AddEdgeInput {
     #[desc = "ID of the upstream (source) node"]
@@ -36,12 +37,15 @@ impl ToolFunction for AddEdgeTool {
     type Input = AddEdgeInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
-        let msg = format!("edge added: {} -> {}", input.from, input.to);
+        let msg = format!(
+            "edge added: {} -> {}",
+            input.from, input.to
+        );
 
         self.client
             .add_edge(input.from, input.to)
             .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .map_err(ExecError::from)?;
 
         Ok(ToolResult::success(msg))
     }

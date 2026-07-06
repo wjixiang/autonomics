@@ -13,9 +13,9 @@ use ratatui_comfy_tabs::{TabBarAlign, TabDirection, TabNav, TabNavState};
 use rusqlite::Connection;
 use uuid::Uuid;
 
-use agentik_runtime::AgentRuntime;
 use crate::state::{self, AgentStatus, AppState, InputMode, MainTabState};
 use crate::widgets::agent_tab_widget::AgentTabWidget;
+use agentik_runtime::AgentRuntime;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(16);
 
@@ -44,8 +44,8 @@ impl App {
         let model_pool = Self::build_model_pool(&conn).expect("failed to build model pool");
 
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-        let agent_runtime = AgentRuntime::new(&runtime, model_pool, "You are a helpful assistant. ")
-            .expect("failed to create agent runtime");
+        let agent_runtime =
+            AgentRuntime::new(&runtime, model_pool).expect("failed to create agent runtime");
 
         let mut state = AppState::default();
         Self::reload_config(&mut state.config_tab_state, &conn);

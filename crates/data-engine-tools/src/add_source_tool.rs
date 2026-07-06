@@ -6,8 +6,9 @@ use data_engine::data_engine::{FileFormat, Source};
 use data_engine::runtime::DataEngineClient;
 
 use agentik_core::tools::{ToolError, ToolFunction};
-
 use agentik_proc::tool;
+
+use crate::ExecError;
 
 #[tool(
     name = "add_source_node",
@@ -21,6 +22,8 @@ pub struct AddSourceNodeInput {
     pub path: String,
     #[desc = "Explicit file format (csv, parquet, vcf, etc.). Auto-detected from path if omitted."]
     pub format: Option<String>,
+    #[desc = "Name for the output DataFrame. Defaults to the node id if omitted."]
+    pub output_df_name: Option<String>,
 }
 
 pub struct AddSourceNodeTool {
@@ -41,18 +44,18 @@ impl ToolFunction for AddSourceNodeTool {
         let format = input
             .format
             .map(|f| parse_file_format(&f))
-            .transpose()
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .transpose()?;
 
         let source = Source::File {
             path: input.path,
             format,
         };
 
+        let output_df_name = input.output_df_name.unwrap_or_else(|| input.id.clone());
         self.client
-            .add_source_node(input.id, source)
+            .add_source_node(input.id, source, output_df_name)
             .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .map_err(ExecError::from)?;
 
         Ok(ToolResult::success("source node added to DAG"))
     }

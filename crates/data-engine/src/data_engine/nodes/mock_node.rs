@@ -1,10 +1,10 @@
 use std::fmt::Display;
 
 use async_trait::async_trait;
-use datafusion::prelude::DataFrame;
+use datafusion::common::HashMap;
 
 use crate::{
-    data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta},
+    data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::NamedDataFrames},
     dataset::{BuiltinDataset, get_builtin_dataset},
 };
 
@@ -52,8 +52,10 @@ impl DagNode for MockNode {
     }
 
     /// Input data injected by the scheduler when the node runs.
-    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
+    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         let test_dataset = get_builtin_dataset(BuiltinDataset::Iris).await;
-        Ok(vec![test_dataset])
+        let mut res: NamedDataFrames = HashMap::new();
+        res.insert("iris".to_string(), test_dataset);
+        Ok(res)
     }
 }

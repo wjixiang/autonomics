@@ -18,9 +18,13 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use tokio::sync::{Semaphore, mpsc};
 use tracing::{debug, warn};
 
+use crate::data_engine::dag::utils::{build_inputs, cascade_skip};
+
 use super::error::DagError;
 use super::runtime::{RunReport, RuntimeStatus, SchedulerConfig};
-use super::{DagNode, NodeId, NodeInput};
+use super::{DagNode, NodeId};
+
+pub type NamedDataFrames = HashMap<String, DataFrame>;
 
 /// How an edge's data flows between two nodes. `OneToOne` is the streaming
 /// default; `Shuffle` is reserved for future partitioned fan-out.
@@ -33,13 +37,12 @@ pub enum DependencyKind {
 
 /// A declared dependency `from -> to`. `port` is the name under which the
 /// upstream output is registered for the downstream node (e.g. the table name a
-/// `SqlNode` references); `None` lets the scheduler assign a positional default.
+/// `SqlNode` references).
 #[derive(Debug, Clone)]
 pub struct Edge {
     pub from: NodeId,
     pub to: NodeId,
     pub kind: DependencyKind,
-    pub port: Option<String>,
 }
 
 impl Edge {
@@ -48,13 +51,7 @@ impl Edge {
             from: from.into(),
             to: to.into(),
             kind: DependencyKind::default(),
-            port: None,
         }
-    }
-
-    pub fn with_port(mut self, port: impl Into<String>) -> Self {
-        self.port = Some(port.into());
-        self
     }
 }
 
@@ -70,13 +67,20 @@ pub struct DAG {
     id_to_idx: HashMap<NodeId, NodeIndex>,
     /// Per-node runtime status. Populated on [`Self::run`], queryable via [`Self::status`].
     pub statuses: HashMap<NodeId, RuntimeStatus>,
-    outputs: HashMap<NodeId, Vec<DataFrame>>,
+    outputs: HashMap<NodeId, NamedDataFrames>,
+    errors: HashMap<NodeId, DagError>,
 }
 
 /// Messages a dispatched task sends back to the scheduler.
 enum JobResult {
-    Success { id: NodeId, outputs: Vec<DataFrame> },
-    Failed { id: NodeId, error: DagError },
+    Success {
+        id: NodeId,
+        outputs: NamedDataFrames,
+    },
+    Failed {
+        id: NodeId,
+        error: DagError,
+    },
 }
 
 impl DAG {
@@ -86,7 +90,7 @@ impl DAG {
         self.statuses.get(id).copied()
     }
 
-    pub fn output(&self, id: &str) -> Option<Vec<DataFrame>> {
+    pub fn output(&self, id: &str) -> Option<NamedDataFrames> {
         self.outputs.get(id).cloned()
     }
 
@@ -114,7 +118,7 @@ impl DAG {
         // needs a single mutable borrow of `self`.
         let mut successors: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
         // (predecessor id, resolved input port) per node, in declared edge order
-        let mut incoming: HashMap<NodeId, Vec<(NodeId, String)>> = HashMap::new();
+        let mut incoming: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
         // unresolved-predecessor count per node
         let mut pending: HashMap<NodeId, usize> = HashMap::new();
         for id in &all_ids {
@@ -123,17 +127,7 @@ impl DAG {
             let inc = self
                 .incoming_edges(id)
                 .into_iter()
-                .enumerate()
-                .map(|(i, e)| {
-                    let port = e.port.clone().unwrap_or_else(|| {
-                        if i == 0 {
-                            "src".to_string()
-                        } else {
-                            format!("src_{}", i + 1)
-                        }
-                    });
-                    (e.from.clone(), port)
-                })
+                .map(|e| e.from.clone())
                 .collect();
             incoming.insert(id.clone(), inc);
         }
@@ -143,8 +137,8 @@ impl DAG {
         for id in &all_ids {
             self.statuses.insert(id.clone(), RuntimeStatus::Pending);
         }
-        let mut outputs: HashMap<NodeId, Vec<DataFrame>> = HashMap::new();
-        let mut errors: HashMap<NodeId, DagError> = HashMap::new();
+        // let mut outputs: HashMap<NodeId, Vec<DataFrame>> = HashMap::new();
+        // let mut errors: HashMap<NodeId, DagError> = HashMap::new();
 
         let sem = Arc::new(Semaphore::new(cfg.max_concurrency.max(1)));
         let (tx, mut rx) = mpsc::channel::<JobResult>(all_ids.len().max(1));
@@ -164,7 +158,7 @@ impl DAG {
                     // Already skipped/finished by a cascade — don't dispatch.
                     continue;
                 }
-                let inputs = build_inputs(&id, &incoming, &outputs);
+                let inputs = build_inputs(&id, &incoming, &self.outputs);
                 // Borrow the node payload, then clone it into an owned Box so it
                 // can be moved into the 'static future. The original stays in
                 // `self` for re-runs / iterative optimisation.
@@ -229,7 +223,7 @@ impl DAG {
                 JobResult::Failed { id, error } => {
                     self.statuses.insert(id.clone(), RuntimeStatus::Failed);
                     debug!(node = %id, kind = error.kind(), "node failed; cascading skip to descendants");
-                    errors.insert(id.clone(), error);
+                    self.errors.insert(id.clone(), error);
                     cascade_skip(&id, &successors, &mut self.statuses, &mut ready);
                 }
             }
@@ -242,8 +236,8 @@ impl DAG {
 
         Ok(RunReport {
             statuses: self.statuses.clone(),
-            errors,
             ok,
+            errors: self.errors.drain().collect(),
         })
     }
 }
@@ -363,58 +357,6 @@ impl DAG {
     }
 }
 
-/// Gather a node's predecessor outputs into [`NodeInput`]s, in declared edge
-/// order, cloning the [`DataFrame`] handles (cheap — they are `Arc` internally).
-fn build_inputs(
-    id: &str,
-    incoming: &HashMap<NodeId, Vec<(NodeId, String)>>,
-    outputs: &HashMap<NodeId, Vec<DataFrame>>,
-) -> Vec<NodeInput> {
-    let mut inputs = Vec::new();
-    if let Some(edges) = incoming.get(id) {
-        for (from, port) in edges {
-            if let Some(pred_outputs) = outputs.get(from) {
-                for df in pred_outputs.iter() {
-                    inputs.push(NodeInput {
-                        port: port.clone(),
-                        data: df.clone(),
-                    });
-                }
-            }
-        }
-    }
-    inputs
-}
-
-/// Mark every transitive descendant of `failed` as [`RuntimeStatus::Skipped`].
-/// Stops at nodes that already have a terminal status so independent branches
-/// keep running.
-fn cascade_skip(
-    failed: &str,
-    successors: &HashMap<NodeId, Vec<NodeId>>,
-    statuses: &mut HashMap<NodeId, RuntimeStatus>,
-    ready: &mut VecDeque<NodeId>,
-) {
-    let mut queue: VecDeque<NodeId> = successors
-        .get(failed)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    while let Some(id) = queue.pop_front() {
-        if statuses[&id] != RuntimeStatus::Pending {
-            continue;
-        }
-        statuses.insert(id.clone(), RuntimeStatus::Skipped);
-        ready.retain(|r| r != &id);
-        if let Some(succs) = successors.get(&id) {
-            for s in succs {
-                queue.push_back(s.clone());
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -437,8 +379,8 @@ mod tests {
         async fn execute(
             &mut self,
             _inputs: &[super::super::NodeInput],
-        ) -> Result<Vec<datafusion::prelude::DataFrame>, super::super::DagError> {
-            Ok(vec![])
+        ) -> Result<NamedDataFrames, super::super::DagError> {
+            Ok(HashMap::new())
         }
     }
 
@@ -503,7 +445,7 @@ mod tests {
         for id in ["src", "a", "b"] {
             add(&mut dag, id);
         }
-        dag.add_edge(Edge::new("src", "a").with_port("s1")).unwrap();
+        dag.add_edge(Edge::new("src", "a")).unwrap();
         dag.add_edge(Edge::new("src", "b")).unwrap();
 
         assert_eq!(dag.predecessors("a").len(), 1);
@@ -513,6 +455,5 @@ mod tests {
         assert_eq!(succ, vec!["a", "b"]);
         let inc = dag.incoming_edges("a");
         assert_eq!(inc.len(), 1);
-        assert_eq!(inc[0].port.as_deref(), Some("s1"));
     }
 }

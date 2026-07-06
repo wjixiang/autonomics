@@ -52,9 +52,9 @@ crates/
 - **Uniform agent loop** — One behavioral loop for all agents. Agent personality and tooling are configured _only_ through the toolset and system prompt; no agent-specific code paths in the loop itself (see `crates/agentik-core/src/agent.rs`).
 - **Reactive context** — `AgentContext` trait: implement `read()` / `write()`. The loop polls the version at each boundary and injects a `[context-update]` message into memory when it changes. Built-in `InMemoryAgentContext` for tests.
 - **Memory with compaction** — `Memory` keeps a rolling list of summarized `MemoryItem`s. When token pressure rises against the model's `context_length`, the oldest segment is summarized by the LLM into a `summary` and a fresh segment is opened.
-- **Toolset** — `ToolRegistration` + `Toolset` handle schema exposure, parallel dispatch, per-tool timeouts, and `ToolEffect` propagation. Every `T: ToolFunction` is auto-erased to `DynToolFunction` for heterogeneous storage.
+- **Toolset** — `ToolRegistration` + `Toolset` handle schema exposure, parallel dispatch, and per-tool timeouts. Every `T: ToolFunction` is auto-erased to `DynToolFunction` for heterogeneous storage.
 - **Built-in tools** — `attempt_complete`, `abort_task` (lifecycle), `bash` (subprocess with kill-on-drop and tail-truncated output).
-- **Lifecycle & effects** — `AgentLifecycle` (IDLE / RUNNING / ABORTED) driven by tool-emitted `ToolEffect`s, so agents self-terminate without external orchestration.
+- **Lifecycle** — `AgentLifecycle` (IDLE / RUNNING / ABORTED) driven by built-in lifecycle tools, so agents self-terminate without external orchestration.
 - **Retry with feedback** — Retryable `AgentError`s trigger exponential backoff and the failure reason is injected back into memory for the next attempt.
 - **Observation** — Optional `mpsc` event channel streams `AgentUiEvent`s (Thinking, LlmResponse, ToolCall, ToolResult, Requesting, Done, Error) to a TUI or logger.
 - **Snapshots** — `AgentSnapshotStorage` trait with a SQLite backend for persisting agent memory and status.
@@ -208,13 +208,7 @@ impl ToolFunction for WeatherTool {
 }
 ```
 
-Tools can declare side effects that the agent loop acts on:
-
-```rust
-fn effects(&self) -> Vec<ToolEffect> { vec![ToolEffect::AttemptComplete] }
-```
-
-The built-in lifecycle tools (`attempt_complete`, `abort_task`) use this mechanism to flip the agent to `IDLE` / `ABORTED`.
+The built-in lifecycle tools (`attempt_complete`, `abort_task`) drive agent state transitions (`IDLE` / `ABORTED`).
 
 ## Configuration
 
@@ -306,7 +300,7 @@ agentik/
             ├── toolset.rs              # Re-exports ToolRegistration / Toolset
             ├── tools/                  # ToolFunction trait, registry, executor,
             │                           #   bash_tool, lifecycle_tools, errors
-            └── types.rs                # Re-exports ToolEffect, ToolError
+            └── types.rs                # Re-exports ToolError
 ```
 
 ## Requirements

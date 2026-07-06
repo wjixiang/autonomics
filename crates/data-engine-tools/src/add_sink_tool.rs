@@ -6,8 +6,9 @@ use data_engine::data_engine::{Sink, WriteFormat};
 use data_engine::runtime::DataEngineClient;
 
 use agentik_core::tools::{ToolError, ToolFunction};
-
 use agentik_proc::tool;
+
+use crate::ExecError;
 
 #[tool(
     name = "add_sink_node",
@@ -41,8 +42,7 @@ impl ToolFunction for AddSinkNodeTool {
         let format = input
             .format
             .map(|f| parse_write_format(&f))
-            .transpose()
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .transpose()?;
 
         // Auto-detect from extension when not explicitly specified
         let format = format.or_else(|| detect_write_format(&input.path));
@@ -55,7 +55,7 @@ impl ToolFunction for AddSinkNodeTool {
         self.client
             .add_sink_node(input.id, sink)
             .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            .map_err(ExecError::from)?;
 
         Ok(ToolResult::success("sink node added to DAG"))
     }
