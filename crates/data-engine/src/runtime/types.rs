@@ -35,4 +35,8 @@ pub enum DataEngineCmd {
         id: String,
         reply: oneshot::Sender<EngineResult<Option<NamedDataFrames>>>,
     },
+    RemoveNode {
+        id: String,
+        reply: oneshot::Sender<EngineResult<()>>,
+    },
 }

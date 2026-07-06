@@ -25,10 +25,10 @@ impl SqlNodeError {
 }
 
 impl From<SqlNodeError> for DagError {
-    fn from(value: SqlNodeError) -> Self {
-        Self::ExecutionError {
-            kind: value.kind(),
-            source: Box::new(value),
+    fn from(e: SqlNodeError) -> Self {
+        match e {
+            SqlNodeError::RegisterView(source) => DagError::DataFusion(source),
+            SqlNodeError::InvalidInput { message } => DagError::Schedule(message),
         }
     }
 }

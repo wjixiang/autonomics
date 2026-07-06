@@ -1,11 +1,4 @@
 //! The DAG data structure: a payload store + a structural index.
-//!
-//! Node payloads (`Box<dyn DagNode>`) live in a [`HashMap`] keyed by id; a
-//! lightweight [`petgraph`] directed graph mirrors only the connectivity so we
-//! get cycle detection, topological sort, and predecessor/successor queries for
-//! free. The two are decoupled on purpose — keeping payloads out of the graph
-//! lets the scheduler `take` a node out of the map and move it into a spawned
-//! task without fighting the graph's borrow.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -15,6 +8,7 @@ use datafusion::prelude::DataFrame;
 use petgraph::Direction;
 use petgraph::algo::{is_cyclic_directed, kosaraju_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 use tokio::sync::{Semaphore, mpsc};
 use tracing::{debug, warn};
 
@@ -26,6 +20,10 @@ use super::{DagNode, NodeId};
 
 pub type NamedDataFrames = HashMap<String, DataFrame>;
 
+/// Module-local Result alias — every fallible operation in this module fails
+/// with [`DagError`].
+pub type Result<T> = std::result::Result<T, DagError>;
+
 /// How an edge's data flows between two nodes. `OneToOne` is the streaming
 /// default; `Shuffle` is reserved for future partitioned fan-out.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -35,36 +33,22 @@ pub enum DependencyKind {
     Shuffle,
 }
 
-/// A declared dependency `from -> to`. `port` is the name under which the
-/// upstream output is registered for the downstream node (e.g. the table name a
-/// `SqlNode` references).
-#[derive(Debug, Clone)]
-pub struct Edge {
-    pub from: NodeId,
-    pub to: NodeId,
-    pub kind: DependencyKind,
-}
-
-impl Edge {
-    pub fn new(from: impl Into<NodeId>, to: impl Into<NodeId>) -> Self {
-        Self {
-            from: from.into(),
-            to: to.into(),
-            kind: DependencyKind::default(),
-        }
-    }
-}
-
 /// The workflow graph: payload store + connectivity index.
+///
+/// Node payloads (`Box<dyn DagNode>`) live in a [`HashMap`] keyed by id; a
+/// lightweight [`petgraph`] directed graph mirrors both the connectivity and
+/// edge metadata (see [`DependencyKind`]) so we get cycle detection,
+/// topological sort, predecessor/successor queries, and edge iteration for
+/// free. The two are decoupled on purpose — keeping payloads out of the graph
+/// lets the scheduler `clone_box` a node into a spawned task without
+/// fighting the graph's borrow.
 #[derive(Default)]
 pub struct DAG {
     /// Node payloads, keyed by id. Public so external tooling can introspect.
     pub nodes: HashMap<NodeId, Box<dyn DagNode>>,
-    /// Declared edges, in insertion order. Public for introspection.
-    pub edges: Vec<Edge>,
-    /// Connectivity index (id-only, no payload).
-    graph: DiGraph<NodeId, ()>,
-    id_to_idx: HashMap<NodeId, NodeIndex>,
+    /// Connectivity + edge metadata index.
+    graph: DiGraph<NodeId, DependencyKind>,
+    pub id_to_idx: HashMap<NodeId, NodeIndex>,
     /// Per-node runtime status. Populated on [`Self::run`], queryable via [`Self::status`].
     pub statuses: HashMap<NodeId, RuntimeStatus>,
     outputs: HashMap<NodeId, NamedDataFrames>,
@@ -106,7 +90,7 @@ impl DAG {
     ///
     /// Uses [`DagNode::clone_box`] to copy node payloads into spawned tasks so
     /// the original nodes stay in the DAG for re-runs / iterative optimisation.
-    pub async fn run(&mut self, cfg: &SchedulerConfig) -> Result<RunReport, DagError> {
+    pub async fn run(&mut self, cfg: &SchedulerConfig) -> Result<RunReport> {
         self.validate()?;
         // Topological order is computed mainly to validate the graph and to seed a
         // deterministic processing order for the ready queue.
@@ -127,7 +111,7 @@ impl DAG {
             let inc = self
                 .incoming_edges(id)
                 .into_iter()
-                .map(|e| e.from.clone())
+                .map(|(from, _kind)| from)
                 .collect();
             incoming.insert(id.clone(), inc);
         }
@@ -185,7 +169,7 @@ impl DAG {
                                 .await;
                         }
                         Err(error) => {
-                            warn!(node = %job_id, kind = error.kind(), "node failed");
+                            warn!(node = %job_id, error = %error, "node failed");
                             let _ = tx.send(JobResult::Failed { id: job_id, error }).await;
                         }
                     }
@@ -222,7 +206,7 @@ impl DAG {
                 }
                 JobResult::Failed { id, error } => {
                     self.statuses.insert(id.clone(), RuntimeStatus::Failed);
-                    debug!(node = %id, kind = error.kind(), "node failed; cascading skip to descendants");
+                    debug!(node = %id, error = %error, "node failed; cascading skip to descendants");
                     self.errors.insert(id.clone(), error);
                     cascade_skip(&id, &successors, &mut self.statuses, &mut ready);
                 }
@@ -244,7 +228,7 @@ impl DAG {
 
 impl DAG {
     /// Register a node under `id`. Errors if the id is already taken.
-    pub fn add_node(&mut self, id: NodeId, node: Box<dyn DagNode>) -> Result<(), DagError> {
+    pub fn add_node(&mut self, id: NodeId, node: Box<dyn DagNode>) -> Result<()> {
         if self.nodes.contains_key(&id) {
             return Err(DagError::DuplicateNode(id));
         }
@@ -254,19 +238,42 @@ impl DAG {
         Ok(())
     }
 
-    /// Add a dependency edge. Both endpoints must already exist.
-    pub fn add_edge(&mut self, edge: Edge) -> Result<(), DagError> {
-        if !self.nodes.contains_key(&edge.from) {
-            return Err(DagError::UnknownNode(edge.from));
+    /// Add a dependency edge `from -> to`. Both endpoints must already exist.
+    pub fn add_edge(&mut self, from: impl Into<NodeId>, to: impl Into<NodeId>) -> Result<()> {
+        let from = from.into();
+        let to = to.into();
+        if !self.nodes.contains_key(&from) {
+            return Err(DagError::UnknownNode(from));
         }
-        if !self.nodes.contains_key(&edge.to) {
-            return Err(DagError::UnknownNode(edge.to));
+        if !self.nodes.contains_key(&to) {
+            return Err(DagError::UnknownNode(to));
         }
-        if let (Some(&a), Some(&b)) = (self.id_to_idx.get(&edge.from), self.id_to_idx.get(&edge.to))
+        if let (Some(&a), Some(&b)) = (self.id_to_idx.get(&from), self.id_to_idx.get(&to)) {
+            self.graph.add_edge(a, b, DependencyKind::default());
+        }
+        Ok(())
+    }
+
+    pub fn delete_node(&mut self, id: &str) -> Result<()> {
+        let target_node_idx = self
+            .id_to_idx
+            .get(id)
+            .ok_or_else(|| DagError::UnknownNode(id.to_string()))?;
+        if self
+            .graph
+            .neighbors_directed(*target_node_idx, Direction::Outgoing)
+            .next()
+            .is_some()
         {
-            self.graph.add_edge(a, b, ());
+            return Err(DagError::Schedule(
+                "Node to delete has successors depend on it".to_string(),
+            ));
         }
-        self.edges.push(edge);
+        self.graph.remove_node(*target_node_idx);
+        self.nodes.remove(id);
+        self.id_to_idx.remove(id);
+        self.statuses.remove(id);
+        self.outputs.remove(id);
         Ok(())
     }
 
@@ -297,14 +304,21 @@ impl DAG {
             .collect()
     }
 
-    /// Incoming edges for `id`, in insertion order. Used by the scheduler to
-    /// assemble a node's `inputs` with correct port names.
-    pub fn incoming_edges(&self, id: &str) -> Vec<&Edge> {
-        self.edges.iter().filter(|e| e.to == id).collect()
+    /// Incoming edges for `id`, in insertion order. Returns `(predecessor_id,
+    /// dependency_kind)` pairs. Used by the scheduler to assemble a node's
+    /// `inputs` with correct port names.
+    pub fn incoming_edges(&self, id: &str) -> Vec<(NodeId, DependencyKind)> {
+        let Some(&idx) = self.id_to_idx.get(id) else {
+            return Vec::new();
+        };
+        self.graph
+            .edges_directed(idx, Direction::Incoming)
+            .map(|e| (self.graph[e.source()].clone(), *e.weight()))
+            .collect()
     }
 
     /// Fail if the graph has a cycle. Reports the offending nodes.
-    pub fn validate(&self) -> Result<(), DagError> {
+    pub fn validate(&self) -> Result<()> {
         if is_cyclic_directed(&self.graph) {
             return Err(DagError::Cycle(self.cycle_node_names()));
         }
@@ -312,7 +326,7 @@ impl DAG {
     }
 
     /// Topological order (predecessors before successors). Errors on a cycle.
-    pub fn topo_order(&self) -> Result<Vec<NodeId>, DagError> {
+    pub fn topo_order(&self) -> Result<Vec<NodeId>> {
         match toposort(&self.graph, None) {
             Ok(order) => Ok(order.iter().map(|i| self.graph[*i].clone()).collect()),
             Err(_) => Err(DagError::Cycle(self.cycle_node_names())),
@@ -379,7 +393,7 @@ mod tests {
         async fn execute(
             &mut self,
             _inputs: &[super::super::NodeInput],
-        ) -> Result<NamedDataFrames, super::super::DagError> {
+        ) -> std::result::Result<NamedDataFrames, super::super::DagError> {
             Ok(HashMap::new())
         }
     }
@@ -395,10 +409,10 @@ mod tests {
         for id in ["a", "b", "c", "d"] {
             add(&mut dag, id);
         }
-        dag.add_edge(Edge::new("a", "b")).unwrap();
-        dag.add_edge(Edge::new("a", "c")).unwrap();
-        dag.add_edge(Edge::new("b", "d")).unwrap();
-        dag.add_edge(Edge::new("c", "d")).unwrap();
+        dag.add_edge("a", "b").unwrap();
+        dag.add_edge("a", "c").unwrap();
+        dag.add_edge("b", "d").unwrap();
+        dag.add_edge("c", "d").unwrap();
 
         let order = dag.topo_order().unwrap();
         dbg!(&order);
@@ -414,8 +428,8 @@ mod tests {
         let mut dag = DAG::default();
         add(&mut dag, "x");
         add(&mut dag, "y");
-        dag.add_edge(Edge::new("x", "y")).unwrap();
-        dag.add_edge(Edge::new("y", "x")).unwrap();
+        dag.add_edge("x", "y").unwrap();
+        dag.add_edge("y", "x").unwrap();
         let err = dag.validate().unwrap_err();
         assert!(matches!(err, DagError::Cycle(_)), "{err:?}");
         let err = dag.topo_order().unwrap_err();
@@ -429,7 +443,7 @@ mod tests {
         add(&mut dag, "a");
         // edge to missing node
         assert!(matches!(
-            dag.add_edge(Edge::new("a", "ghost")),
+            dag.add_edge("a", "ghost"),
             Err(DagError::UnknownNode(_))
         ));
         // duplicate id
@@ -445,8 +459,8 @@ mod tests {
         for id in ["src", "a", "b"] {
             add(&mut dag, id);
         }
-        dag.add_edge(Edge::new("src", "a")).unwrap();
-        dag.add_edge(Edge::new("src", "b")).unwrap();
+        dag.add_edge("src", "a").unwrap();
+        dag.add_edge("src", "b").unwrap();
 
         assert_eq!(dag.predecessors("a").len(), 1);
         assert_eq!(dag.predecessors("a")[0], "src");

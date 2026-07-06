@@ -6,8 +6,6 @@
 //! [`DataFrame`] itself. The trait is `Send` so node payloads can be moved into
 //! spawned scheduler tasks.
 
-use std::collections::HashSet;
-
 use async_trait::async_trait;
 use datafusion::prelude::DataFrame;
 
@@ -51,6 +49,8 @@ impl NodeMeta {
 ///
 /// `execute` receives the outputs of all predecessor nodes (in declared edge
 /// order) and returns its own outputs, which are then fanned out to successors.
+///
+/// - Stateless: all states managed by DAG
 #[async_trait]
 pub trait DagNode: Send + Sync {
     fn meta(&self) -> &NodeMeta;

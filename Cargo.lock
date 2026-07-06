@@ -1611,7 +1611,6 @@ dependencies = [
 name = "data-engine"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "arrow",
  "arrow-array",
  "arrow-schema",

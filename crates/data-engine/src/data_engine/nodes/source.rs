@@ -125,7 +125,10 @@ impl SourceError {
 
 impl From<SourceError> for DagError {
     fn from(e: SourceError) -> Self {
-        DagError::execution(e.kind(), e)
+        match e {
+            SourceError::Read { source, .. } => DagError::DataFusion(source),
+            SourceError::UnknownFormat(msg) => DagError::Schedule(msg),
+        }
     }
 }
 

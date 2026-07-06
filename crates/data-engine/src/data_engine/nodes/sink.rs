@@ -54,7 +54,10 @@ impl SinkError {
 
 impl From<SinkError> for DagError {
     fn from(e: SinkError) -> Self {
-        DagError::execution(e.kind(), e)
+        match e {
+            SinkError::Write { source, .. } => DagError::DataFusion(source),
+            SinkError::InvalidInput { message } => DagError::Schedule(message),
+        }
     }
 }
 

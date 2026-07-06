@@ -6,7 +6,6 @@
 
 pub mod meta;
 pub mod mock_node;
-pub mod preview_node;
 pub mod sink;
 pub mod source;
 pub mod sql_node;

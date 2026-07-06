@@ -3,7 +3,7 @@ use std::sync::Arc;
 use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
 
-use crate::data_engine::dag::{DAG, Edge, RunReport, SchedulerConfig};
+use crate::data_engine::dag::{DAG, RunReport, SchedulerConfig};
 use crate::data_engine::error::{Error, Result};
 use crate::data_engine::nodes::{DagNode, NodeMeta};
 use datalake::Datalake;
@@ -66,6 +66,12 @@ impl DataEngine {
         Ok(self)
     }
 
+    pub fn remove_node(&mut self, id: impl Into<String>) -> Result<&mut Self> {
+        let id = id.into();
+        self.dag.delete_node(&id)?;
+        Ok(self)
+    }
+
     /// Convenience: add a [`SourceNode`] (chaining-safe — meta built internally).
     pub fn source_node(
         &mut self,
@@ -125,8 +131,7 @@ impl DataEngine {
         from: impl Into<String>,
         to: impl Into<String>,
     ) -> Result<&mut Self> {
-        let edge = Edge::new(from, to);
-        self.dag.add_edge(edge)?;
+        self.dag.add_edge(from, to)?;
         Ok(self)
     }
 

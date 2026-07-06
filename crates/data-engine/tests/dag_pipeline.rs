@@ -169,10 +169,7 @@ impl DagNode for BoomNode {
         Box::new((*self).clone())
     }
     async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
-        Err(DagError::execution(
-            "test.boom",
-            std::io::Error::other("kaboom"),
-        ))
+        Err(DagError::Schedule("kaboom".into()))
     }
 }
 

@@ -44,6 +44,9 @@ impl DataEngineServer {
             DataEngineCmd::GetOutput { id, reply } => {
                 let _ = reply.send(Ok(self.engine.get_output(id).await));
             }
+            DataEngineCmd::RemoveNode { id, reply } => {
+                let _ = reply.send(self.engine.remove_node(id).map(|_| ()));
+            }
         }
     }
 }
@@ -139,6 +142,18 @@ impl DataEngineClient {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::GetOutput {
+                id,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
+    }
+
+    pub async fn remove_node(&self, id: String) -> Result<()> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::RemoveNode {
                 id,
                 reply: reply_tx,
             },
