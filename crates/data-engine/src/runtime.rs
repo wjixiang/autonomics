@@ -1,5 +1,7 @@
 use tokio::{sync::mpsc, task::JoinHandle};
 
+use datafusion::prelude::DataFrame;
+
 use crate::data_engine::DataEngine;
 use crate::runtime::error::Result;
 use crate::runtime::types::DataEngineCmd;
@@ -44,6 +46,9 @@ impl DataEngineServer {
             }
             DataEngineCmd::RunDag { reply } => {
                 let _ = reply.send(self.engine.run().await);
+            }
+            DataEngineCmd::GetOutput { id, reply } => {
+                let _ = reply.send(Ok(self.engine.get_output(id).await));
             }
         }
     }
@@ -145,6 +150,18 @@ impl DataEngineClient {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(DataEngineCmd::RunDag { reply: reply_tx }, reply_rx)
             .await
+    }
+
+    pub async fn get_output(&self, id: String) -> Result<Option<Vec<DataFrame>>> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::GetOutput {
+                id,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
     }
 }
 

@@ -150,11 +150,15 @@ async fn cycle_is_rejected() {
 }
 
 /// A node that always fails — for the cascade test.
+#[derive(Clone)]
 struct BoomNode(NodeMeta);
 #[async_trait::async_trait]
 impl DagNode for BoomNode {
     fn meta(&self) -> &NodeMeta {
         &self.0
+    }
+    fn clone_box(&self) -> Box<dyn DagNode> {
+        Box::new((*self).clone())
     }
     async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
         Err(DagError::execution(
@@ -169,7 +173,7 @@ async fn failure_cascades() {
     let ctx = Arc::new(SessionContext::new());
     let mut engine = DataEngine::new(ctx.clone());
     // Custom node: build meta in a separate statement (avoids self-borrow).
-    let boom_meta = NodeMeta::new("boom", ctx.clone());
+    let boom_meta = NodeMeta::new("boom");
     engine.add_node("boom", BoomNode(boom_meta)).unwrap();
     engine
         .sql_node("child", "SELECT 1")
@@ -188,11 +192,15 @@ async fn failure_cascades() {
 }
 
 /// A node that sleeps — for the parallelism test.
+#[derive(Clone)]
 struct SleepNode(NodeMeta);
 #[async_trait::async_trait]
 impl DagNode for SleepNode {
     fn meta(&self) -> &NodeMeta {
         &self.0
+    }
+    fn clone_box(&self) -> Box<dyn DagNode> {
+        Box::new((*self).clone())
     }
     async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -212,7 +220,7 @@ async fn scheduler_runs_in_parallel() {
         });
         for i in 0..4 {
             let id = format!("s{i}");
-            let meta = NodeMeta::new(&id, ctx.clone());
+            let meta = NodeMeta::new(&id);
             engine.add_node(id, SleepNode(meta)).unwrap();
         }
         let start = Instant::now();

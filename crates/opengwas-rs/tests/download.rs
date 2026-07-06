@@ -11,7 +11,7 @@ use opengwas_rs::OpengwasClient;
 #[ignore]
 async fn test_download_ieu_a_2() {
     let client = Arc::new(OpengwasClient::new(None));
-    let storage = Arc::new(OpendalFileStorage::new_in_fs());
+    let storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
     let tool = DownloadFilesTool::new(client, storage.clone());
 
     let input = DownloadFilesInput {

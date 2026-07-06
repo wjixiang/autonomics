@@ -1,23 +1,29 @@
 use std::fmt::{Debug, Display};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::Bytes;
 use chrono::{TimeZone, Utc};
+use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::object_store::Error as ObjectStoreError;
 use datafusion::object_store::{
     Attributes, CopyMode, CopyOptions, GetOptions, GetRange, GetResult, GetResultPayload,
     ListResult, MultipartUpload, ObjectMeta, ObjectStore, PutMultipartOptions, PutOptions,
     PutPayload, PutResult, path::Path,
 };
+use datafusion::prelude::SessionContext;
 use futures::stream::BoxStream;
 use futures::{StreamExt, TryStreamExt};
 use opendal::Operator;
 use opendal::services::Fs;
+use tempfile::TempDir;
 
 pub struct OpendalFileStorage {
     pub op: Operator,
     root: PathBuf,
+    /// Keeps the temp directory alive until this storage is dropped.
+    _temp_guard: Option<TempDir>,
 }
 
 impl OpendalFileStorage {
@@ -27,11 +33,37 @@ impl OpendalFileStorage {
         let op = Operator::new(Fs::default().root(root.to_str().unwrap_or("/tmp/opendal")))
             .unwrap()
             .finish();
-        Self { op, root }
+        Self {
+            op,
+            root,
+            _temp_guard: None,
+        }
     }
 
-    pub fn new_in_fs() -> Self {
-        Self::new("/mnt/disk3/test")
+    /// Create a storage backed by a temporary directory.
+    /// The temporary directory is cleaned up when this storage is dropped.
+    pub fn new_temp() -> Self {
+        let tmp = TempDir::new().expect("failed to create temp dir");
+        let root = tmp.path().to_path_buf();
+        let op = Operator::new(Fs::default().root(root.to_str().unwrap_or("/tmp/opendal")))
+            .unwrap()
+            .finish();
+        Self {
+            op,
+            root,
+            _temp_guard: Some(tmp),
+        }
+    }
+
+    pub fn register_to_ctx(self) -> (SessionContext, Arc<OpendalFileStorage>) {
+        let ctx = SessionContext::new();
+        let object_store = Arc::new(self);
+
+        ctx.register_object_store(
+            ObjectStoreUrl::parse("file://").unwrap().as_ref(),
+            object_store.clone(),
+        );
+        (ctx, object_store)
     }
 
     /// Convert an ObjectStore path to a local filesystem path.

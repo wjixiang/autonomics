@@ -10,8 +10,8 @@ use datafusion::dataframe::DataFrameWriteOptions;
 use datafusion::prelude::DataFrame;
 use thiserror::Error;
 
-use crate::data_engine::dag::DagError;
 use super::meta::{DagNode, NodeInput, NodeMeta};
+use crate::data_engine::dag::DagError;
 
 /// Where a [`SinkNode`] writes to.
 #[derive(Debug, Clone)]
@@ -73,6 +73,15 @@ impl DagNode for SinkNode {
         &self.meta
     }
 
+    fn clone_box(&self) -> Box<dyn DagNode> {
+        let cp_node = Self {
+            meta: self.meta.clone(),
+            sink: self.sink.clone(),
+        };
+
+        Box::new(cp_node)
+    }
+
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
         let input = inputs.first().ok_or(SinkError::InvalidInput {
             message: "SinkNode requires exactly one upstream input".to_string(),
@@ -95,7 +104,10 @@ impl DagNode for SinkNode {
                         .await
                     }
                 };
-                res.map_err(|e| SinkError::Write { path: path.clone(), source: e })?;
+                res.map_err(|e| SinkError::Write {
+                    path: path.clone(),
+                    source: e,
+                })?;
             }
             Sink::Iceberg { ident } => {
                 // Iceberg table writes go through the catalog's writer. This is

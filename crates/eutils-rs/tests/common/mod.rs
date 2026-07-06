@@ -73,5 +73,5 @@ pub async fn egquery_available() -> bool {
 
 // Well-known PMIDs used across tests (unlikely to disappear from PubMed).
 pub const PMID_CRISPR: &str = "29474904"; // First CRISPR in human embryos
-pub const PMID_BRCA1: &str = "20109048";  // BRCA1 review article
+pub const PMID_BRCA1: &str = "20109048"; // BRCA1 review article
 pub const PMID_RNA_SEQ: &str = "31819223"; // RNA-seq benchmarking

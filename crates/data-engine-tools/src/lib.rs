@@ -2,6 +2,7 @@ mod add_edge_tool;
 mod add_sink_tool;
 mod add_source_tool;
 mod add_sql_tool;
+mod get_output_tool;
 mod run_dag_tool;
 
 use std::sync::Arc;
@@ -19,6 +20,7 @@ pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
         ToolRegistration::from(add_sql_tool::AddSqlNodeTool::new(client.clone())),
         ToolRegistration::from(add_sink_tool::AddSinkNodeTool::new(client.clone())),
         ToolRegistration::from(add_edge_tool::AddEdgeTool::new(client.clone())),
-        ToolRegistration::from(run_dag_tool::RunDagTool::new(client)),
+        ToolRegistration::from(run_dag_tool::RunDagTool::new(client.clone())),
+        ToolRegistration::from(get_output_tool::GetOutputTool::new(client)),
     ]
 }

@@ -14,8 +14,8 @@ pub mod runtime;
 
 // Re-export node abstractions from the nodes module for backward compatibility
 // and so that dag internals (graph.rs, runtime.rs) can use `super::DagNode` etc.
-pub use super::nodes::{DagNode, DagNodeStatus, NodeId, NodeInput, NodeMeta};
+pub use super::nodes::{DagNode, NodeId, NodeInput, NodeMeta};
 
 pub use error::DagError;
 pub use graph::{DAG, DependencyKind, Edge};
-pub use runtime::{run_dag, RunReport, RuntimeStatus, SchedulerConfig};
+pub use runtime::{RunReport, RuntimeStatus, SchedulerConfig};

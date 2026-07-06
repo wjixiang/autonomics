@@ -25,7 +25,7 @@ impl AgentRuntime {
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let cancel_token = CancellationToken::new();
 
-        let file_storage = Arc::new(OpendalFileStorage::new_in_fs());
+        let file_storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
 
         let (internal_tx, engine_handle) = runtime.block_on(async {
             // Build and spawn DataEngine actor

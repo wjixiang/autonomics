@@ -7,13 +7,20 @@
 //! lets the scheduler `take` a node out of the map and move it into a spawned
 //! task without fighting the graph's borrow.
 
+use std::collections::VecDeque;
+use std::sync::Arc;
+
 use datafusion::common::HashMap;
+use datafusion::prelude::DataFrame;
 use petgraph::Direction;
 use petgraph::algo::{is_cyclic_directed, kosaraju_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
+use tokio::sync::{Semaphore, mpsc};
+use tracing::{debug, warn};
 
 use super::error::DagError;
-use super::{DagNode, NodeId};
+use super::runtime::{RunReport, RuntimeStatus, SchedulerConfig};
+use super::{DagNode, NodeId, NodeInput};
 
 /// How an edge's data flows between two nodes. `OneToOne` is the streaming
 /// default; `Shuffle` is reserved for future partitioned fan-out.
@@ -61,6 +68,184 @@ pub struct DAG {
     /// Connectivity index (id-only, no payload).
     graph: DiGraph<NodeId, ()>,
     id_to_idx: HashMap<NodeId, NodeIndex>,
+    /// Per-node runtime status. Populated on [`Self::run`], queryable via [`Self::status`].
+    pub statuses: HashMap<NodeId, RuntimeStatus>,
+    outputs: HashMap<NodeId, Vec<DataFrame>>,
+}
+
+/// Messages a dispatched task sends back to the scheduler.
+enum JobResult {
+    Success { id: NodeId, outputs: Vec<DataFrame> },
+    Failed { id: NodeId, error: DagError },
+}
+
+impl DAG {
+    /// Query the runtime status of a node. Returns `None` if the DAG has never
+    /// been run.
+    pub fn status(&self, id: &str) -> Option<RuntimeStatus> {
+        self.statuses.get(id).copied()
+    }
+
+    pub fn output(&self, id: &str) -> Option<Vec<DataFrame>> {
+        self.outputs.get(id).cloned()
+    }
+
+    /// Reset all node statuses to [`RuntimeStatus::Pending`], preparing for a
+    /// re-run.
+    pub fn reset(&mut self) {
+        for id in self.nodes.keys() {
+            self.statuses.insert(id.clone(), RuntimeStatus::Pending);
+        }
+    }
+
+    /// Execute every node of the DAG according to its dependencies.
+    ///
+    /// Uses [`DagNode::clone_box`] to copy node payloads into spawned tasks so
+    /// the original nodes stay in the DAG for re-runs / iterative optimisation.
+    pub async fn run(&mut self, cfg: &SchedulerConfig) -> Result<RunReport, DagError> {
+        self.validate()?;
+        // Topological order is computed mainly to validate the graph and to seed a
+        // deterministic processing order for the ready queue.
+        let _topo = self.topo_order()?;
+
+        let all_ids = self.node_ids();
+
+        // Precompute adjacency + per-node port assignment so the dispatch loop only
+        // needs a single mutable borrow of `self`.
+        let mut successors: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        // (predecessor id, resolved input port) per node, in declared edge order
+        let mut incoming: HashMap<NodeId, Vec<(NodeId, String)>> = HashMap::new();
+        // unresolved-predecessor count per node
+        let mut pending: HashMap<NodeId, usize> = HashMap::new();
+        for id in &all_ids {
+            successors.insert(id.clone(), self.successors(id));
+            pending.insert(id.clone(), self.predecessors(id).len());
+            let inc = self
+                .incoming_edges(id)
+                .into_iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    let port = e.port.clone().unwrap_or_else(|| {
+                        if i == 0 {
+                            "src".to_string()
+                        } else {
+                            format!("src_{}", i + 1)
+                        }
+                    });
+                    (e.from.clone(), port)
+                })
+                .collect();
+            incoming.insert(id.clone(), inc);
+        }
+
+        // Initialise runtime state.
+        self.statuses.clear();
+        for id in &all_ids {
+            self.statuses.insert(id.clone(), RuntimeStatus::Pending);
+        }
+        let mut outputs: HashMap<NodeId, Vec<DataFrame>> = HashMap::new();
+        let mut errors: HashMap<NodeId, DagError> = HashMap::new();
+
+        let sem = Arc::new(Semaphore::new(cfg.max_concurrency.max(1)));
+        let (tx, mut rx) = mpsc::channel::<JobResult>(all_ids.len().max(1));
+
+        // Seed the ready queue with source nodes.
+        let mut ready: VecDeque<NodeId> = all_ids
+            .iter()
+            .filter(|id| pending[*id] == 0)
+            .cloned()
+            .collect();
+        let mut in_flight: usize = 0;
+
+        loop {
+            // Dispatch every currently-ready node.
+            while let Some(id) = ready.pop_front() {
+                if self.statuses[&id] != RuntimeStatus::Pending {
+                    // Already skipped/finished by a cascade — don't dispatch.
+                    continue;
+                }
+                let inputs = build_inputs(&id, &incoming, &outputs);
+                // Borrow the node payload, then clone it into an owned Box so it
+                // can be moved into the 'static future. The original stays in
+                // `self` for re-runs / iterative optimisation.
+                let Some(node_box) = self.get_node(&id).map(|n| n.clone_box()) else {
+                    warn!(node = %id, "scheduler: node payload missing");
+                    continue;
+                };
+                self.statuses.insert(id.clone(), RuntimeStatus::Running);
+                in_flight += 1;
+                let tx = tx.clone();
+                let sem = sem.clone();
+                let job_id = id.clone();
+                tokio::spawn(async move {
+                    let _permit = sem.acquire().await.ok();
+                    let mut node = node_box;
+                    let result = node.execute(&inputs).await;
+                    match result {
+                        Ok(outs) => {
+                            let _ = tx
+                                .send(JobResult::Success {
+                                    id: job_id,
+                                    outputs: outs,
+                                })
+                                .await;
+                        }
+                        Err(error) => {
+                            warn!(node = %job_id, kind = error.kind(), "node failed");
+                            let _ = tx.send(JobResult::Failed { id: job_id, error }).await;
+                        }
+                    }
+                });
+            }
+
+            if in_flight == 0 {
+                break;
+            }
+
+            // Block until at least one dispatched job reports back.
+            let Some(msg) = rx.recv().await else {
+                return Err(DagError::Schedule(
+                    "result channel closed unexpectedly".into(),
+                ));
+            };
+            in_flight -= 1;
+
+            match msg {
+                JobResult::Success { id, outputs: outs } => {
+                    self.outputs.insert(id.clone(), outs);
+                    self.statuses.insert(id.clone(), RuntimeStatus::Success);
+                    debug!(node = %id, "node succeeded");
+                    for succ in &successors[&id] {
+                        let left = {
+                            let c = pending.entry(succ.clone()).or_insert(0);
+                            *c = c.saturating_sub(1);
+                            *c
+                        };
+                        if left == 0 && self.statuses[succ] == RuntimeStatus::Pending {
+                            ready.push_back(succ.clone());
+                        }
+                    }
+                }
+                JobResult::Failed { id, error } => {
+                    self.statuses.insert(id.clone(), RuntimeStatus::Failed);
+                    debug!(node = %id, kind = error.kind(), "node failed; cascading skip to descendants");
+                    errors.insert(id.clone(), error);
+                    cascade_skip(&id, &successors, &mut self.statuses, &mut ready);
+                }
+            }
+        }
+
+        let ok = !self
+            .statuses
+            .values()
+            .any(|s| matches!(s, RuntimeStatus::Failed));
+
+        Ok(RunReport {
+            statuses: self.statuses.clone(),
+            errors,
+            ok,
+        })
+    }
 }
 
 impl DAG {
@@ -140,9 +325,18 @@ impl DAG {
         }
     }
 
+    /// Borrow a node payload by id. Returns the trait object directly — no
+    /// `Box` in the return type, since callers only want to call methods on
+    /// the node (or take a fresh `Box<dyn DagNode>` themselves if they need
+    /// ownership).
+    pub fn get_node(&self, id: &str) -> Option<&dyn DagNode> {
+        self.nodes.get(id).map(|b| b.as_ref())
+    }
+
     /// Remove and return a node payload by id, so it can be moved into a task.
     /// Leaves the connectivity index untouched (the scheduler precomputes the
     /// adjacency it needs before dispatch).
+    #[deprecated]
     pub fn take_node(&mut self, id: &str) -> Option<Box<dyn DagNode>> {
         self.nodes.remove(id)
     }
@@ -169,22 +363,76 @@ impl DAG {
     }
 }
 
+/// Gather a node's predecessor outputs into [`NodeInput`]s, in declared edge
+/// order, cloning the [`DataFrame`] handles (cheap — they are `Arc` internally).
+fn build_inputs(
+    id: &str,
+    incoming: &HashMap<NodeId, Vec<(NodeId, String)>>,
+    outputs: &HashMap<NodeId, Vec<DataFrame>>,
+) -> Vec<NodeInput> {
+    let mut inputs = Vec::new();
+    if let Some(edges) = incoming.get(id) {
+        for (from, port) in edges {
+            if let Some(pred_outputs) = outputs.get(from) {
+                for df in pred_outputs.iter() {
+                    inputs.push(NodeInput {
+                        port: port.clone(),
+                        data: df.clone(),
+                    });
+                }
+            }
+        }
+    }
+    inputs
+}
+
+/// Mark every transitive descendant of `failed` as [`RuntimeStatus::Skipped`].
+/// Stops at nodes that already have a terminal status so independent branches
+/// keep running.
+fn cascade_skip(
+    failed: &str,
+    successors: &HashMap<NodeId, Vec<NodeId>>,
+    statuses: &mut HashMap<NodeId, RuntimeStatus>,
+    ready: &mut VecDeque<NodeId>,
+) {
+    let mut queue: VecDeque<NodeId> = successors
+        .get(failed)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    while let Some(id) = queue.pop_front() {
+        if statuses[&id] != RuntimeStatus::Pending {
+            continue;
+        }
+        statuses.insert(id.clone(), RuntimeStatus::Skipped);
+        ready.retain(|r| r != &id);
+        if let Some(succs) = successors.get(&id) {
+            for s in succs {
+                queue.push_back(s.clone());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn dummy_meta(id: &str) -> super::super::NodeMeta {
-        use datafusion::prelude::SessionContext;
-        use std::sync::Arc;
-        super::super::NodeMeta::new(id, Arc::new(SessionContext::new()))
+        super::super::NodeMeta::new(id)
     }
 
     // A no-op node so tests can build a real DAG without touching IO.
+    #[derive(Clone)]
     struct EchoNode(super::super::NodeMeta);
     #[async_trait::async_trait]
     impl super::super::DagNode for EchoNode {
         fn meta(&self) -> &super::super::NodeMeta {
             &self.0
+        }
+        fn clone_box(&self) -> Box<dyn super::super::DagNode> {
+            Box::new((*self).clone())
         }
         async fn execute(
             &mut self,
@@ -211,6 +459,7 @@ mod tests {
         dag.add_edge(Edge::new("c", "d")).unwrap();
 
         let order = dag.topo_order().unwrap();
+        dbg!(&order);
         let pos = |id: &str| order.iter().position(|x| x == id).unwrap();
         assert!(pos("a") < pos("b"));
         assert!(pos("a") < pos("c"));

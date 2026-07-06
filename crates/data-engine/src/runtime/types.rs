@@ -1,3 +1,4 @@
+use datafusion::prelude::DataFrame;
 use tokio::sync::oneshot;
 
 use crate::data_engine::dag::RunReport;
@@ -33,5 +34,9 @@ pub enum DataEngineCmd {
     },
     RunDag {
         reply: oneshot::Sender<EngineResult<RunReport>>,
+    },
+    GetOutput {
+        id: String,
+        reply: oneshot::Sender<EngineResult<Option<Vec<DataFrame>>>>,
     },
 }

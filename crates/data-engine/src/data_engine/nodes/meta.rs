@@ -6,27 +6,13 @@
 //! [`DataFrame`] itself. The trait is `Send` so node payloads can be moved into
 //! spawned scheduler tasks.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use datafusion::prelude::{DataFrame, SessionContext};
+use datafusion::prelude::DataFrame;
 
 use crate::data_engine::dag::DagError;
 
 /// Unique identifier for a node in the DAG.
 pub type NodeId = String;
-
-/// Static, declared-at-construction metadata status. Distinct from the runtime
-/// status the scheduler tracks while a run is in flight (see
-/// [`crate::data_engine::dag::RuntimeStatus`]).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum DagNodeStatus {
-    #[default]
-    Idle,
-    Success,
-    Running,
-    Failed,
-}
 
 /// One upstream output injected into a node at execution time.
 #[derive(Debug, Clone)]
@@ -38,36 +24,19 @@ pub struct NodeInput {
     pub data: DataFrame,
 }
 
-/// Static per-node metadata. The shared [`SessionContext`] is injected here by
-/// [`crate::data_engine::DataEngine::node_meta`] so every node reads through the
-/// same engine context (registered object stores, catalogs, …).
+/// Static per-node metadata.
+#[derive(Clone)]
 pub struct NodeMeta {
     id: NodeId,
-    status: DagNodeStatus,
-    ctx: Arc<SessionContext>,
 }
 
 impl NodeMeta {
-    pub fn new(id: impl Into<String>, ctx: Arc<SessionContext>) -> Self {
-        Self {
-            id: id.into(),
-            status: DagNodeStatus::default(),
-            ctx,
-        }
+    pub fn new(id: impl Into<String>) -> Self {
+        Self { id: id.into() }
     }
 
     pub fn id(&self) -> &str {
         &self.id
-    }
-
-    /// Status borrowed by reference — caller must not outlive the meta node.
-    pub fn status(&self) -> &DagNodeStatus {
-        &self.status
-    }
-
-    /// Returns an `Arc::clone` of the shared SessionContext.
-    pub fn ctx(&self) -> Arc<SessionContext> {
-        self.ctx.clone()
     }
 }
 
@@ -76,8 +45,15 @@ impl NodeMeta {
 /// `execute` receives the outputs of all predecessor nodes (in declared edge
 /// order) and returns its own outputs, which are then fanned out to successors.
 #[async_trait]
-pub trait DagNode: Send {
+pub trait DagNode: Send + Sync {
     fn meta(&self) -> &NodeMeta;
     /// Input data injected by the scheduler when the node runs.
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError>;
+    fn clone_box(&self) -> Box<dyn DagNode>;
+}
+
+impl Clone for Box<dyn DagNode> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }

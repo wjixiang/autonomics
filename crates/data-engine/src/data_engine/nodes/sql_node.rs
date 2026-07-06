@@ -1,8 +1,10 @@
 use async_trait::async_trait;
-use datafusion::prelude::DataFrame;
+use datafusion::prelude::{DataFrame, SessionContext};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
+use std::sync::Arc;
+
 use crate::data_engine::dag::DagError;
 
 #[derive(Debug, Error)]
@@ -33,16 +35,19 @@ impl From<SqlNodeError> for DagError {
 
 /// A transform node: registers each upstream input as a named table/view
 /// (the edge `port`) and runs a SQL query over them. Single output.
+#[derive(Clone)]
 pub struct SqlNode {
     meta: NodeMeta,
     sql_query: String,
+    ctx: Arc<SessionContext>,
 }
 
 impl SqlNode {
-    pub fn new(meta: NodeMeta, query: String) -> Self {
+    pub fn new(meta: NodeMeta, query: String, ctx: Arc<SessionContext>) -> Self {
         Self {
             meta,
             sql_query: query,
+            ctx,
         }
     }
 
@@ -57,6 +62,10 @@ impl DagNode for SqlNode {
         &self.meta
     }
 
+    fn clone_box(&self) -> Box<dyn DagNode> {
+        Box::new((*self).clone())
+    }
+
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
         if inputs.is_empty() {
             return Err(SqlNodeError::InvalidInput {
@@ -65,7 +74,7 @@ impl DagNode for SqlNode {
             .into());
         }
 
-        let ctx = self.meta.ctx();
+        let ctx = self.ctx.clone();
         for inp in inputs {
             // register_table errors if the name already exists, so deregister
             // first. NOTE: SqlNodes share the engine's SessionContext, so a port
@@ -104,8 +113,9 @@ mod tests {
             RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();
         let df = ctx.read_batch(batch).unwrap();
         let node = SqlNode::new(
-            NodeMeta::new("sql", ctx.clone()),
+            NodeMeta::new("sql"),
             "SELECT * FROM src WHERE x > 1".into(),
+            ctx.clone(),
         );
         let view = df.into_view();
         ctx.register_table("src", view).unwrap();

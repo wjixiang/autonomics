@@ -22,7 +22,7 @@ fn check_ok(result: &ToolResult, label: &str) {
 #[tokio::test]
 async fn test_add_source_sql_run_dag() {
     // 1. Set up file storage and write test data
-    let file_storage = Arc::new(OpendalFileStorage::new_in_fs());
+    let file_storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let csv_path = std::path::Path::new(&manifest_dir)
         .join("../data-engine/test_datasets/insurance.csv");

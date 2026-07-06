@@ -7,14 +7,16 @@
 //! formats (VCF, BAM, BED, …) are read through `biofusion`, which already
 //! exposes them as DataFusion tables.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use biofusion::datasource::BioReadOptions;
 use biofusion::ext::DataFusionReadExt;
 use datafusion::prelude::{CsvReadOptions, DataFrame, ParquetReadOptions, SessionContext};
 use thiserror::Error;
 
-use crate::data_engine::dag::DagError;
 use super::meta::{DagNode, NodeInput, NodeMeta};
+use crate::data_engine::dag::DagError;
 
 /// Where a [`SourceNode`] reads from.
 #[derive(Debug, Clone)]
@@ -124,14 +126,16 @@ impl From<SourceError> for DagError {
     }
 }
 
+#[derive(Clone)]
 pub struct SourceNode {
     meta: NodeMeta,
     source: Source,
+    ctx: Arc<SessionContext>,
 }
 
 impl SourceNode {
-    pub fn new(meta: NodeMeta, source: Source) -> Self {
-        Self { meta, source }
+    pub fn new(meta: NodeMeta, source: Source, ctx: Arc<SessionContext>) -> Self {
+        Self { meta, source, ctx }
     }
 }
 
@@ -141,8 +145,12 @@ impl DagNode for SourceNode {
         &self.meta
     }
 
+    fn clone_box(&self) -> Box<dyn DagNode> {
+        Box::new((*self).clone())
+    }
+
     async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<Vec<DataFrame>, DagError> {
-        let ctx = self.meta.ctx();
+        let ctx = self.ctx.clone();
         let df = match &self.source {
             Source::File { path, format } => {
                 let fmt = format
@@ -182,5 +190,34 @@ async fn read_file(
         BigWig => ctx.read_bigwig(path, BioReadOptions::default()).await,
         BigBed => ctx.read_bigbed(path, BioReadOptions::default()).await,
     };
-    df.map_err(|e| SourceError::Read { path: path.to_string(), source: e }.into())
+    df.map_err(|e| {
+        SourceError::Read {
+            path: path.to_string(),
+            source: e,
+        }
+        .into()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fs::OpendalFileStorage;
+
+    #[tokio::test]
+    async fn test_load_vcf() {
+        let (ctx, fs) = OpendalFileStorage::new_temp().register_to_ctx();
+        let test_vcf = std::fs::read("test_datasets/sample.vcf").unwrap();
+        fs.op.write("/sample.vcf", test_vcf).await.unwrap();
+
+        let res = ctx
+            .read_vcf("/sample.vcf", BioReadOptions::default())
+            .await
+            .unwrap();
+
+        // res.show().await.unwrap();
+
+        let schema = res.schema();
+        dbg!(schema);
+    }
 }

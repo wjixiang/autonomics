@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
+use datafusion::prelude::DataFrame;
 use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
 
-use crate::data_engine::dag::{DAG, Edge, RunReport, SchedulerConfig, run_dag};
+use crate::data_engine::dag::{DAG, Edge, RunReport, SchedulerConfig};
 use crate::data_engine::error::{Error, Result};
 use crate::data_engine::nodes::{DagNode, NodeMeta};
 use datalake::Datalake;
@@ -41,24 +42,20 @@ impl DataEngine {
         self.ctx.clone()
     }
 
-    /// Build a [`NodeMeta`] bound to this engine's shared context. Nodes must be
-    /// constructed with this so they read through the registered stores/catalogs.
-    ///
-    /// Note that this is a helper function
+    /// Build a [`NodeMeta`] with the given id.
     fn crate_node_meta(&self, id: impl Into<String>) -> NodeMeta {
-        NodeMeta::new(id.into(), self.ctx.clone())
+        NodeMeta::new(id.into())
     }
 
     /// Register a node under `id`.
     ///
-    /// When the node argument needs the engine's context, prefer the typed
-    /// helpers ([`Self::source_node`], [`Self::sql_node`], [`Self::sink_node`])
-    /// — they construct the `NodeMeta` internally so the call chains cleanly.
-    /// With this raw `add_node`, build the meta in a separate statement to
-    /// avoid a self-borrow conflict:
+    /// Prefer the typed helpers ([`Self::source_node`], [`Self::sql_node`],
+    /// [`Self::sink_node`]) — they construct the `NodeMeta` internally so the
+    /// call chains cleanly. With this raw `add_node`, build the meta in a
+    /// separate statement:
     ///
     /// ```ignore
-    /// let meta = engine.node_meta("x");
+    /// let meta = NodeMeta::new("x");
     /// engine.add_node("x", MyNode::new(meta, ...))?;
     /// ```
     pub fn add_node<N: DagNode + 'static>(
@@ -74,8 +71,10 @@ impl DataEngine {
     pub fn source_node(&mut self, id: impl Into<String>, source: Source) -> Result<&mut Self> {
         let id = id.into();
         let meta = self.crate_node_meta(id.clone());
-        self.dag
-            .add_node(id, Box::new(SourceNode::new(meta, source)))?;
+        self.dag.add_node(
+            id,
+            Box::new(SourceNode::new(meta, source, self.ctx.clone())),
+        )?;
         Ok(self)
     }
 
@@ -87,8 +86,10 @@ impl DataEngine {
     ) -> Result<&mut Self> {
         let id = id.into();
         let meta = self.crate_node_meta(id.clone());
-        self.dag
-            .add_node(id, Box::new(SqlNode::new(meta, query.into())))?;
+        self.dag.add_node(
+            id,
+            Box::new(SqlNode::new(meta, query.into(), self.ctx.clone())),
+        )?;
         Ok(self)
     }
 
@@ -133,7 +134,11 @@ impl DataEngine {
 
     /// Validate and run every node of the DAG.
     pub async fn run(&mut self) -> Result<RunReport> {
-        Ok(run_dag(&mut self.dag, &self.config).await?)
+        Ok(self.dag.run(&self.config).await?)
+    }
+
+    pub async fn get_output(&self, node_id: impl Into<String>) -> Option<Vec<DataFrame>> {
+        self.dag.output(node_id.into().as_ref())
     }
 }
 
@@ -179,7 +184,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dataengine_opendal_datafusion() {
-        let file_session = Arc::new(OpendalFileStorage::new_in_fs());
+        let file_session = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
         let test_data_file = std::fs::read("test_datasets/Iris.csv").unwrap();
         let _write_res = file_session
             .op
