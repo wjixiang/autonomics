@@ -15,15 +15,6 @@ pub enum SqlNodeError {
     RegisterView(#[source] datafusion::error::DataFusionError),
 }
 
-impl SqlNodeError {
-    fn kind(&self) -> &'static str {
-        match self {
-            SqlNodeError::InvalidInput { .. } => "sql.invalid_input",
-            SqlNodeError::RegisterView(_) => "sql.register_view",
-        }
-    }
-}
-
 impl From<SqlNodeError> for DagError {
     fn from(e: SqlNodeError) -> Self {
         match e {

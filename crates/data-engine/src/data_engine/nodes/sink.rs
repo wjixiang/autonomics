@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use datafusion::common::HashMap;
 use datafusion::common::config::{CsvOptions, TableParquetOptions};
 use datafusion::dataframe::DataFrameWriteOptions;
-use datafusion::prelude::DataFrame;
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
@@ -41,15 +40,6 @@ pub enum SinkError {
         #[source]
         source: datafusion::error::DataFusionError,
     },
-}
-
-impl SinkError {
-    fn kind(&self) -> &'static str {
-        match self {
-            Self::InvalidInput { .. } => "sink.invalid_input",
-            Self::Write { .. } => "sink.write",
-        }
-    }
 }
 
 impl From<SinkError> for DagError {

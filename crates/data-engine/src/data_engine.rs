@@ -33,7 +33,7 @@ impl DataEngine {
     }
 
     pub fn builder() -> DataEngineBuilder {
-        DataEngineBuilder::new()
+        DataEngineBuilder::default()
     }
 
     /// Returns the shared session context (object stores, catalogs, …).
@@ -158,13 +158,15 @@ pub struct DataEngineBuilder {
     ctx: Arc<SessionContext>,
 }
 
-impl DataEngineBuilder {
-    pub fn new() -> Self {
-        DataEngineBuilder {
+impl Default for DataEngineBuilder {
+    fn default() -> Self {
+        Self {
             ctx: Arc::new(SessionContext::new()),
         }
     }
+}
 
+impl DataEngineBuilder {
     pub fn register_opendal_fs(self, file_session: Arc<OpendalFileStorage>) -> Result<Self> {
         let object_url = ObjectStoreUrl::parse("file://")
             .map_err(|e| Error::Custom(format!("cannot parse datafusion url: {e}")))?;

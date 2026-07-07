@@ -114,15 +114,6 @@ pub enum SourceError {
     },
 }
 
-impl SourceError {
-    fn kind(&self) -> &'static str {
-        match self {
-            Self::UnknownFormat(_) => "source.infer_format",
-            Self::Read { .. } => "source.read",
-        }
-    }
-}
-
 impl From<SourceError> for DagError {
     fn from(e: SourceError) -> Self {
         match e {

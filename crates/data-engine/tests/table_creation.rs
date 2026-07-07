@@ -28,20 +28,16 @@ async fn test_create_and_load_table() {
         .with_schema_id(0)
         .with_fields(vec![
             Arc::new(
-                NestedField::required(1, "id", Type::Primitive(PrimitiveType::Long).into())
+                NestedField::required(1, "id", Type::Primitive(PrimitiveType::Long))
                     .with_doc("Primary key".to_string()),
             ),
             Arc::new(
-                NestedField::optional(2, "name", Type::Primitive(PrimitiveType::String).into())
+                NestedField::optional(2, "name", Type::Primitive(PrimitiveType::String))
                     .with_doc("Display name".to_string()),
             ),
             Arc::new(
-                NestedField::optional(
-                    3,
-                    "created_at",
-                    Type::Primitive(PrimitiveType::Timestamp).into(),
-                )
-                .with_doc("Creation time".to_string()),
+                NestedField::optional(3, "created_at", Type::Primitive(PrimitiveType::Timestamp))
+                    .with_doc("Creation time".to_string()),
             ),
         ])
         .build()
@@ -88,7 +84,7 @@ async fn test_create_and_load_table() {
 
     eprintln!(
         "✓ table '{}.{}' created and verified ({} columns)",
-        ns.to_string(),
+        ns,
         table_name,
         fields.len(),
     );
