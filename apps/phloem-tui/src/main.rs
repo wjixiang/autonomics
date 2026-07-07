@@ -1,8 +1,3 @@
-mod app;
-mod config_db;
-mod state;
-mod widgets;
-
 use std::path::PathBuf;
 use time::macros::format_description;
 use tracing::Level;
@@ -12,7 +7,7 @@ use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::EnvFilter;
 
-use crate::app::App;
+use phloem_tui::app::App;
 
 fn init_logging() -> color_eyre::Result<()> {
     color_eyre::install()?;

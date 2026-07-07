@@ -364,27 +364,64 @@ impl App {
 
     /// Key handling in input mode: typing goes to input, Enter sends, Esc exits.
     fn handle_input_key(&mut self, key: &KeyEvent) {
+        use crate::widgets::input_area::{history_clear_recall, history_down, history_up};
         let ts = &mut self.state.agent_tab_state;
 
         match key.code {
-            // Esc: exit input mode, clear input
+            // Esc: exit input mode, clear input AND any in-flight recall
             KeyCode::Esc => {
                 ts.input.clear();
+                history_clear_recall(&mut ts.input_draft, &mut ts.input_recall);
                 ts.input_mode = InputMode::Browse;
             }
             // Enter: send message (if valid), return to browse mode
             KeyCode::Enter => {
                 if ts.can_send() {
                     let text = ts.take_input();
+                    // Push to in-memory history before clearing the
+                    // recall state — `take_input()` already cleared the
+                    // textbox, but recall metadata is independent.
+                    crate::widgets::input_area::history_push(
+                        &mut ts.input_history,
+                        text.clone(),
+                        ts.input_history_capacity,
+                    );
+                    history_clear_recall(&mut ts.input_draft, &mut ts.input_recall);
                     ts.push_user_message(text.clone());
                     self.agent_runtime.send_message(text);
                     ts.scroll_to_bottom();
                 }
                 ts.input_mode = InputMode::Browse;
             }
-            // Delegate all other keys to input when idle
+            // Up/Down: recall history (Up) / advance towards draft (Down)
+            KeyCode::Up => {
+                if ts.status == state::AgentStatus::Idle {
+                    let _ = history_up(
+                        &mut ts.input,
+                        &ts.input_history,
+                        &mut ts.input_draft,
+                        &mut ts.input_recall,
+                    );
+                }
+            }
+            KeyCode::Down => {
+                if ts.status == state::AgentStatus::Idle {
+                    let _ = history_down(
+                        &mut ts.input,
+                        &ts.input_history,
+                        &mut ts.input_draft,
+                        &mut ts.input_recall,
+                    );
+                }
+            }
+            // Any other key: collapse in-progress recall so subsequent
+            // edits are treated as user-driven (not as a recalled entry
+            // we'd accidentally re-push when sent).
             _ => {
                 if ts.status == state::AgentStatus::Idle {
+                    if ts.input_recall.is_some() {
+                        history_clear_recall(&mut ts.input_draft, &mut ts.input_recall);
+                    }
                     ts.input.handle_key(*key);
                 }
             }

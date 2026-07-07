@@ -1,6 +1,11 @@
-mod render;
-mod style;
-mod table;
+mod md_highlight;
+mod md_math;
+mod md_mermaid;
+mod md_renderer;
+mod md_table;
+mod md_theme;
+pub(crate) mod render;
+pub(crate) mod text_layout;
 
 use ratatui::{
     layout::Rect,

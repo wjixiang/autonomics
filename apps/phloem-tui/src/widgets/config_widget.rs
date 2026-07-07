@@ -5,14 +5,15 @@ use ratatui::{
     prelude::{Buffer, StatefulWidget},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Widget},
+    widgets::{
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Widget,
+    },
 };
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::state::{
-    ConfigMode, ConfigPane, ConfigTabState, ModelForm, ProviderForm,
-};
+use crate::state::{ConfigMode, ConfigPane, ConfigTabState, ModelForm, ProviderForm};
+use crate::widgets::input_area::InputState;
 
 // ── Shared style helpers ────────────────────────────────
 
@@ -32,7 +33,11 @@ const HIGHLIGHT_SYMBOL: &str = "▶ ";
 fn pane_block(title: &str, count: usize, active: bool) -> Block<'_> {
     Block::default()
         .borders(Borders::ALL)
-        .border_type(if active { BorderType::Thick } else { BorderType::Plain })
+        .border_type(if active {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        })
         .border_style(if active {
             Style::default().fg(Color::Yellow)
         } else {
@@ -40,10 +45,7 @@ fn pane_block(title: &str, count: usize, active: bool) -> Block<'_> {
         })
         .title(Line::from(vec![
             Span::raw(format!(" {title} ")),
-            Span::styled(
-                format!("({count}) "),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(format!("({count}) "), Style::default().fg(Color::DarkGray)),
         ]))
 }
 
@@ -101,7 +103,11 @@ fn render_selectable_list<T>(
         .highlight_symbol(HIGHLIGHT_SYMBOL);
 
     let mut list_state = ListState::default();
-    list_state.select(if rows.is_empty() { None } else { Some(selected) });
+    list_state.select(if rows.is_empty() {
+        None
+    } else {
+        Some(selected)
+    });
     StatefulWidget::render(list, area, buf, &mut list_state);
 }
 
@@ -172,7 +178,10 @@ fn render_hint(message: &str, area: Rect, buf: &mut Buffer) {
     } else {
         Style::default().fg(Color::Yellow)
     };
-    Paragraph::new(hint).style(style).alignment(Alignment::Center).render(area, buf);
+    Paragraph::new(hint)
+        .style(style)
+        .alignment(Alignment::Center)
+        .render(area, buf);
 }
 
 // ── Forms ──────────────────────────────────────────────
@@ -204,7 +213,7 @@ fn render_provider_form(form: &ProviderForm, message: &str, area: Rect, buf: &mu
         render_field_line(
             rows[i],
             label,
-            form.fields()[i].value(),
+            &form.fields()[i],
             i == form.focus,
             buf,
         );
@@ -219,7 +228,11 @@ fn render_model_form(
     buf: &mut Buffer,
 ) {
     let block = form_block(
-        if form.id.is_some() { " Edit Model " } else { " New Model " },
+        if form.id.is_some() {
+            " Edit Model "
+        } else {
+            " New Model "
+        },
         message,
     );
     let inner = block.inner(area);
@@ -255,7 +268,7 @@ fn render_model_form(
         render_field_line(
             rows[row_idx],
             labels[row_idx],
-            form.text_fields()[form_idx].value(),
+            &form.text_fields()[form_idx],
             form.focus == form_idx,
             buf,
         );
@@ -267,7 +280,13 @@ fn render_model_form(
         .get(form.provider_index)
         .map(|p| format!("{} (#{})", p.name, p.id))
         .unwrap_or_else(|| "<no provider>".to_string());
-    render_field_line(rows[1], "Provider", &pv, provider_focus, buf);
+    // Provider selector row is read-only (Up/Down cycles through the
+    // list), so render it through `render_field_line` with a scratch
+    // InputState populated from the resolved provider name. Cursor
+    // lands at end-of-text and signals focus via the yellow ▏ glyph.
+    let mut provider_display = InputState::new();
+    let _ = provider_display.insert_str(&pv);
+    render_field_line(rows[1], "Provider", &provider_display, provider_focus, buf);
 
     // Toggles row
     let toggle_focus = form.focus == ModelForm::TEXT_FIELD_COUNT + 1;
@@ -292,35 +311,56 @@ fn yn(b: bool) -> &'static str {
     if b { "Y" } else { "n" }
 }
 
-fn render_field_line(
-    row: Rect,
-    label: &str,
-    value: &str,
-    focused: bool,
-    buf: &mut Buffer,
-) {
+fn render_field_line(row: Rect, label: &str, input: &InputState, focused: bool, buf: &mut Buffer) {
     let label_span = Span::styled(
         format!(" {:<11}: ", label),
         Style::default().fg(Color::Cyan),
     );
     let mut spans = vec![label_span];
+    let value = input.value();
     if value.is_empty() {
+        // Empty field: dim hint text (no highlight bg, the active border is the cue).
         spans.push(Span::styled(
-            " ",
-            if focused { highlight_style() } else { Style::default().fg(Color::DarkGray) },
+            if focused { "▏" } else { "·" }.to_string(),
+            Style::default().fg(if focused {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            }),
         ));
     } else {
-        spans.push(Span::styled(
-            value.to_string(),
-            if focused { highlight_style() } else { Style::default().fg(Color::White) },
-        ));
+        // Split value at the cursor so the caret glyph can sit between the
+        // two halves with its own style. Pre-cursor dim, post-cursor bright.
+        let cursor = input.cursor();
+        let value_before = value[..cursor.min(value.len())].to_string();
+        let value_after = value[cursor.min(value.len())..].to_string();
+        if focused {
+            if !value_before.is_empty() {
+                spans.push(Span::styled(value_before, Style::default().fg(Color::DarkGray)));
+            }
+            spans.push(Span::styled(
+                "▏".to_string(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            ));
+            if !value_after.is_empty() {
+                spans.push(Span::styled(value_after, Style::default().fg(Color::White)));
+            }
+        } else {
+            spans.push(Span::styled(value.to_string(), Style::default().fg(Color::White)));
+        }
     }
     Paragraph::new(Line::from(spans)).render(row, buf);
 }
 
 fn form_block<'a>(title: &'a str, message: &'a str) -> Block<'a> {
     let title_line = if message.is_empty() {
-        Line::from(title).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Line::from(title).style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
         Line::from(vec![
             Span::styled(title, Style::default().fg(Color::Yellow)),
@@ -337,7 +377,9 @@ fn form_block<'a>(title: &'a str, message: &'a str) -> Block<'a> {
         .border_style(Style::default().fg(Color::Yellow))
         .padding(Padding::horizontal(1))
         .title_top(title_line)
-        .title_bottom(Line::from("[Tab/↑↓] move  [Enter] save  [Esc] cancel").alignment(Alignment::Center))
+        .title_bottom(
+            Line::from("[Tab/↑↓] move  [Enter] save  [Esc] cancel").alignment(Alignment::Center),
+        )
 }
 
 fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {

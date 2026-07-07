@@ -1,0 +1,22 @@
+[package]
+name = "mermaid-text"
+version = "0.56.0"
+edition.workspace = true
+license.workspace = true
+# mermaid-text requires Rust 1.92; workspace floor is 1.85. Per-crate override
+# keeps the workspace floor intact for the 16 other crates.
+rust-version = "1.92"
+description = "Render Mermaid diagrams as Unicode box-drawing text — pure Rust, vendored into the agentik workspace from markdown-reader"
+repository = "https://github.com/leboiko/markdown-reader/tree/master/crates/mermaid-text"
+homepage = "https://github.com/leboiko/markdown-reader/tree/master/crates/mermaid-text"
+readme = "README.md"
+keywords = ["mermaid", "diagram", "terminal", "unicode", "flowchart"]
+categories = ["command-line-utilities", "text-processing", "visualization"]
+
+[dependencies]
+unicode-width.workspace = true
+ascii-dag = "0.9.1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+[dev-dependencies]
+insta = "1"

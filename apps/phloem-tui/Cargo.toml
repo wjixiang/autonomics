@@ -16,7 +16,8 @@ agentik-sdk = { path = "../../crates/agentik-sdk" }
 agentik-runtime = { path = "../../crates/agentik-runtime" }
 rusqlite = "0.40.1"
 anyhow.workspace = true
-tui-markdown = "0.3.7"
+pulldown-cmark = "0.13"
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] }
 tracing-appender = "0.2"
@@ -24,6 +25,8 @@ time = { version = "0.3", features = ["macros"] }
 uuid = "1.23.3"
 tokio.workspace = true
 unicode-width = "0.2"
+mermaid-text = { path = "../../crates/mermaid-text" }
+unicode-segmentation = "1.12"
 
 [lints]
 workspace = true

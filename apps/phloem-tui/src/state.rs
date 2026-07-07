@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::config_db::{ModelInput, ProviderInput, ProviderRow};
 use crate::widgets::input_area::{InputArea, InputState};
 use agentik_sdk::types::AgentEvent;
@@ -99,6 +101,19 @@ pub struct AgentTabState {
     pub scroll_offset: usize,
     pub status: AgentStatus,
     pub input: InputArea,
+    /// History of submitted prompts, newest at the back. Used by
+    /// `Up`/`Down` to recall previous messages.
+    pub input_history: VecDeque<String>,
+    /// Maximum number of retained history entries. Oldest get evicted
+    /// when capacity is reached.
+    pub input_history_capacity: usize,
+    /// Buffer snapshot saved when the user first presses `Up` so the
+    /// in-progress edit is restored on `Down` past the oldest recall.
+    pub input_draft: Option<String>,
+    /// `None` = editing the user's draft (no recall in progress).
+    /// `Some(idx)` = displaying `input_history[idx]`. The first non-`Up`/
+    /// `Down` keystroke collapses back to draft mode.
+    pub input_recall: Option<usize>,
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
@@ -129,6 +144,10 @@ impl Default for AgentTabState {
             scroll_offset: 0,
             status: AgentStatus::Idle,
             input: InputArea::new(),
+            input_history: VecDeque::new(),
+            input_history_capacity: 200,
+            input_draft: None,
+            input_recall: None,
             input_tokens: 0,
             output_tokens: 0,
             cache_read_tokens: 0,
@@ -364,7 +383,7 @@ impl ProviderForm {
         let mk = |v: String| {
             let mut s = InputState::new();
             for ch in v.chars() {
-                s.insert(ch);
+                s.insert_char(ch);
             }
             s
         };
@@ -439,7 +458,7 @@ impl ModelForm {
         let mk = |v: String| {
             let mut s = InputState::new();
             for ch in v.chars() {
-                s.insert(ch);
+                s.insert_char(ch);
             }
             s
         };
