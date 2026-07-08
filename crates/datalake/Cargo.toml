@@ -7,7 +7,6 @@ rust-version.workspace = true
 description = "Iceberg connection management: REST catalog bootstrap, DataFusion catalog provider, and namespace/table CRUD."
 
 [dependencies]
-anyhow.workspace = true
 tokio = { workspace = true }
 iceberg.workspace = true
 iceberg-catalog-rest.workspace = true

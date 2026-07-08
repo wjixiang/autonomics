@@ -4,8 +4,6 @@
 //! backend) and exercise the scheduler through the three built-in node types:
 //! `SourceNode` (load), `SqlNode` (transform), `SinkNode` (write).
 
-use std::sync::Arc;
-
 use data_engine::data_engine::{
     DataEngine, Sink, Source, WriteFormat,
     dag::{DagError, RuntimeStatus, SchedulerConfig},
@@ -13,7 +11,6 @@ use data_engine::data_engine::{
     nodes::{DagNode, NodeInput, NodeMeta},
 };
 use datafusion::common::HashMap;
-use datafusion::prelude::SessionContext;
 
 fn datasets_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_datasets")
@@ -21,8 +18,7 @@ fn datasets_dir() -> std::path::PathBuf {
 
 #[tokio::test]
 async fn insurance_pipeline_runs() {
-    let ctx = Arc::new(SessionContext::new());
-    let mut engine = DataEngine::new(ctx);
+    let mut engine = DataEngine::builder().build();
     let csv_path = datasets_dir().join("insurance.csv");
     let out_path = "/tmp/dag_insurance_out.csv";
     let _ = std::fs::remove_file(out_path);
@@ -71,8 +67,7 @@ async fn insurance_pipeline_runs() {
 #[tokio::test]
 async fn fanout_branch() {
     // Source -> two independent SqlNodes (fan-out). Both should succeed.
-    let ctx = Arc::new(SessionContext::new());
-    let mut engine = DataEngine::new(ctx);
+    let mut engine = DataEngine::builder().build();
     let iris = datasets_dir().join("Iris.csv");
 
     engine
@@ -118,8 +113,7 @@ async fn fanout_branch() {
 #[tokio::test]
 async fn bio_source_reads_vcf() {
     // SourceNode auto-detects the VCF.gz format from the extension.
-    let ctx = Arc::new(SessionContext::new());
-    let mut engine = DataEngine::new(ctx);
+    let mut engine = DataEngine::builder().build();
     let vcf = datasets_dir().join("test.vcf.gz");
 
     engine
@@ -140,8 +134,7 @@ async fn bio_source_reads_vcf() {
 
 #[tokio::test]
 async fn cycle_is_rejected() {
-    let ctx = Arc::new(SessionContext::new());
-    let mut engine = DataEngine::new(ctx);
+    let mut engine = DataEngine::builder().build();
     engine
         .sql_node("a", "SELECT 1", "a")
         .unwrap()
@@ -175,8 +168,7 @@ impl DagNode for BoomNode {
 
 #[tokio::test]
 async fn failure_cascades() {
-    let ctx = Arc::new(SessionContext::new());
-    let mut engine = DataEngine::new(ctx.clone());
+    let mut engine = DataEngine::builder().build();
     // Custom node: build meta in a separate statement (avoids self-borrow).
     let boom_meta = NodeMeta::new("boom");
     engine.add_node("boom", BoomNode(boom_meta)).unwrap();
@@ -219,8 +211,7 @@ async fn scheduler_runs_in_parallel() {
 
     // 4 independent sleep nodes, concurrency 4 → ~100ms; concurrency 1 → ~400ms.
     for &concurrency in &[4usize, 1] {
-        let ctx = Arc::new(SessionContext::new());
-        let mut engine = DataEngine::new(ctx.clone()).with_config(SchedulerConfig {
+        let mut engine = DataEngine::builder().build().with_config(SchedulerConfig {
             max_concurrency: concurrency,
         });
         for i in 0..4 {

@@ -7,6 +7,7 @@ use datafusion::common::HashMap;
 use datafusion::prelude::DataFrame;
 use petgraph::Direction;
 use petgraph::algo::{is_cyclic_directed, kosaraju_scc, toposort};
+use petgraph::dot::Dot;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use tokio::sync::{Semaphore, mpsc};
@@ -24,15 +25,6 @@ pub type NamedDataFrames = HashMap<String, DataFrame>;
 /// with [`DagError`].
 pub type Result<T> = std::result::Result<T, DagError>;
 
-/// How an edge's data flows between two nodes. `OneToOne` is the streaming
-/// default; `Shuffle` is reserved for future partitioned fan-out.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum DependencyKind {
-    #[default]
-    OneToOne,
-    Shuffle,
-}
-
 /// The workflow graph: payload store + connectivity index.
 ///
 /// Node payloads (`Box<dyn DagNode>`) live in a [`HashMap`] keyed by id; a
@@ -46,8 +38,8 @@ pub enum DependencyKind {
 pub struct DAG {
     /// Node payloads, keyed by id. Public so external tooling can introspect.
     pub nodes: HashMap<NodeId, Box<dyn DagNode>>,
-    /// Connectivity + edge metadata index.
-    graph: DiGraph<NodeId, DependencyKind>,
+    /// Connectivity index.
+    graph: DiGraph<NodeId, ()>,
     pub id_to_idx: HashMap<NodeId, NodeIndex>,
     /// Per-node runtime status. Populated on [`Self::run`], queryable via [`Self::status`].
     pub statuses: HashMap<NodeId, RuntimeStatus>,
@@ -76,6 +68,16 @@ impl DAG {
 
     pub fn output(&self, id: &str) -> Option<NamedDataFrames> {
         self.outputs.get(id).cloned()
+    }
+
+    /// Remove all nodes, edges, statuses, outputs, and errors — a full reset.
+    pub fn clear(&mut self) {
+        self.nodes.clear();
+        self.graph.clear();
+        self.id_to_idx.clear();
+        self.statuses.clear();
+        self.outputs.clear();
+        self.errors.clear();
     }
 
     /// Reset all node statuses to [`RuntimeStatus::Pending`], preparing for a
@@ -108,11 +110,7 @@ impl DAG {
         for id in &all_ids {
             successors.insert(id.clone(), self.successors(id));
             pending.insert(id.clone(), self.predecessors(id).len());
-            let inc = self
-                .incoming_edges(id)
-                .into_iter()
-                .map(|(from, _kind)| from)
-                .collect();
+            let inc = self.incoming_edges(id);
             incoming.insert(id.clone(), inc);
         }
 
@@ -249,7 +247,7 @@ impl DAG {
             return Err(DagError::UnknownNode(to));
         }
         if let (Some(&a), Some(&b)) = (self.id_to_idx.get(&from), self.id_to_idx.get(&to)) {
-            self.graph.add_edge(a, b, DependencyKind::default());
+            self.graph.add_edge(a, b, ());
         }
         Ok(())
     }
@@ -304,16 +302,14 @@ impl DAG {
             .collect()
     }
 
-    /// Incoming edges for `id`, in insertion order. Returns `(predecessor_id,
-    /// dependency_kind)` pairs. Used by the scheduler to assemble a node's
-    /// `inputs` with correct port names.
-    pub fn incoming_edges(&self, id: &str) -> Vec<(NodeId, DependencyKind)> {
+    /// Incoming edges for `id`, in insertion order. Returns predecessor ids.
+    pub fn incoming_edges(&self, id: &str) -> Vec<NodeId> {
         let Some(&idx) = self.id_to_idx.get(id) else {
             return Vec::new();
         };
         self.graph
             .edges_directed(idx, Direction::Incoming)
-            .map(|e| (self.graph[e.source()].clone(), *e.weight()))
+            .map(|e| self.graph[e.source()].clone())
             .collect()
     }
 
@@ -341,14 +337,6 @@ impl DAG {
         self.nodes.get(id).map(|b| b.as_ref())
     }
 
-    /// Remove and return a node payload by id, so it can be moved into a task.
-    /// Leaves the connectivity index untouched (the scheduler precomputes the
-    /// adjacency it needs before dispatch).
-    #[deprecated]
-    pub fn take_node(&mut self, id: &str) -> Option<Box<dyn DagNode>> {
-        self.nodes.remove(id)
-    }
-
     /// Comma-separated names of the nodes participating in a cycle, pulled from
     /// the first non-trivial strongly-connected component.
     fn cycle_node_names(&self) -> String {
@@ -369,6 +357,11 @@ impl DAG {
         }
         String::from("<unknown>")
     }
+
+    /// Render DAG topology into dot code
+    pub fn to_dot(&self) -> String {
+        format!("{:?}", Dot::with_config(&self.graph, &[]))
+    }
 }
 
 #[cfg(test)]
@@ -377,6 +370,18 @@ mod tests {
 
     fn dummy_meta(id: &str) -> super::super::NodeMeta {
         super::super::NodeMeta::new(id)
+    }
+
+    fn get_diamond_dag() -> DAG {
+        let mut dag = DAG::default();
+        for id in ["a", "b", "c", "d"] {
+            add(&mut dag, id);
+        }
+        dag.add_edge("a", "b").unwrap();
+        dag.add_edge("a", "c").unwrap();
+        dag.add_edge("b", "d").unwrap();
+        dag.add_edge("c", "d").unwrap();
+        dag
     }
 
     // A no-op node so tests can build a real DAG without touching IO.
@@ -405,15 +410,7 @@ mod tests {
 
     #[test]
     fn topo_order_diamond() {
-        let mut dag = DAG::default();
-        for id in ["a", "b", "c", "d"] {
-            add(&mut dag, id);
-        }
-        dag.add_edge("a", "b").unwrap();
-        dag.add_edge("a", "c").unwrap();
-        dag.add_edge("b", "d").unwrap();
-        dag.add_edge("c", "d").unwrap();
-
+        let dag = get_diamond_dag();
         let order = dag.topo_order().unwrap();
         dbg!(&order);
         let pos = |id: &str| order.iter().position(|x| x == id).unwrap();
@@ -469,5 +466,31 @@ mod tests {
         assert_eq!(succ, vec!["a", "b"]);
         let inc = dag.incoming_edges("a");
         assert_eq!(inc.len(), 1);
+    }
+
+    #[test]
+    fn render_into_dot() {
+        let dag = get_diamond_dag();
+        let dot = dag.to_dot();
+
+        // DOT output must be a digraph declaration
+        assert!(
+            dot.contains("digraph"),
+            "to_dot output should be a digraph declaration"
+        );
+
+        // All 4 diamond nodes must appear as labels in the output
+        for node_id in ["a", "b", "c", "d"] {
+            assert!(
+                dot.contains(node_id),
+                "DOT output should contain node '{node_id}'"
+            );
+        }
+
+        // 4 edges: a→b, a→c, b→d, c→d — petgraph uses "N -> M" notation
+        assert!(dot.contains("->"), "DOT output should contain directed edges");
+
+        // Smoke-check: non-trivial output (a 4-node DAG should be > 20 chars)
+        assert!(dot.len() > 20, "DOT output seems too short, got: {dot}");
     }
 }

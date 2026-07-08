@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
+use iceberg::Catalog;
+use iceberg_catalog_rest::RestCatalog;
 
 use crate::data_engine::dag::{DAG, RunReport, SchedulerConfig};
 use crate::data_engine::error::{Error, Result};
@@ -14,30 +16,45 @@ pub mod nodes;
 
 pub use nodes::{FileFormat, Sink, SinkNode, Source, SourceNode, SqlNode, WriteFormat};
 
+/// Convenience alias for the default engine backed by a REST Iceberg catalog.
+pub type IcebergDataEngine = DataEngine<RestCatalog>;
+
 /// `DataEngine` is the core object that implements the data analysis engine.
 /// It orchestrates ingestion, transformation, and querying of datasets via a
 /// [`DAG`] of nodes executed by an async scheduler.
-pub struct DataEngine {
-    ctx: Arc<SessionContext>,
+pub struct DataEngine<R: Catalog> {
+    ctx: SessionContext,
+    catalog: Option<Arc<R>>,
     dag: DAG,
     config: SchedulerConfig,
 }
 
-impl DataEngine {
-    pub fn new(ctx: Arc<SessionContext>) -> Self {
+impl<R: Catalog> DataEngine<R> {
+    pub fn new(ctx: SessionContext, catalog: Option<Arc<R>>) -> Self {
         Self {
             ctx,
             dag: DAG::default(),
             config: SchedulerConfig::default(),
+            catalog,
         }
     }
 
+    /// Returns the Iceberg catalog, if registered.
+    pub fn catalog(&self) -> Option<Arc<R>> {
+        self.catalog.clone()
+    }
+}
+
+// builder() lives in a concrete impl so callers don't need to specify <R>.
+impl DataEngine<RestCatalog> {
     pub fn builder() -> DataEngineBuilder {
         DataEngineBuilder::default()
     }
+}
 
+impl<R: Catalog> DataEngine<R> {
     /// Returns the shared session context (object stores, catalogs, …).
-    pub fn ctx(&self) -> Arc<SessionContext> {
+    pub fn ctx(&self) -> SessionContext {
         self.ctx.clone()
     }
 
@@ -70,6 +87,16 @@ impl DataEngine {
         let id = id.into();
         self.dag.delete_node(&id)?;
         Ok(self)
+    }
+
+    pub fn view_dag(&self) -> Result<String> {
+        Ok(self.dag.to_dot())
+    }
+
+    /// Clear all nodes, edges, and runtime state — start fresh.
+    pub fn clear_dag(&mut self) -> Result<()> {
+        self.dag.clear();
+        Ok(())
     }
 
     /// Convenience: add a [`SourceNode`] (chaining-safe — meta built internally).
@@ -155,13 +182,15 @@ impl DataEngine {
 }
 
 pub struct DataEngineBuilder {
-    ctx: Arc<SessionContext>,
+    ctx: SessionContext,
+    catalog: Option<Arc<RestCatalog>>,
 }
 
 impl Default for DataEngineBuilder {
     fn default() -> Self {
         Self {
-            ctx: Arc::new(SessionContext::new()),
+            ctx: SessionContext::new(),
+            catalog: None,
         }
     }
 }
@@ -175,16 +204,17 @@ impl DataEngineBuilder {
         Ok(self)
     }
 
-    pub async fn register_iceberg(self) -> Result<Self> {
+    pub async fn register_iceberg(mut self) -> Result<Self> {
         let datalake = Datalake::default();
         let provider = datalake.get_provider().await?;
         self.ctx.register_catalog("iceberg", Arc::new(provider));
+        self.catalog = Some(datalake.get_catalog().await?);
 
         Ok(self)
     }
 
-    pub fn build(self) -> DataEngine {
-        DataEngine::new(self.ctx)
+    pub fn build(self) -> IcebergDataEngine {
+        DataEngine::new(self.ctx, self.catalog)
     }
 }
 

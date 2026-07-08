@@ -33,6 +33,7 @@ derive_more = { workspace = true }
 futures.workspace = true
 tokio.workspace = true
 bytes = "1"
+blake3 = "1.8.5"
 
 [lints]
 workspace = true

@@ -1,6 +1,6 @@
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::data_engine::DataEngine;
+use crate::data_engine::IcebergDataEngine;
 use crate::runtime::error::Result;
 use crate::runtime::types::DataEngineCmd;
 
@@ -8,7 +8,7 @@ pub mod error;
 pub mod types;
 
 pub struct DataEngineServer {
-    engine: DataEngine,
+    engine: IcebergDataEngine,
     rx: mpsc::UnboundedReceiver<DataEngineCmd>,
 }
 
@@ -22,20 +22,30 @@ impl DataEngineServer {
 
     async fn handle(&mut self, cmd: DataEngineCmd) {
         match cmd {
-            DataEngineCmd::AddSourceNode { id, source, output_df_name, reply } => {
-                let _ = reply.send(self.engine.source_node(id, source, output_df_name).map(|_| ()));
+            DataEngineCmd::AddSourceNode {
+                id,
+                source,
+                output_df_name,
+                reply,
+            } => {
+                let _ = reply.send(
+                    self.engine
+                        .source_node(id, source, output_df_name)
+                        .map(|_| ()),
+                );
             }
-            DataEngineCmd::AddSqlNode { id, query, output_df_name, reply } => {
+            DataEngineCmd::AddSqlNode {
+                id,
+                query,
+                output_df_name,
+                reply,
+            } => {
                 let _ = reply.send(self.engine.sql_node(id, query, output_df_name).map(|_| ()));
             }
             DataEngineCmd::AddSinkNode { id, sink, reply } => {
                 let _ = reply.send(self.engine.sink_node(id, sink).map(|_| ()));
             }
-            DataEngineCmd::AddEdge {
-                from,
-                to,
-                reply,
-            } => {
+            DataEngineCmd::AddEdge { from, to, reply } => {
                 let _ = reply.send(self.engine.add_edge(from, to).map(|_| ()));
             }
             DataEngineCmd::RunDag { reply } => {
@@ -46,6 +56,12 @@ impl DataEngineServer {
             }
             DataEngineCmd::RemoveNode { id, reply } => {
                 let _ = reply.send(self.engine.remove_node(id).map(|_| ()));
+            }
+            DataEngineCmd::ViewDag { reply } => {
+                let _ = reply.send(self.engine.view_dag());
+            }
+            DataEngineCmd::ClearDag { reply } => {
+                let _ = reply.send(self.engine.clear_dag().map(|_| ()));
             }
         }
     }
@@ -92,7 +108,12 @@ impl DataEngineClient {
         .await
     }
 
-    pub async fn add_sql_node(&self, id: String, query: String, output_df_name: String) -> Result<()> {
+    pub async fn add_sql_node(
+        &self,
+        id: String,
+        query: String,
+        output_df_name: String,
+    ) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::AddSqlNode {
@@ -138,7 +159,10 @@ impl DataEngineClient {
             .await
     }
 
-    pub async fn get_output(&self, id: String) -> Result<Option<crate::data_engine::dag::graph::NamedDataFrames>> {
+    pub async fn get_output(
+        &self,
+        id: String,
+    ) -> Result<Option<crate::data_engine::dag::graph::NamedDataFrames>> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::GetOutput {
@@ -161,12 +185,24 @@ impl DataEngineClient {
         )
         .await
     }
+
+    pub async fn view_dag(&self) -> Result<String> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(DataEngineCmd::ViewDag { reply: reply_tx }, reply_rx)
+            .await
+    }
+
+    pub async fn clear_dag(&self) -> Result<()> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(DataEngineCmd::ClearDag { reply: reply_tx }, reply_rx)
+            .await
+    }
 }
 
 pub fn spawn_engine() {}
 
 /// Spawn server through dependency injection, good for test purpose.
-pub fn spawn_with_engine(engine: DataEngine) -> (DataEngineClient, JoinHandle<()>) {
+pub fn spawn_with_engine(engine: IcebergDataEngine) -> (DataEngineClient, JoinHandle<()>) {
     let (tx, rx) = mpsc::unbounded_channel::<DataEngineCmd>();
     let server = DataEngineServer { engine, rx };
     let client = DataEngineClient { tx };

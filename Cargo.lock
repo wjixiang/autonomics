@@ -817,6 +817,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "bigtools",
+ "blake3",
  "bytes",
  "datafusion",
  "datafusion-common-runtime",
@@ -1629,6 +1630,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "biofusion",
+ "blake3",
  "datafusion",
  "datalake",
  "fs",
@@ -2327,7 +2329,6 @@ dependencies = [
 name = "datalake"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "datafusion",
  "iceberg",
  "iceberg-catalog-rest",

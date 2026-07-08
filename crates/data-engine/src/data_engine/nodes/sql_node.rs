@@ -3,7 +3,6 @@ use datafusion::{common::HashMap, prelude::SessionContext};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
-use std::sync::Arc;
 
 use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
 
@@ -30,7 +29,7 @@ impl From<SqlNodeError> for DagError {
 pub struct SqlNode {
     meta: NodeMeta,
     sql_query: String,
-    ctx: Arc<SessionContext>,
+    ctx: SessionContext,
     output_df_name: String,
 }
 
@@ -38,7 +37,7 @@ impl SqlNode {
     pub fn new(
         meta: NodeMeta,
         query: String,
-        ctx: Arc<SessionContext>,
+        ctx: SessionContext,
         output_df_name: String,
     ) -> Self {
         Self {
@@ -95,11 +94,10 @@ impl DagNode for SqlNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     use arrow_array::{Int32Array, RecordBatch};
     use arrow_schema::{DataType, Field, Schema};
-    use datafusion::prelude::SessionContext;
+    use std::sync::Arc;
 
     use super::super::meta::NodeMeta;
 
@@ -109,7 +107,7 @@ mod tests {
         // registered — this exercises the API path used by `execute`. The
         // DAG plumbing / schema wiring lives in higher-level integration
         // tests.
-        let ctx: Arc<SessionContext> = Arc::new(SessionContext::new());
+        let ctx = SessionContext::new();
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
         let batch =
             RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();

@@ -18,5 +18,5 @@ pub mod utils;
 pub use super::nodes::{DagNode, NodeId, NodeInput, NodeMeta};
 
 pub use error::DagError;
-pub use graph::{DAG, DependencyKind};
+pub use graph::DAG;
 pub use runtime::{RunReport, RuntimeStatus, SchedulerConfig};

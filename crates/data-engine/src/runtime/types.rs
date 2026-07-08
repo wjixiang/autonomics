@@ -1,7 +1,7 @@
 use tokio::sync::oneshot;
 
-use crate::data_engine::dag::graph::NamedDataFrames;
 use crate::data_engine::dag::RunReport;
+use crate::data_engine::dag::graph::NamedDataFrames;
 use crate::data_engine::error::Result as EngineResult;
 use crate::data_engine::{Sink, Source};
 
@@ -37,6 +37,12 @@ pub enum DataEngineCmd {
     },
     RemoveNode {
         id: String,
+        reply: oneshot::Sender<EngineResult<()>>,
+    },
+    ViewDag {
+        reply: oneshot::Sender<EngineResult<String>>,
+    },
+    ClearDag {
         reply: oneshot::Sender<EngineResult<()>>,
     },
 }

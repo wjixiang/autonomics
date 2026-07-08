@@ -13,6 +13,7 @@ pub struct Datalake {
     config: config::IcebergConfig,
     catalog: OnceCell<Arc<RestCatalog>>,
 }
+
 impl Default for Datalake {
     fn default() -> Self {
         Self {
@@ -32,20 +33,22 @@ impl Datalake {
     }
 
     pub async fn get_catalog(&self) -> crate::error::Result<Arc<RestCatalog>> {
-        self.catalog
-            .get_or_try_init(|| async {
-                let builder = iceberg_catalog_rest::RestCatalogBuilder::default()
-                    .with_storage_factory(Arc::new(OpenDalStorageFactory::S3 {
-                        customized_credential_load: None,
-                    }));
-                let catalog = builder
-                    .load("rest", self.config.to_properties())
-                    .await
-                    .map_err(|e| format!("build RestCatalog failed: {e}"))?;
-                Ok::<_, crate::error::Error>(Arc::new(catalog))
-            })
-            .await?;
+        self.catalog.get_or_try_init(|| self.init()).await?;
         Ok(self.catalog.get().unwrap().clone())
+    }
+
+    async fn init(&self) -> crate::error::Result<Arc<RestCatalog>> {
+        let builder = iceberg_catalog_rest::RestCatalogBuilder::default().with_storage_factory(
+            Arc::new(OpenDalStorageFactory::S3 {
+                customized_credential_load: None,
+            }),
+        );
+        let catalog = builder
+            .load("rest", self.config.to_properties())
+            .await
+            .map_err(|e| format!("build RestCatalog failed: {e}"))?;
+
+        Ok(Arc::new(catalog))
     }
 
     pub async fn list_all_tables(&self) -> crate::error::Result<Vec<(Vec<String>, String)>> {

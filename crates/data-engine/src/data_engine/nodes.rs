@@ -4,6 +4,7 @@
 //! the contract every node fulfils. Concrete implementations live in
 //! [`source`], [`sql_node`], and [`sink`].
 
+pub mod cache_source;
 pub mod meta;
 pub mod mock_node;
 pub mod sink;

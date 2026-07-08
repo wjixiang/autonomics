@@ -8,6 +8,9 @@ pub enum Error {
     #[error("Datalake error")]
     DatalakeError(#[from] datalake::error::Error),
 
+    #[error("Iceberg datalake is missing")]
+    MissDatalake,
+
     #[error(transparent)]
     Dag(#[from] crate::data_engine::dag::DagError),
 }

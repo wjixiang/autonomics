@@ -7,8 +7,6 @@
 //! formats (VCF, BAM, BED, …) are read through `biofusion`, which already
 //! exposes them as DataFusion tables.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use biofusion::datasource::BioReadOptions;
 use biofusion::ext::DataFusionReadExt;
@@ -127,7 +125,7 @@ impl From<SourceError> for DagError {
 pub struct SourceNode {
     meta: NodeMeta,
     source: Source,
-    ctx: Arc<SessionContext>,
+    ctx: SessionContext,
     output_df_name: String,
 }
 
@@ -135,7 +133,7 @@ impl SourceNode {
     pub fn new(
         meta: NodeMeta,
         source: Source,
-        ctx: Arc<SessionContext>,
+        ctx: SessionContext,
         output_df_name: String,
     ) -> Self {
         Self {
@@ -229,5 +227,26 @@ mod tests {
 
         let schema = res.schema();
         dbg!(schema);
+    }
+
+    #[tokio::test]
+    async fn test_load_vcf_gz() {
+        let (ctx, fs) = OpendalFileStorage::new_temp().register_to_ctx();
+        dbg!("start copy data");
+        let test_vcf_gz =
+            std::fs::read("/mnt/disk3/test/ebi-a-GCST90012005/ebi-a-GCST90012005.vcf.gz").unwrap();
+        fs.op.write("/sample.vcf.gz", test_vcf_gz).await.unwrap();
+        dbg!("copy data finished");
+
+        let res = ctx
+            .read_vcf("/sample.vcf.gz", BioReadOptions::default())
+            .await
+            .unwrap();
+
+        res.show().await.unwrap();
+
+        // let schema = res.schema();
+        // dbg!(schema);
+        panic!()
     }
 }
