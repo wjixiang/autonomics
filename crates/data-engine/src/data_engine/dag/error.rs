@@ -16,9 +16,9 @@ pub enum DagError {
     #[error("datafusion: {0}")]
     DataFusion(#[from] datafusion::error::DataFusionError),
 
-    /// The graph contains a cycle; carries a comma-separated list of the
-    /// offending nodes for diagnostics.
-    #[error("cycle detected involving nodes: {0}")]
+    /// The graph contains a cycle; carries a representation of the cycle
+    /// path (e.g. `A → B → C → A`) for diagnostics.
+    #[error("cycle detected: {0}")]
     Cycle(String),
 
     /// An edge referenced a node id that was never added.
@@ -33,4 +33,7 @@ pub enum DagError {
     /// the scheduler did not dispatch).
     #[error("scheduler: {0}")]
     Schedule(String),
+
+    #[error("node `{node_type}` failed: {msg}")]
+    NodeError { node_type: String, msg: String },
 }

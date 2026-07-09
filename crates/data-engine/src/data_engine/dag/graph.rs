@@ -257,15 +257,13 @@ impl DAG {
             .id_to_idx
             .get(id)
             .ok_or_else(|| DagError::UnknownNode(id.to_string()))?;
-        if self
-            .graph
-            .neighbors_directed(*target_node_idx, Direction::Outgoing)
-            .next()
-            .is_some()
-        {
-            return Err(DagError::Schedule(
-                "Node to delete has successors depend on it".to_string(),
-            ));
+        let successors = self.successors(id);
+        if !successors.is_empty() {
+            return Err(DagError::Schedule(format!(
+                "Cannot delete node `{id}`: the following successor node(s) still depend on it: [{}]. \
+                 Remove those nodes (or their incoming edges) first.",
+                successors.join(", ")
+            )));
         }
         self.graph.remove_node(*target_node_idx);
         self.nodes.remove(id);
@@ -337,8 +335,10 @@ impl DAG {
         self.nodes.get(id).map(|b| b.as_ref())
     }
 
-    /// Comma-separated names of the nodes participating in a cycle, pulled from
-    /// the first non-trivial strongly-connected component.
+    /// Build a human-readable cycle path like `A → B → C → A` from the first
+    /// strongly-connected component that contains a cycle.
+    ///
+    /// Uses DFS within the SCC to recover an actual cycle (not just the node set).
     fn cycle_node_names(&self) -> String {
         let sccs = kosaraju_scc(&self.graph);
         for scc in sccs {
@@ -347,15 +347,72 @@ impl DAG {
                     .first()
                     .map(|&i| self.graph.neighbors(i).any(|j| j == i))
                     .unwrap_or(false);
-            if cyclic {
-                return scc
-                    .into_iter()
-                    .map(|i| self.graph[i].clone())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+            if !cyclic {
+                continue;
             }
+            // Collect node ids in this SCC and map from NodeIndex → node id.
+            let ids: Vec<String> = scc.iter().map(|&i| self.graph[i].clone()).collect();
+            let idx_set: std::collections::HashSet<NodeIndex> = scc.iter().copied().collect();
+            // DFS to find an actual cycle path within the SCC.
+            if let Some(path) = self.find_cycle_path(&idx_set) {
+                let names: Vec<&str> = path.iter().map(|&i| self.graph[i].as_str()).collect();
+                return names.join(" → ");
+            }
+            // Fallback: list the SCC members (shouldn't happen for a cyclic SCC).
+            return ids.join(", ");
         }
         String::from("<unknown>")
+    }
+
+    /// DFS within a known SCC to recover one concrete cycle path.
+    ///
+    /// Returns a vec of [`NodeIndex`] forming a cycle (first element == last).
+    fn find_cycle_path(
+        &self,
+        idx_set: &std::collections::HashSet<NodeIndex>,
+    ) -> Option<Vec<NodeIndex>> {
+        // Try DFS from each node in the SCC until we find a back-edge.
+        let start = *idx_set.iter().next()?;
+        let mut stack: Vec<NodeIndex> = vec![start];
+        let mut on_stack: std::collections::HashSet<NodeIndex> =
+            std::collections::HashSet::from([start]);
+        let mut visited: std::collections::HashSet<NodeIndex> =
+            std::collections::HashSet::from([start]);
+
+        loop {
+            let &current = stack.last()?;
+            // Look for a successor that is still on the stack (back-edge = cycle).
+            for neighbor in self
+                .graph
+                .neighbors_directed(current, Direction::Outgoing)
+            {
+                if !idx_set.contains(&neighbor) {
+                    continue;
+                }
+                if on_stack.contains(&neighbor) {
+                    // Found a cycle: extract the portion from `neighbor` to end.
+                    let cycle_start = stack.iter().position(|&n| n == neighbor).unwrap();
+                    let mut path: Vec<NodeIndex> = stack[cycle_start..].to_vec();
+                    path.push(neighbor);
+                    return Some(path);
+                }
+                if !visited.contains(&neighbor) {
+                    visited.insert(neighbor);
+                    on_stack.insert(neighbor);
+                    stack.push(neighbor);
+                    break; // continue DFS from the pushed neighbor
+                }
+            }
+            // If no unvisited successor was pushed, backtrack.
+            if *stack.last().unwrap() == current {
+                // We processed all neighbors without finding a cycle — pop and try next.
+                on_stack.remove(&current);
+                stack.pop();
+                if stack.is_empty() {
+                    return None;
+                }
+            }
+        }
     }
 
     /// Render DAG topology into dot code

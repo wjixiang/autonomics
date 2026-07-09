@@ -145,6 +145,19 @@ impl SourceNode {
     }
 }
 
+pub fn normalize_path(path: &str) -> String {
+    let trimmed = path
+        .trim_matches('/')
+        .strip_prefix("./")
+        .unwrap_or(path.trim_matches('/'));
+    let trimmed = trimmed.strip_prefix('.').unwrap_or(trimmed);
+    if trimmed.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{trimmed}")
+    }
+}
+
 #[async_trait]
 impl DagNode for SourceNode {
     fn meta(&self) -> &NodeMeta {
@@ -159,10 +172,11 @@ impl DagNode for SourceNode {
         let ctx = self.ctx.clone();
         let df = match &self.source {
             Source::File { path, format } => {
+                let path = normalize_path(path);
                 let fmt = format
-                    .or_else(|| FileFormat::from_path(path))
+                    .or_else(|| FileFormat::from_path(&path))
                     .ok_or_else(|| SourceError::UnknownFormat(path.clone()))?;
-                read_file(&ctx, path, fmt).await?
+                read_file(&ctx, &path, fmt).await?
             }
             Source::Iceberg { ident } => {
                 // The iceberg catalog is registered under "iceberg"; qualify

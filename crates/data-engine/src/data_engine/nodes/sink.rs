@@ -11,6 +11,7 @@ use datafusion::dataframe::DataFrameWriteOptions;
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::source::normalize_path;
 use crate::data_engine::dag::DagError;
 use crate::data_engine::dag::graph::NamedDataFrames;
 
@@ -84,15 +85,16 @@ impl DagNode for SinkNode {
 
         match &self.sink {
             Sink::File { path, format } => {
+                let path = normalize_path(path);
                 let df = input.data.clone();
                 let res = match format {
                     WriteFormat::Csv => {
-                        df.write_csv(path, DataFrameWriteOptions::default(), None::<CsvOptions>)
+                        df.write_csv(&path, DataFrameWriteOptions::default(), None::<CsvOptions>)
                             .await
                     }
                     WriteFormat::Parquet => {
                         df.write_parquet(
-                            path,
+                            &path,
                             DataFrameWriteOptions::default(),
                             None::<TableParquetOptions>,
                         )
