@@ -3,12 +3,14 @@ use std::time::Duration;
 use agentik_sdk::AuthMethod;
 use agentik_sdk::model::model_pool::ModelPoolConfig;
 use agentik_sdk::model::{ModelInfo, ProviderConfig};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{
-    DefaultTerminal, Frame,
+    Frame,
+    backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    prelude::Widget,
+    prelude::{Terminal, Widget},
 };
+use std::io::{stdout, Stdout, Write};
 use ratatui_comfy_tabs::{TabBarAlign, TabDirection, TabNav, TabNavState};
 use rusqlite::Connection;
 use uuid::Uuid;
@@ -170,11 +172,23 @@ impl App {
     }
 
     pub fn start(&mut self) -> color_eyre::Result<()> {
-        ratatui::run(|f| self.app(f))?;
+        crossterm::terminal::enable_raw_mode()?;
+        crossterm::execute!(stdout(), crossterm::terminal::EnterAlternateScreen, EnableMouseCapture)?;
+        stdout().flush()?;
+
+        let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+
+        let result = self.app(&mut terminal);
+
+        // Restore terminal on exit (whether normal or error).
+        crossterm::execute!(stdout(), DisableMouseCapture, crossterm::terminal::LeaveAlternateScreen)?;
+        crossterm::terminal::disable_raw_mode()?;
+
+        result?;
         Ok(())
     }
 
-    fn app(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
+    fn app(&mut self, terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> std::io::Result<()> {
         loop {
             if self.should_quit {
                 break Ok(());
