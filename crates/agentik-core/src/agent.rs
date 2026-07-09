@@ -125,7 +125,7 @@ impl Agent {
 
     /// Returns a clone of the internal event sender.
     ///
-    /// Used by the sync-to-async bridge (e.g. `agentik-runtime`) to
+    /// Used by the sync-to-async bridge (e.g. `runtime`) to
     /// inject [`InternalEvent`]s without holding a reference to the Agent.
     pub fn internal_event_tx(&self) -> tokio::sync::mpsc::UnboundedSender<InternalEvent> {
         self.internal_event_tx.clone()

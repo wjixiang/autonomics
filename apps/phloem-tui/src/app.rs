@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::state::{self, AgentStatus, AppState, InputMode, MainTabState};
 use crate::widgets::agent_tab_widget::AgentTabWidget;
-use agentik_runtime::AgentRuntime;
+use runtime::AgentRuntime;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(16);
 

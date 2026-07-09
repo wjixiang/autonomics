@@ -13,7 +13,7 @@ ratatui-comfy-tabs = "0.5"
 ratatui-textarea = "0.9"
 agentik-core = { path = "../../crates/agentik-core" }
 agentik-sdk = { path = "../../crates/agentik-sdk" }
-agentik-runtime = { path = "../../crates/agentik-runtime" }
+runtime = { path = "../../crates/runtime" }
 rusqlite = "0.40.1"
 anyhow.workspace = true
 pulldown-cmark = "0.13"

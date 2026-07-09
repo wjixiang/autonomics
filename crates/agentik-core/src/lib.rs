@@ -7,7 +7,7 @@ pub mod error;
 pub mod lifecycle;
 pub mod memory;
 pub mod message_ext;
-// pub mod process; // TODO: process module lives in agentik-runtime
+// pub mod process; // TODO: process module lives in runtime
 pub mod prompt;
 pub mod skill;
 pub mod storage;

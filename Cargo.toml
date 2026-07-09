@@ -12,7 +12,7 @@ members = [
   "apps/phloem-tui",
   "crates/opengwas-rs",
   "crates/eutils-rs",
-  "crates/agentik-runtime",
+  "crates/runtime",
   "crates/fs",
   "crates/datalake",
   "crates/biofusion",
