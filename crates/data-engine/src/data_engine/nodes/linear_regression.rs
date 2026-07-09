@@ -1,0 +1,383 @@
+//! Linear regression transform node.
+//!
+//! Takes a single upstream `DataFrame`, extracts the specified X and Y columns,
+//! fits an OLS model via [`stat_primitives::regression::ols`], and outputs a summary
+//! `DataFrame` with coefficients, standard errors, t-statistics, and p-values.
+
+use std::sync::Arc;
+
+use arrow_array::{
+    Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array,
+    RecordBatch, StringArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+};
+use arrow_schema::{DataType, Field, Schema};
+use async_trait::async_trait;
+use thiserror::Error;
+
+use super::meta::{DagNode, NodeInput, NodeMeta};
+use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
+
+// =====================================================================
+// Error type
+// =====================================================================
+
+#[derive(Debug, Error)]
+pub enum LinearRegressionError {
+    #[error("missing column '{name}' in input DataFrame")]
+    MissingColumn { name: String },
+    #[error("column '{name}' is not numeric (got type: {dtype})")]
+    NonNumericColumn { name: String, dtype: String },
+    #[error("no input data: expected at least one row")]
+    EmptyInput,
+    #[error("regression failed: {0}")]
+    Regression(String),
+}
+
+impl From<LinearRegressionError> for DagError {
+    fn from(e: LinearRegressionError) -> Self {
+        DagError::NodeError {
+            node_type: "linear_regression".to_string(),
+            msg: e.to_string(),
+        }
+    }
+}
+
+// =====================================================================
+// Column extraction — Arrow array → Vec<f64>
+// =====================================================================
+
+/// Extract a named column from `Vec<RecordBatch>` into a `Vec<f64>`,
+/// casting numeric types and returning an error for unsupported types.
+/// Null values are replaced with `NaN` (the caller or regression engine can
+/// filter them if desired).
+fn extract_column(batches: &[RecordBatch], name: &str) -> Result<Vec<f64>, LinearRegressionError> {
+    let schema = batches
+        .first()
+        .map(|b| b.schema().clone())
+        .ok_or(LinearRegressionError::EmptyInput)?;
+    let idx = schema
+        .index_of(name)
+        .map_err(|_| LinearRegressionError::MissingColumn { name: name.to_string() })?;
+
+    let dtype = schema.field(idx).data_type().clone();
+    let is_numeric = matches!(
+        dtype,
+        DataType::Float16
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::UInt8
+            | DataType::UInt16
+            | DataType::UInt32
+            | DataType::UInt64
+    );
+    if !is_numeric {
+        return Err(LinearRegressionError::NonNumericColumn {
+            name: name.to_string(),
+            dtype: dtype.to_string(),
+        });
+    }
+
+    let mut values = Vec::new();
+    for batch in batches {
+        let col = batch.column(idx);
+        extract_numeric_column(col, &mut values);
+    }
+    Ok(values)
+}
+
+/// Push numeric values from a single column array into `out`, converting
+/// nulls to NaN. Dispatches on the array type.
+fn extract_numeric_column(col: &dyn Array, out: &mut Vec<f64>) {
+    macro_rules! cast {
+        ($arr:expr, $T:ty) => {
+            if let Some(a) = $arr.as_any().downcast_ref::<$T>() {
+                for v in a.iter() {
+                    out.push(match v {
+                        Some(val) => val as f64,
+                        None => f64::NAN,
+                    });
+                }
+                return;
+            }
+        };
+    }
+    cast!(col, Int8Array);
+    cast!(col, Int16Array);
+    cast!(col, Int32Array);
+    cast!(col, Int64Array);
+    cast!(col, UInt8Array);
+    cast!(col, UInt16Array);
+    cast!(col, UInt32Array);
+    cast!(col, UInt64Array);
+    cast!(col, Float32Array);
+    cast!(col, Float64Array);
+    // Float16 and any numeric type not explicitly handled above is intentionally
+    // left as NaN — `extract_column` already rejects non-numeric columns before
+    // dispatching here, so this only fills remaining slots defensively.
+    for i in 0..col.len() {
+        if col.is_null(i) {
+            out.push(f64::NAN);
+        }
+    }
+}
+
+// =====================================================================
+// Output DataFrame construction
+// =====================================================================
+
+/// Build a summary `RecordBatch` from the regression result.
+///
+/// Columns: `term` (Utf8), `coefficient`, `std_error`, `t_stat`, `p_value`,
+/// `r_squared`, `n_obs` (all Float64 except term).
+fn build_result_batch(reg: &stat_primitives::regression::Regression, intercept: bool) -> RecordBatch {
+    let n = reg.n_params;
+    let mut terms = Vec::with_capacity(n);
+    let mut coefficients = Vec::with_capacity(n);
+    let mut std_errors = Vec::with_capacity(n);
+    let mut t_stats = Vec::with_capacity(n);
+    let mut p_values = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let term = if intercept && i == 0 {
+            "intercept".to_string()
+        } else {
+            format!("x{}", if intercept { i } else { i + 1 })
+        };
+        terms.push(term);
+        coefficients.push(reg.coefficients[i]);
+        std_errors.push(reg.std_errors[i]);
+        t_stats.push(reg.t_stats[i]);
+        p_values.push(reg.p_values[i]);
+    }
+
+    // Broadcast global summary columns.
+    let r_squared = vec![reg.r_squared; n];
+    let n_obs = vec![reg.n_obs as f64; n];
+
+    RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("term", DataType::Utf8, false),
+            Field::new("coefficient", DataType::Float64, false),
+            Field::new("std_error", DataType::Float64, false),
+            Field::new("t_stat", DataType::Float64, false),
+            Field::new("p_value", DataType::Float64, false),
+            Field::new("r_squared", DataType::Float64, false),
+            Field::new("n_obs", DataType::Float64, false),
+        ])),
+        vec![
+            Arc::new(StringArray::from(terms)),
+            Arc::new(Float64Array::from(coefficients)),
+            Arc::new(Float64Array::from(std_errors)),
+            Arc::new(Float64Array::from(t_stats)),
+            Arc::new(Float64Array::from(p_values)),
+            Arc::new(Float64Array::from(r_squared)),
+            Arc::new(Float64Array::from(n_obs)),
+        ],
+    )
+    .expect("failed to build regression result batch")
+}
+
+// =====================================================================
+// Node
+// =====================================================================
+
+/// A transform node that fits an OLS linear regression on the input DataFrame.
+#[derive(Clone)]
+pub struct LinearRegressionNode {
+    meta: NodeMeta,
+    x_columns: Vec<String>,
+    y_column: String,
+    intercept: bool,
+    output_df_name: String,
+}
+
+impl LinearRegressionNode {
+    pub fn new(
+        meta: NodeMeta,
+        x_columns: Vec<String>,
+        y_column: String,
+        intercept: bool,
+        output_df_name: String,
+    ) -> Self {
+        Self {
+            meta,
+            x_columns,
+            y_column,
+            intercept,
+            output_df_name,
+        }
+    }
+}
+
+#[async_trait]
+impl DagNode for LinearRegressionNode {
+    fn meta(&self) -> &NodeMeta {
+        &self.meta
+    }
+
+    fn clone_box(&self) -> Box<dyn DagNode> {
+        Box::new((*self).clone())
+    }
+
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
+        let input = inputs.first().ok_or(LinearRegressionError::EmptyInput)?;
+        let batches = input
+            .data
+            .clone()
+            .collect()
+            .await
+            .map_err(|e| DagError::NodeError {
+                node_type: "linear_regression".to_string(),
+                msg: format!("collect failed: {e}"),
+            })?;
+
+        // Extract Y column.
+        let y = extract_column(&batches, &self.y_column)?;
+
+        // Extract each X column.
+        let mut x_owned: Vec<Vec<f64>> = Vec::with_capacity(self.x_columns.len());
+        for col_name in &self.x_columns {
+            let x = extract_column(&batches, col_name)?;
+            x_owned.push(x);
+        }
+        let x_slices: Vec<&[f64]> = x_owned.iter().map(|v| v.as_slice()).collect();
+
+        // Run OLS.
+        let reg = stat_primitives::regression::ols(&x_slices, &y, self.intercept)
+            .map_err(|e| LinearRegressionError::Regression(e.to_string()))?;
+
+        // Build output batch → DataFrame.
+        let batch = build_result_batch(&reg, self.intercept);
+        let ctx = datafusion::prelude::SessionContext::new();
+        let df = ctx
+            .read_batch(batch)
+            .map_err(|e| DagError::NodeError {
+                node_type: "linear_regression".to_string(),
+                msg: format!("read_batch failed: {e}"),
+            })?;
+
+        let mut res: NamedDataFrames = NamedDataFrames::new();
+        res.insert(self.output_df_name.clone(), df);
+        Ok(res)
+    }
+}
+
+// =====================================================================
+// Tests
+// =====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::{Float64Array, RecordBatch};
+    use arrow_schema::{DataType, Field, Schema};
+    use std::sync::Arc;
+
+    /// Helper: build a simple `RecordBatch` from named float64 columns.
+    fn make_batch(columns: Vec<(&str, Vec<f64>)>) -> RecordBatch {
+        let fields: Vec<Field> = columns
+            .iter()
+            .map(|(name, _)| Field::new(*name, DataType::Float64, false))
+            .collect();
+        let arrays: Vec<Arc<dyn Array>> = columns
+            .iter()
+            .map(|(_, vals)| Arc::new(Float64Array::from(vals.clone())) as Arc<dyn Array>)
+            .collect();
+        RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_perfect_fit() {
+        // y = 2·x + 1, no noise
+        let x: Vec<f64> = (0..5).map(|i| i as f64).collect();
+        let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 1.0).collect();
+        let batch = make_batch(vec![("x", x), ("y", y)]);
+
+        let meta = NodeMeta::new("lr");
+        let mut node = LinearRegressionNode::new(
+            meta,
+            vec!["x".to_string()],
+            "y".to_string(),
+            true,
+            "out".to_string(),
+        );
+        let input = super::super::meta::NodeInput {
+            df_name: "src".to_string(),
+            data: datafusion::prelude::SessionContext::new()
+                .read_batch(batch)
+                .unwrap(),
+        };
+        let outs = node.execute(&[input]).await.unwrap();
+        assert_eq!(outs.len(), 1);
+        let df = outs["out"].clone();
+        let rows = df.collect().await.unwrap();
+        let total: usize = rows.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total, 2); // intercept + x1
+
+        // Verify the fitted coefficients: intercept ≈ 1.0, slope ≈ 2.0.
+        let coeff_col = rows
+            .iter()
+            .flat_map(|b| {
+                b.column(1)
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .unwrap()
+                    .iter()
+            })
+            .map(|v| v.unwrap())
+            .collect::<Vec<f64>>();
+        assert!(
+            (coeff_col[0] - 1.0).abs() < 1e-9,
+            "intercept should be ~1.0, got {}",
+            coeff_col[0]
+        );
+        assert!(
+            (coeff_col[1] - 2.0).abs() < 1e-9,
+            "slope should be ~2.0, got {}",
+            coeff_col[1]
+        );
+
+        // R² for a perfect fit is 1.0.
+        let r2 = rows
+            .iter()
+            .flat_map(|b| {
+                b.column(5)
+                    .as_any()
+                    .downcast_ref::<Float64Array>()
+                    .unwrap()
+                    .iter()
+            })
+            .map(|v| v.unwrap())
+            .next()
+            .unwrap();
+        assert!((r2 - 1.0).abs() < 1e-9, "R² should be ~1.0, got {}", r2);
+    }
+
+    #[tokio::test]
+    async fn test_no_intercept() {
+        let x: Vec<f64> = (1..6).map(|i| i as f64).collect();
+        let y: Vec<f64> = x.iter().map(|v| 3.0 * v).collect();
+        let batch = make_batch(vec![("x", x), ("y", y)]);
+
+        let mut node = LinearRegressionNode::new(
+            NodeMeta::new("lr"),
+            vec!["x".to_string()],
+            "y".to_string(),
+            false,
+            "out".to_string(),
+        );
+        let input = super::super::meta::NodeInput {
+            df_name: "src".to_string(),
+            data: datafusion::prelude::SessionContext::new()
+                .read_batch(batch)
+                .unwrap(),
+        };
+        let outs = node.execute(&[input]).await.unwrap();
+        let rows = outs["out"].clone().collect().await.unwrap();
+        assert_eq!(rows.iter().map(|b| b.num_rows()).sum::<usize>(), 1); // only slope
+    }
+}

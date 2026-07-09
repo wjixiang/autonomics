@@ -45,6 +45,20 @@ impl DataEngineServer {
             DataEngineCmd::AddSinkNode { id, sink, reply } => {
                 let _ = reply.send(self.engine.sink_node(id, sink).map(|_| ()));
             }
+            DataEngineCmd::AddLinearRegressionNode {
+                id,
+                x_columns,
+                y_column,
+                intercept,
+                output_df_name,
+                reply,
+            } => {
+                let _ = reply.send(
+                    self.engine
+                        .linear_regression_node(id, x_columns, y_column, intercept, output_df_name)
+                        .map(|_| ()),
+                );
+            }
             DataEngineCmd::AddEdge { from, to, reply } => {
                 let _ = reply.send(self.engine.add_edge(from, to).map(|_| ()));
             }
@@ -133,6 +147,29 @@ impl DataEngineClient {
             DataEngineCmd::AddSinkNode {
                 id,
                 sink,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
+    }
+
+    pub async fn add_linear_regression_node(
+        &self,
+        id: String,
+        x_columns: Vec<String>,
+        y_column: String,
+        intercept: bool,
+        output_df_name: String,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::AddLinearRegressionNode {
+                id,
+                x_columns,
+                y_column,
+                intercept,
+                output_df_name,
                 reply: reply_tx,
             },
             reply_rx,

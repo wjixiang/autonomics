@@ -23,6 +23,8 @@ petgraph = "0.8"
 tracing.workspace = true
 futures.workspace = true
 blake3 = "1.8.5"
+derive_more.workspace = true
+stat-primitives = { path = "../stat-primitives" }
 
 [dev-dependencies]
 datalake = { path = "../datalake" }

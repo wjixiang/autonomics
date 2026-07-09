@@ -5,12 +5,14 @@
 //! [`source`], [`sql_node`], and [`sink`].
 
 pub mod cache_source;
+pub mod linear_regression;
 pub mod meta;
 pub mod mock_node;
 pub mod sink;
 pub mod source;
 pub mod sql_node;
 
+pub use linear_regression::LinearRegressionNode;
 pub use meta::{DagNode, NodeId, NodeInput, NodeMeta};
 pub use sink::{Sink, SinkNode, WriteFormat};
 pub use source::{FileFormat, Source, SourceNode};

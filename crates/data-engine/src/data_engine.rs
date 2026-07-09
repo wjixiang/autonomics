@@ -14,7 +14,9 @@ pub mod dag;
 pub mod error;
 pub mod nodes;
 
-pub use nodes::{FileFormat, Sink, SinkNode, Source, SourceNode, SqlNode, WriteFormat};
+pub use nodes::{
+    FileFormat, LinearRegressionNode, Sink, SinkNode, Source, SourceNode, SqlNode, WriteFormat,
+};
 
 /// Convenience alias for the default engine backed by a REST Iceberg catalog.
 pub type IcebergDataEngine = DataEngine<RestCatalog>;
@@ -148,6 +150,34 @@ impl<R: Catalog> DataEngine<R> {
         let id = id.into();
         let meta = self.crate_node_meta(id.clone());
         self.dag.add_node(id, Box::new(SinkNode::new(meta, sink)))?;
+        Ok(self)
+    }
+
+    /// Convenience: add a [`LinearRegressionNode`] (chaining-safe).
+    ///
+    /// Fits an OLS regression of `y_column` on `x_columns` over the input
+    /// DataFrame produced by upstream nodes. When `intercept` is true, the
+    /// model includes an intercept term (reported as the first row).
+    pub fn linear_regression_node(
+        &mut self,
+        id: impl Into<String>,
+        x_columns: Vec<String>,
+        y_column: impl Into<String>,
+        intercept: bool,
+        output_df_name: impl Into<String>,
+    ) -> Result<&mut Self> {
+        let id = id.into();
+        let meta = self.crate_node_meta(id.clone());
+        self.dag.add_node(
+            id,
+            Box::new(LinearRegressionNode::new(
+                meta,
+                x_columns,
+                y_column.into(),
+                intercept,
+                output_df_name.into(),
+            )),
+        )?;
         Ok(self)
     }
 

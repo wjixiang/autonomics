@@ -23,6 +23,14 @@ pub enum DataEngineCmd {
         sink: Sink,
         reply: oneshot::Sender<EngineResult<()>>,
     },
+    AddLinearRegressionNode {
+        id: String,
+        x_columns: Vec<String>,
+        y_column: String,
+        intercept: bool,
+        output_df_name: String,
+        reply: oneshot::Sender<EngineResult<()>>,
+    },
     AddEdge {
         from: String,
         to: String,
