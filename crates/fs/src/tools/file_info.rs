@@ -27,7 +27,8 @@ impl ToolFunction for FileInfoTool {
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
         let op = &self.storage.op;
-        let meta = op.stat(&input.path).await.map_err(|e| e.to_string())?;
+        let path = OpendalFileStorage::normalize_path(&input.path);
+        let meta = op.stat(&path).await.map_err(|e| e.to_string())?;
 
         Ok(AgentToolResult::success_json(serde_json::json!({
             "path": input.path,

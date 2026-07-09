@@ -31,11 +31,12 @@ impl ToolFunction for FileReadTool {
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
         let op = &self.storage.op;
+        let path = OpendalFileStorage::normalize_path(&input.path);
         let offset = input.offset.unwrap_or(0);
 
         let buf = if let Some(limit) = input.limit {
             let reader = op
-                .reader(&input.path)
+                .reader(&path)
                 .await
                 .map_err(|e| e.to_string())?;
             reader
@@ -43,7 +44,7 @@ impl ToolFunction for FileReadTool {
                 .await
                 .map_err(|e| e.to_string())?
         } else {
-            op.read(&input.path).await.map_err(|e| e.to_string())?
+            op.read(&path).await.map_err(|e| e.to_string())?
         };
 
         let content = buf.to_vec();

@@ -12,7 +12,7 @@ agentik-sdk = { path = "../agentik-sdk" }
 datafusion = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
-opendal = "0.57"
+opendal = { version = "0.57", features = ["services-fs"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

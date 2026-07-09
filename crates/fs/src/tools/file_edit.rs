@@ -39,7 +39,8 @@ impl ToolFunction for FileEditTool {
         }
 
         let op = &self.storage.op;
-        let buf = op.read(&input.path).await.map_err(|e| e.to_string())?;
+        let path = OpendalFileStorage::normalize_path(&input.path);
+        let buf = op.read(&path).await.map_err(|e| e.to_string())?;
         let text = String::from_utf8(buf.to_vec()).map_err(|e| e.to_string())?;
 
         let replace_all = input.replace_all.unwrap_or(false);
@@ -66,7 +67,7 @@ impl ToolFunction for FileEditTool {
             }
         };
 
-        op.write(&input.path, new_text.into_bytes())
+        op.write(&path, new_text.into_bytes())
             .await
             .map_err(|e| e.to_string())?;
 

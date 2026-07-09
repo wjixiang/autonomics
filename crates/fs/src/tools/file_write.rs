@@ -28,9 +28,10 @@ impl ToolFunction for FileWriteTool {
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
         let op = &self.storage.op;
+        let path = OpendalFileStorage::normalize_path(&input.path);
         let size = input.content.len() as u64;
 
-        op.write(&input.path, input.content.into_bytes())
+        op.write(&path, input.content.into_bytes())
             .await
             .map_err(|e| e.to_string())?;
 

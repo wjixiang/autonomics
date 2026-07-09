@@ -26,8 +26,9 @@ impl ToolFunction for FileDeleteTool {
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
         let op = &self.storage.op;
+        let path = OpendalFileStorage::normalize_path(&input.path);
 
-        op.delete(&input.path)
+        op.delete(&path)
             .await
             .map_err(|e| e.to_string())?;
 

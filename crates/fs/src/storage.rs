@@ -27,6 +27,26 @@ pub struct OpendalFileStorage {
 }
 
 impl OpendalFileStorage {
+    /// Normalize a user-supplied path to always start with `/` so that
+    /// OpenDAL resolves it relative to the configured root (not the process cwd).
+    /// - `"/foo"`           → `"/foo"` (already absolute within the virtual root)
+    /// - `"foo"`            → `"/foo"` (relative → made absolute)
+    /// - `"./foo"`          → `"/foo"` (leading `./` stripped)
+    /// - `"./foo/bar/.."`   → `"/foo/bar/.."` (only the leading `./` is stripped; further normalization is left to OpenDAL)
+    /// - `""`               → `"/"`
+    pub fn normalize_path(path: &str) -> String {
+        let trimmed = path
+            .trim_matches('/')
+            .strip_prefix("./")
+            .unwrap_or(path.trim_matches('/'));
+        let trimmed = trimmed.strip_prefix('.').unwrap_or(trimmed);
+        if trimmed.is_empty() {
+            "/".to_string()
+        } else {
+            format!("/{trimmed}")
+        }
+    }
+
     /// Create a new storage backed by the local filesystem at the given root.
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
@@ -256,19 +276,27 @@ impl ObjectStore for OpendalFileStorage {
         Self: 'async_trait,
     {
         let scan_path = prefix.map(|p| p.to_string()).unwrap_or_default();
+        // opendal Fs requires a trailing '/' to list children of a directory.
+        let scan_path = if scan_path.is_empty() || scan_path.ends_with('/') {
+            scan_path
+        } else {
+            format!("{scan_path}/")
+        };
         let op = self.op.clone();
         Box::pin(async move {
-            let entries = op
-                .list(&scan_path)
+            let mut lister = op
+                .lister_with(&scan_path)
+                .recursive(false)
                 .await
                 .map_err(opendal_to_object_store_error)?;
 
             let mut objects = Vec::new();
             let mut common_prefixes = Vec::new();
 
-            for entry in &entries {
+            while let Some(entry) = lister.next().await {
+                let entry = entry.map_err(opendal_to_object_store_error)?;
                 if entry.metadata().is_file() {
-                    if let Some(meta) = entry_to_meta(entry) {
+                    if let Some(meta) = entry_to_meta(&entry) {
                         objects.push(meta);
                     }
                 } else if entry.metadata().is_dir() {
@@ -399,4 +427,43 @@ fn entry_to_meta(entry: &opendal::Entry) -> Option<ObjectMeta> {
         return None;
     }
     opendal_meta_to_object_meta(entry.path(), meta).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OpendalFileStorage;
+
+    #[test]
+    fn normalize_absolute_path() {
+        assert_eq!(OpendalFileStorage::normalize_path("/foo"), "/foo");
+    }
+
+    #[test]
+    fn normalize_relative_path() {
+        assert_eq!(OpendalFileStorage::normalize_path("foo"), "/foo");
+    }
+
+    #[test]
+    fn normalize_dot_slash_path() {
+        assert_eq!(OpendalFileStorage::normalize_path("./foo"), "/foo");
+        assert_eq!(OpendalFileStorage::normalize_path("./foo/bar"), "/foo/bar");
+    }
+
+    #[test]
+    fn normalize_root() {
+        assert_eq!(OpendalFileStorage::normalize_path("/"), "/");
+        assert_eq!(OpendalFileStorage::normalize_path(""), "/");
+        assert_eq!(OpendalFileStorage::normalize_path("."), "/");
+        assert_eq!(OpendalFileStorage::normalize_path("./"), "/");
+    }
+
+    #[test]
+    fn normalize_slashes_only() {
+        assert_eq!(OpendalFileStorage::normalize_path("///"), "/");
+    }
+
+    #[test]
+    fn normalize_leading_slash_dot_slash() {
+        assert_eq!(OpendalFileStorage::normalize_path("/./foo"), "/foo");
+    }
 }
