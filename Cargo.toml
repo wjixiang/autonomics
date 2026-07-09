@@ -14,8 +14,11 @@ members = [
   "crates/eutils-rs",
   "crates/agentik-runtime",
   "crates/fs",
-  "crates/datalake", "crates/biofusion", "crates/data-engine-tools",
+  "crates/datalake",
+  "crates/biofusion",
+  "crates/data-engine-tools",
   "crates/mermaid-text",
+  "crates/biofusion-cache",
 ]
 
 [workspace.package]
@@ -45,14 +48,14 @@ iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016"
 iceberg-catalog-rest = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016" }
 iceberg-storage-opendal = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016" }
 iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016" }
-arrow = "58.3.0"
+arrow = { version = "58.3.0", features = ["prettyprint"] }
 arrow-array = "58.3.0"
 arrow-schema = "58.3.0"
 arrow-csv = "58.3.0"
 arrow-select = "58.3.0"
 arrow-ord = "58.3.0"
 parquet = "58.3.0"
-datafusion = "53"
+datafusion = { version = "53" }
 noodles = { version = "0.107.0", features = ["vcf"] }
 oxbow = "0.8.0"
 

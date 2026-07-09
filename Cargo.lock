@@ -831,6 +831,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "biofusion-cache"
+version = "0.1.0"
+dependencies = [
+ "biofusion",
+ "derive_more",
+ "iceberg",
+ "iceberg-catalog-rest",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1633,6 +1643,7 @@ dependencies = [
  "blake3",
  "datafusion",
  "datalake",
+ "derive_more",
  "fs",
  "futures",
  "iceberg",
@@ -1641,6 +1652,7 @@ dependencies = [
  "petgraph",
  "serde",
  "serde_json",
+ "stat-primitives",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1653,8 +1665,11 @@ dependencies = [
  "agentik-core",
  "agentik-proc",
  "agentik-sdk",
+ "arrow",
+ "arrow-array",
  "async-trait",
  "data-engine",
+ "datafusion",
  "fs",
  "serde",
  "serde_json",
