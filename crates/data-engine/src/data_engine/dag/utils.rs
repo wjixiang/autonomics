@@ -2,22 +2,26 @@ use std::collections::VecDeque;
 
 use datafusion::common::HashMap;
 
-use crate::data_engine::dag::{NodeId, NodeInput, RuntimeStatus, graph::NamedDataFrames};
+use crate::data_engine::dag::{NodeId, NodeInput, RuntimeStatus, graph::{EdgeLabel, NamedDataFrames}};
 
 /// Gather a node's predecessor outputs into [`NodeInput`]s, in declared edge
 /// order, cloning the [`DataFrame`] handles (cheap — they are `Arc` internally).
+///
+/// Each input's `df_name` is taken from the edge's port label (not the
+/// upstream node's `output_df_name`), ensuring globally-unique table names
+/// in the shared `SessionContext`.
 pub fn build_inputs(
     id: &str,
-    incoming: &HashMap<NodeId, Vec<NodeId>>,
+    incoming: &HashMap<NodeId, Vec<(NodeId, EdgeLabel)>>,
     outputs: &HashMap<NodeId, NamedDataFrames>,
 ) -> Vec<NodeInput> {
     let mut inputs = Vec::new();
     if let Some(edges) = incoming.get(id) {
-        for from in edges {
+        for (from, edge) in edges {
             if let Some(pred_outputs) = outputs.get(from) {
-                for (df_name, df) in pred_outputs.iter() {
+                for (_df_name, df) in pred_outputs.iter() {
                     inputs.push(NodeInput {
-                        df_name: df_name.to_string(),
+                        df_name: edge.port.clone(),
                         data: df.clone(),
                     });
                 }

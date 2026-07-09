@@ -18,8 +18,9 @@ pub type NodeId = String;
 #[derive(Debug, Clone)]
 pub struct NodeInput {
     /// Name under which `data` is registered for the consuming node
-    /// (e.g. the table name a `SqlNode` references). Positional default is
-    /// `"src"`, `"src_2"`, … assigned by the scheduler.
+    /// (e.g. the table name a `SqlNode` references). This is the edge's
+    /// **port label** — either an explicit name supplied to `add_edge`,
+    /// or an auto-generated `"{upstream}__{downstream}"` alias.
     pub df_name: String,
     pub data: DataFrame,
 }

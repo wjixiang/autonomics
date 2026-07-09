@@ -34,6 +34,7 @@ pub enum DataEngineCmd {
     AddEdge {
         from: String,
         to: String,
+        port: Option<String>,
         reply: oneshot::Sender<EngineResult<()>>,
     },
     RunDag {

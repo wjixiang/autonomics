@@ -48,9 +48,9 @@ async fn insurance_pipeline_runs() {
             },
         )
         .unwrap()
-        .add_edge("load", "agg")
+        .add_edge("load", "agg", Some("src".to_string()))
         .unwrap()
-        .add_edge("agg", "out")
+        .add_edge("agg", "out", None)
         .unwrap();
 
     let report = engine.run().await.expect("run should succeed");
@@ -94,9 +94,9 @@ async fn fanout_branch() {
             "virginica",
         )
         .unwrap()
-        .add_edge("load", "setosa")
+        .add_edge("load", "setosa", Some("src".to_string()))
         .unwrap()
-        .add_edge("load", "virginica")
+        .add_edge("load", "virginica", Some("src_2".to_string()))
         .unwrap();
 
     let report = engine.run().await.expect("run should succeed");
@@ -106,6 +106,98 @@ async fn fanout_branch() {
         report.statuses, report.errors
     );
     for n in ["load", "setosa", "virginica"] {
+        assert_eq!(report.status(n), Some(RuntimeStatus::Success), "{n}");
+    }
+}
+
+#[tokio::test]
+async fn fanout_auto_port() {
+    // Same source → two SqlNodes using auto-generated port names.
+    // Auto-generated ports are "{from}__{to}", so SQL must reference those names.
+    let mut engine = DataEngine::builder().build();
+    let iris = datasets_dir().join("Iris.csv");
+
+    engine
+        .source_node(
+            "load",
+            Source::File {
+                path: iris.to_str().unwrap().to_string(),
+                format: None,
+            },
+            "load",
+        )
+        .unwrap()
+        .sql_node(
+            "setosa",
+            r#"SELECT * FROM load__setosa WHERE "Species" = 'Iris-setosa'"#,
+            "setosa",
+        )
+        .unwrap()
+        .sql_node(
+            "virginica",
+            r#"SELECT * FROM load__virginica WHERE "Species" = 'Iris-virginica'"#,
+            "virginica",
+        )
+        .unwrap()
+        .add_edge("load", "setosa", None)
+        .unwrap()
+        .add_edge("load", "virginica", None)
+        .unwrap();
+
+    let report = engine.run().await.expect("run should succeed");
+    assert!(
+        report.ok,
+        "statuses: {:?}; errors: {:?}",
+        report.statuses, report.errors
+    );
+    for n in ["load", "setosa", "virginica"] {
+        assert_eq!(report.status(n), Some(RuntimeStatus::Success), "{n}");
+    }
+}
+
+#[tokio::test]
+async fn fanout_concurrent() {
+    // Fan-out with concurrency=2 to exercise the concurrent registration path.
+    // Both SqlNodes use explicit port names to avoid any name collision.
+    let mut engine = DataEngine::builder().build().with_config(SchedulerConfig {
+        max_concurrency: 2,
+    });
+    let iris = datasets_dir().join("Iris.csv");
+
+    engine
+        .source_node(
+            "load",
+            Source::File {
+                path: iris.to_str().unwrap().to_string(),
+                format: None,
+            },
+            "load",
+        )
+        .unwrap()
+        .sql_node(
+            "branch_a",
+            r#"SELECT COUNT(*) AS cnt FROM iris_a WHERE "Species" = 'Iris-setosa'"#,
+            "branch_a",
+        )
+        .unwrap()
+        .sql_node(
+            "branch_b",
+            r#"SELECT COUNT(*) AS cnt FROM iris_b WHERE "Species" = 'Iris-virginica'"#,
+            "branch_b",
+        )
+        .unwrap()
+        .add_edge("load", "branch_a", Some("iris_a".to_string()))
+        .unwrap()
+        .add_edge("load", "branch_b", Some("iris_b".to_string()))
+        .unwrap();
+
+    let report = engine.run().await.expect("run should succeed");
+    assert!(
+        report.ok,
+        "statuses: {:?}; errors: {:?}",
+        report.statuses, report.errors
+    );
+    for n in ["load", "branch_a", "branch_b"] {
         assert_eq!(report.status(n), Some(RuntimeStatus::Success), "{n}");
     }
 }
@@ -140,9 +232,9 @@ async fn cycle_is_rejected() {
         .unwrap()
         .sql_node("b", "SELECT 1", "b")
         .unwrap()
-        .add_edge("a", "b")
+        .add_edge("a", "b", None)
         .unwrap()
-        .add_edge("b", "a")
+        .add_edge("b", "a", None)
         .unwrap();
 
     let err = engine.run().await.unwrap_err();
@@ -175,7 +267,7 @@ async fn failure_cascades() {
     engine
         .sql_node("child", "SELECT 1", "child")
         .unwrap()
-        .add_edge("boom", "child")
+        .add_edge("boom", "child", None)
         .unwrap();
 
     let report = engine.run().await.expect("run completes even on failure");

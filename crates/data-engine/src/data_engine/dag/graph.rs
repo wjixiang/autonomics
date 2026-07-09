@@ -21,6 +21,18 @@ use super::{DagNode, NodeId};
 
 pub type NamedDataFrames = HashMap<String, DataFrame>;
 
+/// Metadata attached to every edge in the graph.
+///
+/// The `port` field is the table/view name under which the upstream node's
+/// output is registered for the downstream consumer (e.g. the name a
+/// [`SqlNode`](crate::data_engine::nodes::SqlNode) references in its SQL).
+#[derive(Debug, Clone)]
+pub struct EdgeLabel {
+    /// The port (table alias) name for this edge. Auto-generated as
+    /// `"{from}__{to}"` when not explicitly provided by the caller.
+    pub port: String,
+}
+
 /// Module-local Result alias — every fallible operation in this module fails
 /// with [`DagError`].
 pub type Result<T> = std::result::Result<T, DagError>;
@@ -38,8 +50,8 @@ pub type Result<T> = std::result::Result<T, DagError>;
 pub struct DAG {
     /// Node payloads, keyed by id. Public so external tooling can introspect.
     pub nodes: HashMap<NodeId, Box<dyn DagNode>>,
-    /// Connectivity index.
-    graph: DiGraph<NodeId, ()>,
+    /// Connectivity index (edge weight carries the port label).
+    graph: DiGraph<NodeId, EdgeLabel>,
     pub id_to_idx: HashMap<NodeId, NodeIndex>,
     /// Per-node runtime status. Populated on [`Self::run`], queryable via [`Self::status`].
     pub statuses: HashMap<NodeId, RuntimeStatus>,
@@ -103,14 +115,14 @@ impl DAG {
         // Precompute adjacency + per-node port assignment so the dispatch loop only
         // needs a single mutable borrow of `self`.
         let mut successors: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-        // (predecessor id, resolved input port) per node, in declared edge order
-        let mut incoming: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        // (predecessor id, edge port label) per node, in declared edge order
+        let mut incoming: HashMap<NodeId, Vec<(NodeId, super::graph::EdgeLabel)>> = HashMap::new();
         // unresolved-predecessor count per node
         let mut pending: HashMap<NodeId, usize> = HashMap::new();
         for id in &all_ids {
             successors.insert(id.clone(), self.successors(id));
             pending.insert(id.clone(), self.predecessors(id).len());
-            let inc = self.incoming_edges(id);
+            let inc = self.incoming_edges_with_ports(id);
             incoming.insert(id.clone(), inc);
         }
 
@@ -237,7 +249,16 @@ impl DAG {
     }
 
     /// Add a dependency edge `from -> to`. Both endpoints must already exist.
-    pub fn add_edge(&mut self, from: impl Into<NodeId>, to: impl Into<NodeId>) -> Result<()> {
+    ///
+    /// `port` is the table alias under which the upstream output will be
+    /// registered for the downstream consumer. When `None`, a name is
+    /// auto-generated as `"{from}__{to}"`.
+    pub fn add_edge(
+        &mut self,
+        from: impl Into<NodeId>,
+        to: impl Into<NodeId>,
+        port: Option<String>,
+    ) -> Result<()> {
         let from = from.into();
         let to = to.into();
         if !self.nodes.contains_key(&from) {
@@ -246,8 +267,9 @@ impl DAG {
         if !self.nodes.contains_key(&to) {
             return Err(DagError::UnknownNode(to));
         }
+        let port = port.unwrap_or_else(|| format!("{from}__{to}"));
         if let (Some(&a), Some(&b)) = (self.id_to_idx.get(&from), self.id_to_idx.get(&to)) {
-            self.graph.add_edge(a, b, ());
+            self.graph.add_edge(a, b, EdgeLabel { port });
         }
         Ok(())
     }
@@ -302,12 +324,21 @@ impl DAG {
 
     /// Incoming edges for `id`, in insertion order. Returns predecessor ids.
     pub fn incoming_edges(&self, id: &str) -> Vec<NodeId> {
+        self.incoming_edges_with_ports(id)
+            .into_iter()
+            .map(|(nid, _)| nid)
+            .collect()
+    }
+
+    /// Incoming edges for `id` with their port labels, in insertion order.
+    /// Returns `(predecessor_id, edge_label)` pairs.
+    pub fn incoming_edges_with_ports(&self, id: &str) -> Vec<(NodeId, EdgeLabel)> {
         let Some(&idx) = self.id_to_idx.get(id) else {
             return Vec::new();
         };
         self.graph
             .edges_directed(idx, Direction::Incoming)
-            .map(|e| self.graph[e.source()].clone())
+            .map(|e| (self.graph[e.source()].clone(), e.weight().clone()))
             .collect()
     }
 
@@ -434,10 +465,10 @@ mod tests {
         for id in ["a", "b", "c", "d"] {
             add(&mut dag, id);
         }
-        dag.add_edge("a", "b").unwrap();
-        dag.add_edge("a", "c").unwrap();
-        dag.add_edge("b", "d").unwrap();
-        dag.add_edge("c", "d").unwrap();
+        dag.add_edge("a", "b", None).unwrap();
+        dag.add_edge("a", "c", None).unwrap();
+        dag.add_edge("b", "d", None).unwrap();
+        dag.add_edge("c", "d", None).unwrap();
         dag
     }
 
@@ -482,8 +513,8 @@ mod tests {
         let mut dag = DAG::default();
         add(&mut dag, "x");
         add(&mut dag, "y");
-        dag.add_edge("x", "y").unwrap();
-        dag.add_edge("y", "x").unwrap();
+        dag.add_edge("x", "y", None).unwrap();
+        dag.add_edge("y", "x", None).unwrap();
         let err = dag.validate().unwrap_err();
         assert!(matches!(err, DagError::Cycle(_)), "{err:?}");
         let err = dag.topo_order().unwrap_err();
@@ -497,7 +528,7 @@ mod tests {
         add(&mut dag, "a");
         // edge to missing node
         assert!(matches!(
-            dag.add_edge("a", "ghost"),
+            dag.add_edge("a", "ghost", None),
             Err(DagError::UnknownNode(_))
         ));
         // duplicate id
@@ -513,8 +544,8 @@ mod tests {
         for id in ["src", "a", "b"] {
             add(&mut dag, id);
         }
-        dag.add_edge("src", "a").unwrap();
-        dag.add_edge("src", "b").unwrap();
+        dag.add_edge("src", "a", None).unwrap();
+        dag.add_edge("src", "b", None).unwrap();
 
         assert_eq!(dag.predecessors("a").len(), 1);
         assert_eq!(dag.predecessors("a")[0], "src");
@@ -523,6 +554,49 @@ mod tests {
         assert_eq!(succ, vec!["a", "b"]);
         let inc = dag.incoming_edges("a");
         assert_eq!(inc.len(), 1);
+    }
+
+    #[test]
+    fn edge_port_auto_generation() {
+        let mut dag = DAG::default();
+        for id in ["src", "a", "b"] {
+            add(&mut dag, id);
+        }
+        dag.add_edge("src", "a", None).unwrap();
+        dag.add_edge("src", "b", None).unwrap();
+
+        let ports_a = dag.incoming_edges_with_ports("a");
+        assert_eq!(ports_a.len(), 1);
+        assert_eq!(ports_a[0].0, "src");
+        assert_eq!(ports_a[0].1.port, "src__a");
+
+        let ports_b = dag.incoming_edges_with_ports("b");
+        assert_eq!(ports_b.len(), 1);
+        assert_eq!(ports_b[0].1.port, "src__b");
+    }
+
+    #[test]
+    fn edge_port_explicit() {
+        let mut dag = DAG::default();
+        for id in ["x", "y"] {
+            add(&mut dag, id);
+        }
+        dag.add_edge("x", "y", Some("my_port".to_string())).unwrap();
+
+        let ports = dag.incoming_edges_with_ports("y");
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0].1.port, "my_port");
+    }
+
+    #[test]
+    fn diamond_edge_ports() {
+        let dag = get_diamond_dag();
+        // Diamond: a→b, a→c, b→d, c→d
+        let ports_d = dag.incoming_edges_with_ports("d");
+        assert_eq!(ports_d.len(), 2);
+        let port_names: Vec<&str> = ports_d.iter().map(|(_, e)| e.port.as_str()).collect();
+        assert!(port_names.contains(&"b__d"));
+        assert!(port_names.contains(&"c__d"));
     }
 
     #[test]

@@ -182,13 +182,16 @@ impl<R: Catalog> DataEngine<R> {
     }
 
     /// Add a dependency `from -> to`. The downstream node receives the upstream
-    /// output registered under the upstream node's output DataFrame name.
+    /// output registered under the given `port` name (the table alias visible
+    /// in SQL queries). When `port` is `None`, a name is auto-generated as
+    /// `"{from}__{to}"`.
     pub fn add_edge(
         &mut self,
         from: impl Into<String>,
         to: impl Into<String>,
+        port: Option<String>,
     ) -> Result<&mut Self> {
-        self.dag.add_edge(from, to)?;
+        self.dag.add_edge(from, to, port)?;
         Ok(self)
     }
 

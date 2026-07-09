@@ -59,8 +59,8 @@ impl DataEngineServer {
                         .map(|_| ()),
                 );
             }
-            DataEngineCmd::AddEdge { from, to, reply } => {
-                let _ = reply.send(self.engine.add_edge(from, to).map(|_| ()));
+            DataEngineCmd::AddEdge { from, to, port, reply } => {
+                let _ = reply.send(self.engine.add_edge(from, to, port).map(|_| ()));
             }
             DataEngineCmd::RunDag { reply } => {
                 let _ = reply.send(self.engine.run().await);
@@ -177,12 +177,13 @@ impl DataEngineClient {
         .await
     }
 
-    pub async fn add_edge(&self, from: String, to: String) -> Result<()> {
+    pub async fn add_edge(&self, from: String, to: String, port: Option<String>) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::AddEdge {
                 from,
                 to,
+                port,
                 reply: reply_tx,
             },
             reply_rx,
