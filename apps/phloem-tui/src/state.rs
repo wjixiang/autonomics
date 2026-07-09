@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use crate::config_db::{ModelInput, ProviderInput, ProviderRow};
 use crate::widgets::input_area::{InputArea, InputState};
@@ -86,12 +87,18 @@ pub enum AgentStatus {
     Error,
 }
 
-/// Whether the agent tab is in browse (j/k scroll) or input (typing) mode.
+/// Modal state of the agent tab's input surface.
+///
+/// The composer is vim-modal: `Browse` scrolls the transcript, `Input` is
+/// insert mode (typing), and `Normal` is vim normal mode (motions/edits).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InputMode {
     #[default]
     Browse,
+    /// Insert mode — keystrokes insert text; Enter sends.
     Input,
+    /// Vim normal mode — keystrokes are motions or edit commands.
+    Normal,
 }
 
 /// Mutable state for the Agent tab.
@@ -120,10 +127,31 @@ pub struct AgentTabState {
     pub input_mode: InputMode,
     /// When true, `clamp_scroll` forces offset to the bottom each frame.
     pub auto_scroll: bool,
+    /// Tracks a pending first `g` press (in browse or vim normal mode) so a
+    /// second `g` (i.e. `gg`) jumps to the top.
+    pub vim_pending_g: bool,
+    /// Accumulated count prefix typed in vim normal mode (e.g. the `3` in
+    /// `3dd`). `0` means no count; commands default to 1.
+    pub vim_count: usize,
+    /// Pending operator awaiting its motion/target in vim normal mode
+    /// (`Some('d')` after pressing `d`, `Some('c')` after pressing `c`).
+    pub vim_pending_op: Option<char>,
+    /// True while an incremental Ctrl+R history search is in progress.
+    pub in_history_search: bool,
+    /// The current Ctrl+R search query (typed by the user).
+    pub history_search_query: String,
+    /// Indices into `input_history` that match `history_search_query`,
+    /// newest-first. Recomputed whenever the query changes.
+    pub history_search_matches: Vec<usize>,
+    /// Selected position within `history_search_matches` (0 = newest match).
+    pub history_search_selected: usize,
+    /// Snapshot of the input buffer saved when Ctrl+R starts, restored on Esc.
+    pub history_search_draft: Option<String>,
     /// Cached total rendered line count (updated every frame).
     pub content_line_count: usize,
     /// Pre-rendered lines cache, rebuilt only when messages change.
-    pub cached_lines: Vec<Line<'static>>,
+    /// Wrapped in `Arc` so cached frames can be shared without cloning.
+    pub cached_lines: Arc<[Line<'static>]>,
     /// The `messages_version` at which `cached_lines` was built.
     pub cached_version: u64,
     /// The terminal width at which `cached_lines` was built.
@@ -153,8 +181,16 @@ impl Default for AgentTabState {
             cache_read_tokens: 0,
             input_mode: InputMode::Browse,
             auto_scroll: true,
+            vim_pending_g: false,
+            vim_count: 0,
+            vim_pending_op: None,
+            in_history_search: false,
+            history_search_query: String::new(),
+            history_search_matches: Vec::new(),
+            history_search_selected: 0,
+            history_search_draft: None,
             content_line_count: 0,
-            cached_lines: Vec::new(),
+            cached_lines: Arc::from(vec![]),
             cached_version: 0,
             cached_width: 0,
             messages_version: 0,

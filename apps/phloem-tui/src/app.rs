@@ -3,7 +3,7 @@ use std::time::Duration;
 use agentik_sdk::AuthMethod;
 use agentik_sdk::model::model_pool::ModelPoolConfig;
 use agentik_sdk::model::{ModelInfo, ProviderConfig};
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::{
     Frame,
     backend::CrosstermBackend,
@@ -19,7 +19,36 @@ use crate::state::{self, AgentStatus, AppState, InputMode, MainTabState};
 use crate::widgets::agent_tab_widget::AgentTabWidget;
 use runtime::AgentRuntime;
 
-const POLL_TIMEOUT: Duration = Duration::from_millis(16);
+const POLL_TIMEOUT_ACTIVE: Duration = Duration::from_millis(16);
+const POLL_TIMEOUT_IDLE: Duration = Duration::from_millis(100);
+
+/// Lines scrolled by a vim-style half-page motion (`d` / `u` in browse mode).
+const HALF_PAGE: usize = 12;
+
+/// Restore the terminal to its normal state: disable mouse capture, leave
+/// alternate screen, and disable raw mode. Called on both normal exit and
+/// panic (via the panic hook).
+fn restore_terminal() -> std::io::Result<()> {
+    crossterm::execute!(
+        stdout(),
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        crossterm::terminal::LeaveAlternateScreen,
+    )?;
+    crossterm::terminal::disable_raw_mode()?;
+    Ok(())
+}
+
+/// Install a panic hook that restores the terminal before running the
+/// original hook. This ensures the user's shell is usable even if the TUI
+/// panics. Modeled after codex's `tui.rs:set_panic_hook`.
+fn set_panic_hook() {
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = restore_terminal();
+        hook(info);
+    }));
+}
 
 pub struct App {
     state: AppState,
@@ -28,6 +57,12 @@ pub struct App {
     /// Kept alive to drive the agent's background event loop task.
     _runtime: tokio::runtime::Runtime,
     conn: Connection,
+    /// Internal event channel for decoupled communication.
+    app_event_rx: std::sync::mpsc::Receiver<crate::app_event::AppEvent>,
+    /// Sender half exposed for subsystems (file search, plugins, etc.)
+    /// to push events into the main loop without direct App access.
+    #[allow(dead_code)]
+    pub(crate) app_event_tx: crate::app_event_sender::AppEventSender,
     /// True when state has changed and a re-render is needed.
     dirty: bool,
     /// Set to break the main event loop so `ratatui::run()` can call `restore()`.
@@ -50,7 +85,9 @@ impl App {
             AgentRuntime::new(&runtime, model_pool).expect("failed to create agent runtime");
 
         let mut state = AppState::default();
-        Self::reload_config(&mut state.config_tab_state, &conn);
+        crate::config_db::reload_config(&mut state.config_tab_state, &conn);
+
+        let (app_event_tx, app_event_rx) = std::sync::mpsc::channel();
 
         Self {
             state,
@@ -58,24 +95,10 @@ impl App {
             agent_runtime,
             _runtime: runtime,
             conn,
+            app_event_rx,
+            app_event_tx: crate::app_event_sender::AppEventSender::new(app_event_tx),
             dirty: true, // render the initial frame
             should_quit: false,
-        }
-    }
-
-    /// Re-read providers and models from the database, clamping selections.
-    fn reload_config(cs: &mut crate::state::ConfigTabState, conn: &Connection) {
-        cs.providers = crate::config_db::ProviderRow::all(conn).unwrap_or_default();
-        cs.models = crate::config_db::ModelRow::all(conn).unwrap_or_default();
-        if !cs.providers.is_empty() && cs.selected_provider >= cs.providers.len() {
-            cs.selected_provider = cs.providers.len() - 1;
-        } else if cs.providers.is_empty() {
-            cs.selected_provider = 0;
-        }
-        if !cs.models.is_empty() && cs.selected_model >= cs.models.len() {
-            cs.selected_model = cs.models.len() - 1;
-        } else if cs.models.is_empty() {
-            cs.selected_model = 0;
         }
     }
 
@@ -173,16 +196,22 @@ impl App {
 
     pub fn start(&mut self) -> color_eyre::Result<()> {
         crossterm::terminal::enable_raw_mode()?;
-        crossterm::execute!(stdout(), crossterm::terminal::EnterAlternateScreen, EnableMouseCapture)?;
+        crossterm::execute!(
+            stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste,
+        )?;
         stdout().flush()?;
+
+        set_panic_hook();
 
         let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
         let result = self.app(&mut terminal);
 
         // Restore terminal on exit (whether normal or error).
-        crossterm::execute!(stdout(), DisableMouseCapture, crossterm::terminal::LeaveAlternateScreen)?;
-        crossterm::terminal::disable_raw_mode()?;
+        let _ = restore_terminal();
 
         result?;
         Ok(())
@@ -193,9 +222,29 @@ impl App {
             if self.should_quit {
                 break Ok(());
             }
+
+            // ── Drain internal app events (non-blocking) ──
+            while let Ok(event) = self.app_event_rx.try_recv() {
+                match event {
+                    crate::app_event::AppEvent::Agent(e) => {
+                        state::apply_event(&mut self.state.agent_tab_state, e);
+                    }
+                    crate::app_event::AppEvent::Quit => {
+                        self.should_quit = true;
+                    }
+                    crate::app_event::AppEvent::ConfigReload => {
+                        crate::config_db::reload_config(
+                            &mut self.state.config_tab_state,
+                            &self.conn,
+                        );
+                    }
+                }
+                self.dirty = true;
+            }
+
             // ── Event handling phase ──
             // Drain all queued input events before rendering.
-            if event::poll(POLL_TIMEOUT)? {
+            if event::poll(self.poll_timeout())? {
                 let mut scroll_delta: i32 = 0;
                 loop {
                     let event = event::read()?;
@@ -224,6 +273,16 @@ impl App {
                 terminal.draw(|f| self.render(f))?;
                 self.dirty = false;
             }
+        }
+    }
+
+    /// Return a poll timeout appropriate for the current agent status.
+    /// When idle we poll less frequently to save CPU; during streaming we
+    /// poll at ~60 fps for smooth text rendering.
+    fn poll_timeout(&self) -> Duration {
+        match self.state.agent_tab_state.status {
+            AgentStatus::Idle => POLL_TIMEOUT_IDLE,
+            _ => POLL_TIMEOUT_ACTIVE,
         }
     }
 
@@ -341,12 +400,16 @@ impl App {
         match ts.input_mode {
             InputMode::Browse => self.handle_browse_key(key),
             InputMode::Input => self.handle_input_key(key),
+            InputMode::Normal => self.handle_normal_key(key),
         }
     }
 
-    /// Key handling in browse mode: j/k scroll, Enter enters input mode.
+    /// Key handling in browse mode (always vim-style): j/k scroll line-by-line,
+    /// d/u half-page, gg top, G bottom, Enter enters the composer (insert mode).
     fn handle_browse_key(&mut self, key: &KeyEvent) {
         let ts = &mut self.state.agent_tab_state;
+        // A non-`g` key cancels a pending first `g` of `gg`.
+        let mut cancel_g = true;
 
         match key.code {
             // j / Down: scroll down (show later content)
@@ -363,33 +426,233 @@ impl App {
             KeyCode::Char('G') => {
                 ts.auto_scroll = true;
             }
-            // g: jump to top
+            // g: first press primes `gg`; second press jumps to top.
             KeyCode::Char('g') => {
-                ts.scroll_offset = 0;
+                if ts.vim_pending_g {
+                    ts.scroll_offset = 0;
+                    ts.auto_scroll = false;
+                    ts.vim_pending_g = false;
+                } else {
+                    ts.vim_pending_g = true;
+                    cancel_g = false;
+                }
+            }
+            // d: half-page down; u: half-page up (vim-style).
+            KeyCode::Char('d') => {
+                ts.scroll_offset = ts.scroll_offset.saturating_add(HALF_PAGE);
                 ts.auto_scroll = false;
             }
-            // Enter: switch to input mode
-            KeyCode::Enter => {
+            KeyCode::Char('u') => {
+                ts.scroll_offset = ts.scroll_offset.saturating_sub(HALF_PAGE);
+                ts.auto_scroll = false;
+            }
+            // Enter / i: enter the composer in insert mode.
+            KeyCode::Enter | KeyCode::Char('i') => {
                 ts.input_mode = InputMode::Input;
             }
             _ => {}
         }
+
+        if cancel_g {
+            ts.vim_pending_g = false;
+        }
+    }
+
+    /// Key handling in vim **normal mode** for the composer. Implements a
+    /// pragmatic vim subset: counts, motions (`h j k l w b e 0 $ gg G`),
+    /// operators (`d`/`c` with `d/w/$/0/b/e`), and insert-entry commands
+    /// (`i a I A o O`). `Esc` exits the composer back to browse.
+    fn handle_normal_key(&mut self, key: &KeyEvent) {
+        let ts = &mut self.state.agent_tab_state;
+
+        // Ctrl+R: incremental history search (works from normal mode too).
+        if !ts.in_history_search
+            && ts.status == AgentStatus::Idle
+            && !ts.input_history.is_empty()
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('r')
+        {
+            ts.in_history_search = true;
+            ts.history_search_query.clear();
+            ts.history_search_draft = Some(ts.input.value());
+            ts.history_search_matches = compute_search_matches(&ts.input_history, "");
+            ts.history_search_selected = 0;
+            load_selected_history_match(ts);
+            reset_vim(ts);
+            return;
+        }
+
+        let c = match key.code {
+            KeyCode::Char(c) => c,
+            // Esc from normal mode leaves the composer entirely.
+            KeyCode::Esc => {
+                reset_vim(ts);
+                ts.input_mode = InputMode::Browse;
+                return;
+            }
+            // Non-character keys are ignored in normal mode.
+            _ => return,
+        };
+
+        // Count prefix. A lone `0` (when no count is pending) is the
+        // "line start" motion instead.
+        if c.is_ascii_digit() {
+            if c == '0' && ts.vim_count == 0 {
+                if let Some(op) = ts.vim_pending_op {
+                    apply_vim_operator(ts, op, '0', 1);
+                } else {
+                    ts.input.cursor_line_start();
+                    reset_vim(ts);
+                }
+                return;
+            }
+            ts.vim_count = ts
+                .vim_count
+                .saturating_mul(10)
+                .saturating_add((c as u8 - b'0') as usize);
+            return;
+        }
+
+        // A pending operator (`d` / `c`) is awaiting its motion/target.
+        if let Some(op) = ts.vim_pending_op {
+            apply_vim_operator(ts, op, c, ts.vim_count.max(1));
+            return;
+        }
+
+        let count = ts.vim_count.max(1);
+
+        match c {
+            // ── motions ──
+            'h' => repeat(count, |t| t.input.cursor_left(), ts),
+            'l' => repeat(count, |t| t.input.cursor_right(), ts),
+            'j' => repeat(count, |t| t.input.cursor_down(), ts),
+            'k' => repeat(count, |t| t.input.cursor_up(), ts),
+            'w' => repeat(count, |t| t.input.cursor_word_forward(), ts),
+            'b' => repeat(count, |t| t.input.cursor_word_back(), ts),
+            'e' => repeat(count, |t| t.input.cursor_word_end(), ts),
+            '0' => ts.input.cursor_line_start(),
+            '$' => ts.input.cursor_line_end(),
+            '^' => ts.input.cursor_line_start(),
+            'G' => ts.input.cursor_bottom(),
+            'g' => {
+                if ts.vim_pending_g {
+                    ts.input.cursor_top();
+                    reset_vim(ts);
+                } else {
+                    ts.vim_pending_g = true;
+                    return; // keep any count for the second `g`
+                }
+            }
+            // ── deletions / changes ──
+            'x' => repeat(count, |t| t.input.delete_char_forward(), ts),
+            'D' => ts.input.delete_to_line_end(),
+            'C' => {
+                ts.input.delete_to_line_end();
+                enter_insert(ts);
+                return;
+            }
+            's' => {
+                repeat(count, |t| t.input.delete_char_forward(), ts);
+                enter_insert(ts);
+                return;
+            }
+            'S' => {
+                ts.input.change_line();
+                enter_insert(ts);
+                return;
+            }
+            'd' => {
+                ts.vim_pending_op = Some('d');
+                return; // keep count for the motion
+            }
+            'c' => {
+                ts.vim_pending_op = Some('c');
+                return;
+            }
+            'u' => repeat(count, |t| t.input.undo(), ts),
+            // ── insert entry ──
+            'i' => {
+                enter_insert(ts);
+                return;
+            }
+            'I' => {
+                ts.input.cursor_line_start();
+                enter_insert(ts);
+                return;
+            }
+            'a' => {
+                ts.input.cursor_right();
+                enter_insert(ts);
+                return;
+            }
+            'A' => {
+                ts.input.cursor_line_end();
+                enter_insert(ts);
+                return;
+            }
+            'o' => {
+                repeat(count, |t| t.input.open_below(), ts);
+                enter_insert(ts);
+                return;
+            }
+            'O' => {
+                repeat(count, |t| t.input.open_above(), ts);
+                enter_insert(ts);
+                return;
+            }
+            _ => {}
+        }
+        reset_vim(ts);
     }
 
     /// Key handling in input mode: typing goes to input, Enter sends, Esc exits.
     fn handle_input_key(&mut self, key: &KeyEvent) {
         use crate::widgets::input_area::{history_clear_recall, history_down, history_up};
+
+        // While an incremental Ctrl+R search is active, every keystroke
+        // drives the search instead of editing the buffer.
+        if self.state.agent_tab_state.in_history_search {
+            self.handle_history_search_key(key);
+            return;
+        }
+
         let ts = &mut self.state.agent_tab_state;
+        let idle = ts.status == state::AgentStatus::Idle;
+
+        // Ctrl+R: enter incremental history search (codex-style).
+        if idle
+            && !ts.input_history.is_empty()
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('r')
+        {
+            ts.in_history_search = true;
+            ts.history_search_query.clear();
+            ts.history_search_draft = Some(ts.input.value());
+            ts.history_search_matches = compute_search_matches(&ts.input_history, "");
+            ts.history_search_selected = 0;
+            load_selected_history_match(ts);
+            return;
+        }
 
         match key.code {
-            // Esc: exit input mode, clear input AND any in-flight recall
+            // Esc: leave insert mode for vim normal mode. The buffer is kept
+            // (so Esc→normal→edit→i→type is a fluid vim loop). Any in-progress
+            // Up/Down history recall is collapsed first.
             KeyCode::Esc => {
-                ts.input.clear();
                 history_clear_recall(&mut ts.input_draft, &mut ts.input_recall);
-                ts.input_mode = InputMode::Browse;
+                reset_vim(ts);
+                ts.input_mode = InputMode::Normal;
             }
-            // Enter: send message (if valid), return to browse mode
+            // Enter: Shift/Alt+Enter inserts a newline (multiline compose);
+            // a plain Enter sends the message and returns to browse mode.
             KeyCode::Enter => {
+                if key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
+                    // Alt is a fallback for terminals that don't report Shift on Enter.
+                    if idle {
+                        ts.input.insert_newline();
+                    }
+                    return;
+                }
                 if ts.can_send() {
                     let text = ts.take_input();
                     // Push to in-memory history before clearing the
@@ -409,7 +672,7 @@ impl App {
             }
             // Up/Down: recall history (Up) / advance towards draft (Down)
             KeyCode::Up => {
-                if ts.status == state::AgentStatus::Idle {
+                if idle {
                     let _ = history_up(
                         &mut ts.input,
                         &ts.input_history,
@@ -419,7 +682,7 @@ impl App {
                 }
             }
             KeyCode::Down => {
-                if ts.status == state::AgentStatus::Idle {
+                if idle {
                     let _ = history_down(
                         &mut ts.input,
                         &ts.input_history,
@@ -432,13 +695,59 @@ impl App {
             // edits are treated as user-driven (not as a recalled entry
             // we'd accidentally re-push when sent).
             _ => {
-                if ts.status == state::AgentStatus::Idle {
+                if idle {
                     if ts.input_recall.is_some() {
                         history_clear_recall(&mut ts.input_draft, &mut ts.input_recall);
                     }
                     ts.input.handle_key(*key);
                 }
             }
+        }
+    }
+
+    /// Key handling while a Ctrl+R incremental history search is active.
+    fn handle_history_search_key(&mut self, key: &KeyEvent) {
+        let ts = &mut self.state.agent_tab_state;
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            // Esc: cancel the search, restore the original draft buffer.
+            KeyCode::Esc => {
+                let draft = ts.history_search_draft.take().unwrap_or_default();
+                ts.input.clear();
+                ts.input.insert_str(&draft);
+                end_history_search(ts);
+            }
+            // Enter: accept the currently-previewed match into the buffer
+            // and resume normal input editing.
+            KeyCode::Enter => {
+                end_history_search(ts);
+            }
+            // Up: move to the next-older match.
+            KeyCode::Up => {
+                if !ts.history_search_matches.is_empty() {
+                    ts.history_search_selected = (ts.history_search_selected + 1)
+                        .min(ts.history_search_matches.len() - 1);
+                    load_selected_history_match(ts);
+                }
+            }
+            // Down: move toward the newest match.
+            KeyCode::Down => {
+                if !ts.history_search_matches.is_empty() {
+                    ts.history_search_selected = ts.history_search_selected.saturating_sub(1);
+                    load_selected_history_match(ts);
+                }
+            }
+            // Backspace: drop the last query character and refilter.
+            KeyCode::Backspace => {
+                ts.history_search_query.pop();
+                recompute_history_search(ts);
+            }
+            // Type into the query (plain chars only).
+            KeyCode::Char(c) if !ctrl => {
+                ts.history_search_query.push(c);
+                recompute_history_search(ts);
+            }
+            _ => {}
         }
     }
 
@@ -497,127 +806,151 @@ impl App {
         // Enter inside a form validates and saves.
         if code == KeyCode::Enter {
             if matches!(cs.mode, state::ConfigMode::EditProvider(_)) {
-                self.save_provider_form();
+                cs.message = crate::config_db::save_provider(cs, &self.conn)
+                    .unwrap_or_else(|e| e);
                 return;
             }
             if matches!(cs.mode, state::ConfigMode::EditModel(_)) {
-                self.save_model_form();
+                cs.message = crate::config_db::save_model(cs, &self.conn)
+                    .unwrap_or_else(|e| e);
                 return;
             }
         }
 
         // 'd' in browsing deletes the selected row.
         if code == KeyCode::Char('d') && matches!(cs.mode, state::ConfigMode::Browsing) {
-            self.delete_selected_config();
+            cs.message = crate::config_db::delete_selected(cs, &self.conn);
             return;
         }
 
         // Everything else (navigation, opening forms, typing) goes to the widget.
         crate::widgets::config_widget::handle_config_key(&mut self.state.config_tab_state, *key);
     }
+}
 
-    /// Take the open provider form out of state, validate, persist, reload.
-    fn save_provider_form(&mut self) {
-        let conn = &self.conn;
-        let cs = &mut self.state.config_tab_state;
-        let form = match std::mem::replace(&mut cs.mode, state::ConfigMode::Browsing) {
-            state::ConfigMode::EditProvider(f) => f,
-            _ => return,
-        };
+// ── Ctrl+R history search helpers ──────────────────────────
+//
+// Free functions operating on `AgentTabState`. Search state lives on the
+// state struct (see `state.rs`); these compute matches and drive previews.
 
-        match form.collect() {
-            Err(e) => {
-                cs.message = e;
-                cs.mode = state::ConfigMode::EditProvider(form);
-            }
-            Ok(input) => {
-                let id = form.id;
-                let res = match id {
-                    Some(id) => crate::config_db::ProviderRow::update(conn, id, &input),
-                    None => crate::config_db::ProviderRow::insert(conn, &input).map(|_| ()),
-                };
-                match res {
-                    Ok(()) => {
-                        Self::reload_config(cs, conn);
-                        cs.message = match id {
-                            Some(_) => "provider updated".to_string(),
-                            None => "provider added".to_string(),
-                        };
-                    }
-                    Err(e) => {
-                        cs.message = format!("db error: {e}");
-                        cs.mode = state::ConfigMode::EditProvider(form);
-                    }
-                }
-            }
+use std::collections::VecDeque;
+
+/// Return indices into `history` (newest-first) whose text case-insensitively
+/// contains `query`. An empty query matches everything, so the user starts at
+/// the most recent entry and narrows as they type.
+fn compute_search_matches(history: &VecDeque<String>, query: &str) -> Vec<usize> {
+    let needle = query.to_lowercase();
+    history
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, s)| needle.is_empty() || s.to_lowercase().contains(&needle))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Load the match at `history_search_selected` into the input buffer so the
+/// user sees a live preview as they navigate matches. Clears the buffer when
+/// no match is selected.
+fn load_selected_history_match(ts: &mut crate::state::AgentTabState) {
+    if let Some(&idx) = ts.history_search_matches.get(ts.history_search_selected) {
+        if let Some(entry) = ts.input_history.get(idx).cloned() {
+            ts.input.clear();
+            ts.input.insert_str(&entry);
         }
+    } else {
+        ts.input.clear();
     }
+}
 
-    /// Take the open model form out of state, validate, persist, reload.
-    fn save_model_form(&mut self) {
-        let conn = &self.conn;
-        let cs = &mut self.state.config_tab_state;
-        let (form, providers) = match std::mem::replace(&mut cs.mode, state::ConfigMode::Browsing) {
-            state::ConfigMode::EditModel(f) => (f, cs.providers.clone()),
-            _ => return,
-        };
+/// Recompute the match list for the current query, reset selection to the
+/// newest match, and load its preview into the buffer.
+fn recompute_history_search(ts: &mut crate::state::AgentTabState) {
+    let q = ts.history_search_query.clone();
+    ts.history_search_matches = compute_search_matches(&ts.input_history, &q);
+    ts.history_search_selected = 0;
+    load_selected_history_match(ts);
+}
 
-        match form.collect(&providers) {
-            Err(e) => {
-                cs.message = e;
-                cs.mode = state::ConfigMode::EditModel(form);
-            }
-            Ok(input) => {
-                let id = form.id;
-                let res = match id {
-                    Some(id) => crate::config_db::ModelRow::update(conn, id, &input),
-                    None => crate::config_db::ModelRow::insert(conn, &input).map(|_| ()),
-                };
-                match res {
-                    Ok(()) => {
-                        Self::reload_config(cs, conn);
-                        cs.message = match id {
-                            Some(_) => "model updated".to_string(),
-                            None => "model added".to_string(),
-                        };
-                    }
-                    Err(e) => {
-                        cs.message = format!("db error: {e}");
-                        cs.mode = state::ConfigMode::EditModel(form);
-                    }
-                }
-            }
-        }
+/// Leave history search mode, clearing transient search state. The buffer
+/// retains whatever was previewed (on Enter) or the restored draft (on Esc);
+/// the caller is responsible for buffer contents on the way in.
+fn end_history_search(ts: &mut crate::state::AgentTabState) {
+    ts.in_history_search = false;
+    ts.history_search_query.clear();
+    ts.history_search_matches.clear();
+    ts.history_search_selected = 0;
+    ts.history_search_draft = None;
+}
+
+// ── vim normal-mode helpers ───────────────────────────────
+
+/// Clear all transient vim state (count, pending operator, pending `g`).
+fn reset_vim(ts: &mut crate::state::AgentTabState) {
+    ts.vim_count = 0;
+    ts.vim_pending_op = None;
+    ts.vim_pending_g = false;
+}
+
+/// Clear vim state and switch the composer to insert mode.
+fn enter_insert(ts: &mut crate::state::AgentTabState) {
+    reset_vim(ts);
+    ts.input_mode = InputMode::Input;
+}
+
+/// Run a small vim edit/motion closure `n` times against the agent state.
+fn repeat<F: FnMut(&mut crate::state::AgentTabState)>(n: usize, mut f: F, ts: &mut crate::state::AgentTabState) {
+    for _ in 0..n {
+        f(ts);
     }
+}
 
-    fn delete_selected_config(&mut self) {
-        let conn = &self.conn;
-        let cs = &mut self.state.config_tab_state;
-        match cs.pane {
-            state::ConfigPane::Providers => {
-                let Some(row) = cs.selected_provider_row().cloned() else {
-                    return;
-                };
-                match crate::config_db::ProviderRow::delete(conn, row.id) {
-                    Ok(()) => {
-                        Self::reload_config(cs, conn);
-                        cs.message = format!("deleted provider '{}'", row.name);
-                    }
-                    Err(e) => cs.message = format!("db error: {e}"),
-                }
+/// Apply a pending vim operator (`d` or `c`) to a motion/target, then either
+/// return to normal mode (`d`) or drop into insert mode (`c`, for "change").
+/// Unknown motions cancel the operator and reset state.
+fn apply_vim_operator(ts: &mut crate::state::AgentTabState, op: char, motion: char, count: usize) {
+    let n = count.max(1);
+    let change = op == 'c';
+    let handled = match motion {
+        'd' if op == 'd' => {
+            for _ in 0..n {
+                ts.input.delete_line();
             }
-            state::ConfigPane::Models => {
-                let Some(row) = cs.selected_model_row().cloned() else {
-                    return;
-                };
-                match crate::config_db::ModelRow::delete(conn, row.id) {
-                    Ok(()) => {
-                        Self::reload_config(cs, conn);
-                        cs.message = format!("deleted model '{}'", row.model_name);
-                    }
-                    Err(e) => cs.message = format!("db error: {e}"),
-                }
-            }
+            true
         }
+        'c' if op == 'c' => {
+            ts.input.change_line();
+            true
+        }
+        'w' | 'e' => {
+            for _ in 0..n {
+                ts.input.delete_word_forward();
+            }
+            true
+        }
+        'b' => {
+            for _ in 0..n {
+                ts.input.delete_word_back();
+            }
+            true
+        }
+        '$' => {
+            ts.input.delete_to_line_end();
+            true
+        }
+        '0' | '^' => {
+            ts.input.delete_to_line_start();
+            true
+        }
+        _ => false,
+    };
+    if !handled {
+        reset_vim(ts);
+        return;
+    }
+    if change {
+        enter_insert(ts);
+    } else {
+        reset_vim(ts);
     }
 }

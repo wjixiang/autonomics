@@ -2,11 +2,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::Rect,
     prelude::{StatefulWidget, Widget},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     widgets::Block,
 };
-use ratatui_textarea::TextArea;
+use ratatui_textarea::{CursorMove, TextArea, WrapMode};
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 // ── Single-line text input (used by the config tab forms) ──────
 
@@ -343,11 +344,180 @@ impl InputArea {
         let mut textarea = TextArea::default();
         textarea.set_placeholder_text("Type a message...");
         textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
-        // No block set — the InputWidget renders its own bordered block around us.
+        // Soft-wrap long lines at word boundaries so the composer grows in
+        // height instead of scrolling horizontally. This lets `display_height`
+        // predict how many terminal rows the buffer will occupy.
+        textarea.set_wrap_mode(WrapMode::Word);
+        // No block set — the InputWidget renders its own borderless prompt.
         Self {
             textarea,
             max_length: Some(Self::DEFAULT_MAX_LENGTH),
         }
+    }
+
+    /// Maximum number of input rows the layout will allocate before the
+    /// textarea scrolls internally instead of growing further. Keeps a
+    /// long paste from consuming the whole chat viewport.
+    pub const MAX_INPUT_ROWS: u16 = 10;
+
+    /// Number of terminal rows the current buffer occupies when wrapped to
+    /// `width` columns. Used by the parent layout to size the input area
+    /// dynamically: the box grows as the user types and caps at
+    /// [`MAX_INPUT_ROWS`]. `width` is the *text* width (after any prompt /
+    /// gutter), so the caller subtracts the prompt gutter first.
+    pub fn display_height(&self, width: u16) -> u16 {
+        let wrap_width = width.max(1) as usize;
+        let mut rows = 0usize;
+        for line in self.textarea.lines() {
+            let w = UnicodeWidthStr::width(line.as_str());
+            // ceil(w / wrap_width); an empty line still takes one row.
+            let r = w.div_ceil(wrap_width);
+            rows += r.max(1);
+        }
+        let rows = rows.max(1) as u16;
+        rows.min(Self::MAX_INPUT_ROWS)
+    }
+
+    /// Insert a newline (Shift+Enter / Alt+Enter / vim `o`/`O`). Respects
+    /// `max_length`.
+    pub fn insert_newline(&mut self) {
+        if let Some(cap) = self.max_length {
+            if self.grapheme_len() >= cap {
+                return;
+            }
+        }
+        self.textarea.insert_newline();
+    }
+
+    // ── vim normal-mode primitives ──────────────────────────
+    //
+    // Thin wrappers over `ratatui-textarea` operations, named for the vim
+    // semantics they implement. The modal state machine (counts, pending
+    // operators) lives in `app.rs`; these just perform the atomic edits.
+
+    /// Insert a single character (vim `i`-mode entry / `r{c}` replace).
+    /// Honours `max_length`.
+    pub fn insert_char(&mut self, c: char) {
+        if let Some(cap) = self.max_length {
+            if self.grapheme_len() >= cap {
+                return;
+            }
+        }
+        self.textarea.insert_char(c);
+    }
+
+    // — cursor motions —
+    pub fn cursor_left(&mut self) {
+        self.textarea.move_cursor(CursorMove::Back);
+    }
+    pub fn cursor_right(&mut self) {
+        self.textarea.move_cursor(CursorMove::Forward);
+    }
+    pub fn cursor_up(&mut self) {
+        self.textarea.move_cursor(CursorMove::Up);
+    }
+    pub fn cursor_down(&mut self) {
+        self.textarea.move_cursor(CursorMove::Down);
+    }
+    /// Forward to the start of the next word (vim `w`).
+    pub fn cursor_word_forward(&mut self) {
+        self.textarea.move_cursor(CursorMove::WordForward);
+    }
+    /// Back to the start of the previous word (vim `b`).
+    pub fn cursor_word_back(&mut self) {
+        self.textarea.move_cursor(CursorMove::WordBack);
+    }
+    /// Forward to the end of the current/next word (vim `e`).
+    pub fn cursor_word_end(&mut self) {
+        self.textarea.move_cursor(CursorMove::WordEnd);
+    }
+    /// Start of the current line (vim `0`).
+    pub fn cursor_line_start(&mut self) {
+        self.textarea.move_cursor(CursorMove::Head);
+    }
+    /// End of the current line (vim `$`).
+    pub fn cursor_line_end(&mut self) {
+        self.textarea.move_cursor(CursorMove::End);
+    }
+    /// Top of the buffer (vim `gg`).
+    pub fn cursor_top(&mut self) {
+        self.textarea.move_cursor(CursorMove::Top);
+    }
+    /// Bottom of the buffer (vim `G`).
+    pub fn cursor_bottom(&mut self) {
+        self.textarea.move_cursor(CursorMove::Bottom);
+    }
+
+    // — deletions —
+    /// Delete the character after the cursor (vim `x`).
+    pub fn delete_char_forward(&mut self) {
+        self.textarea.delete_next_char();
+    }
+    /// Delete from the cursor to the end of the line (vim `D` / `d$`).
+    pub fn delete_to_line_end(&mut self) {
+        self.textarea.delete_line_by_end();
+    }
+    /// Delete from the start of the line to the cursor (vim `d0`).
+    pub fn delete_to_line_start(&mut self) {
+        self.textarea.delete_line_by_head();
+    }
+    /// Delete the next word forward (vim `dw`).
+    pub fn delete_word_forward(&mut self) {
+        self.textarea.delete_next_word();
+    }
+    /// Delete the previous word backward (vim `db`).
+    pub fn delete_word_back(&mut self) {
+        self.textarea.delete_word();
+    }
+
+    /// Delete the entire current line (vim `dd`). Leaves the buffer with at
+    /// least one line; the cursor lands on the line that takes its place.
+    pub fn delete_line(&mut self) {
+        self.textarea.move_cursor(CursorMove::Head);
+        self.textarea.delete_line_by_end(); // clear current line's content
+        if self.textarea.lines().len() > 1 {
+            // Remove the now-empty line. `delete_newline` merges the current
+            // line into the previous one; for the first line we instead pull
+            // the next line up by merging it into the empty line 0.
+            let (row, _) = self.cursor_row_col();
+            if row == 0 {
+                self.textarea.move_cursor(CursorMove::Down);
+            }
+            self.textarea.delete_newline();
+        }
+    }
+
+    /// Clear the current line's content but keep the (now empty) line, ready
+    /// for insert mode (vim `cc` / `S`). The cursor moves to line start.
+    pub fn change_line(&mut self) {
+        self.textarea.move_cursor(CursorMove::Head);
+        self.textarea.delete_line_by_end();
+    }
+
+    // — line opening (vim `o` / `O`) —
+    /// Open a new empty line below the cursor and move there (vim `o`).
+    pub fn open_below(&mut self) {
+        self.textarea.move_cursor(CursorMove::End);
+        self.textarea.insert_newline();
+    }
+    /// Open a new empty line above the cursor and move there (vim `O`).
+    pub fn open_above(&mut self) {
+        self.textarea.move_cursor(CursorMove::Head);
+        self.textarea.insert_newline();
+        // insert_newline splits at the cursor: the original content moves to
+        // the line below, so move up once to land on the new empty line.
+        self.textarea.move_cursor(CursorMove::Up);
+    }
+
+    /// Undo the last edit (vim `u`).
+    pub fn undo(&mut self) {
+        self.textarea.undo();
+    }
+
+    /// Current (row, col) cursor position (grapheme/char column).
+    fn cursor_row_col(&self) -> (usize, usize) {
+        let ratatui_textarea::DataCursor(r, c) = self.textarea.cursor();
+        (r, c)
     }
 
     /// Get the current text content as a single string.
@@ -452,7 +622,16 @@ pub struct InputWidgetState<'a> {
     pub input: &'a mut InputArea,
 }
 
-/// Composite widget: bordered input area backed by ratatui-textarea.
+/// Width of the borderless prompt gutter ("› " = prompt glyph + space).
+pub const PROMPT_GUTTER: u16 = 2;
+
+/// Composite widget: borderless input area with a `›` prompt, backed by
+/// ratatui-textarea. The textarea renders into the area to the right of the
+/// prompt gutter, so its cursor and word-wrapping line up beneath the prompt.
+///
+/// Modeled after codex's composer: no border, a single bold prompt glyph,
+/// and the textarea fills the remaining width. The parent layout passes a
+/// height computed from [`InputArea::display_height`].
 pub struct InputWidget<'a> {
     pub disabled: bool,
     pub title: &'a str,
@@ -463,20 +642,35 @@ impl<'a> StatefulWidget for InputWidget<'a> {
     type State = InputWidgetState<'a>;
 
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer, state: &mut Self::State) {
-        let style = if self.disabled {
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        // Render the `›` prompt at the top-left, dimmed when disabled.
+        let prompt_style = if self.disabled {
             Style::default().fg(Color::DarkGray)
         } else {
-            Style::default()
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
         };
+        buf.set_string(area.x, area.y, "›", prompt_style);
 
-        let block = Block::bordered()
-            .title(format!(" {} ", self.title))
-            .border_style(style);
-        let inner = block.inner(area);
-        block.render(area, buf);
+        // Leave a 2-column gutter (prompt glyph + space) for the textarea.
+        let inner = if area.width > PROMPT_GUTTER {
+            Rect {
+                x: area.x + PROMPT_GUTTER,
+                width: area.width - PROMPT_GUTTER,
+                ..area
+            }
+        } else {
+            area
+        };
 
         state.input.set_placeholder(self.placeholder);
         state.input.textarea().render(inner, buf);
+
+        // `title` is surfaced by the parent's footer hint line; keep the
+        // field so callers can still annotate the widget without a render.
+        let _ = self.title;
     }
 }
 
@@ -973,5 +1167,103 @@ mod tests {
         assert!(s.handle_key(ctrl_kc('u')));
         assert_eq!(s.value(), "");
         assert_eq!(s.cursor(), 0);
+    }
+
+    // ── display_height + vim primitive tests ───────────────
+
+    /// `display_height` grows with the buffer and is capped at
+    /// [`InputArea::MAX_INPUT_ROWS`]. A short single-line buffer is one row;
+    /// a buffer wider than the wrap width wraps onto extra rows.
+    #[test]
+    fn display_height_grows_and_caps() {
+        let mut input = InputArea::new();
+
+        // Empty buffer → one row.
+        assert_eq!(input.display_height(40), 1);
+
+        // "hello world" is 11 columns; at width 40 it fits on one row.
+        input.insert_str("hello world");
+        assert_eq!(input.display_height(40), 1);
+
+        // Force a wrap: at width 5, 11 columns wrap to ceil(11/5)=3 rows.
+        assert_eq!(input.display_height(5), 3);
+
+        // An explicit newline always adds a row.
+        input.insert_newline();
+        assert_eq!(input.display_height(40), 2);
+
+        // Many lines cap at MAX_INPUT_ROWS even when the raw count is larger.
+        for _ in 0..50 {
+            input.insert_newline();
+        }
+        assert_eq!(input.display_height(40), InputArea::MAX_INPUT_ROWS);
+    }
+
+    /// vim `dd` deletes the entire current line. Starting from two lines,
+    /// one `dd` leaves a single line.
+    #[test]
+    fn vim_dd_deletes_line() {
+        let mut input = InputArea::new();
+        input.insert_str("alpha\nbeta");
+        // cursor sits at the start of "beta" (line 1) after insert_str.
+        // Move to line 0 ("alpha") then dd it.
+        input.cursor_up();
+        let ratatui_textarea::DataCursor(row, _) = input.textarea().cursor();
+        assert_eq!(row, 0);
+        input.delete_line();
+        assert_eq!(input.value(), "beta");
+    }
+
+    /// vim `D` deletes from the cursor to the end of the line, leaving
+    /// the prefix intact.
+    #[test]
+    fn vim_shift_d_deletes_to_line_end() {
+        let mut input = InputArea::new();
+        input.insert_str("hello world");
+        // cursor at end; move back 5 so it sits after "hello ".
+        for _ in 0..5 {
+            input.cursor_left();
+        }
+        input.delete_to_line_end();
+        assert_eq!(input.value(), "hello ");
+    }
+
+    /// vim `dw` deletes the next word forward. The textarea leaves the
+    /// trailing whitespace, so "foo bar baz" at the start becomes
+    /// " bar baz" (matches vim's `dw` at a word start keeping the space).
+    #[test]
+    fn vim_dw_deletes_word() {
+        let mut input = InputArea::new();
+        input.insert_str("foo bar baz");
+        // insert_str leaves the cursor at the end; move to line start so
+        // there is a word ahead to delete.
+        input.cursor_line_start();
+        input.delete_word_forward();
+        assert_eq!(input.value(), " bar baz");
+    }
+
+    /// vim `o` opens a new line below the cursor.
+    #[test]
+    fn vim_o_opens_below() {
+        let mut input = InputArea::new();
+        input.insert_str("line");
+        input.open_below();
+        // Two lines; the second is empty.
+        let lines = input.textarea().lines();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "line");
+        assert_eq!(lines[1], "");
+    }
+
+    /// vim `O` opens a new line above the cursor.
+    #[test]
+    fn vim_shift_o_opens_above() {
+        let mut input = InputArea::new();
+        input.insert_str("line");
+        input.open_above();
+        let lines = input.textarea().lines();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "");
+        assert_eq!(lines[1], "line");
     }
 }

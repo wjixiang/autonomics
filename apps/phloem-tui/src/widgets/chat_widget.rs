@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 mod md_highlight;
 mod md_math;
 mod md_mermaid;
@@ -23,7 +25,8 @@ pub struct ChatWidgetState {
     pub viewport_height: u16,
     pub scroll_offset: usize,
     /// Lines rendered during a fresh (non-cached) render, available for caching by the caller.
-    pub rendered_lines: Option<Vec<Line<'static>>>,
+    /// Wrapped in `Arc` for zero-clone handoff to the caller's cache.
+    pub rendered_lines: Option<Arc<[Line<'static>]>>,
 }
 
 impl ChatWidgetState {
@@ -42,7 +45,8 @@ pub struct ChatWidget<'a> {
     pub messages: &'a [ChatLine],
     /// Pre-rendered lines from a previous frame (same messages, same width).
     /// When `Some`, the expensive markdown-parse / layout pass is skipped.
-    pub cached_lines: Option<Vec<Line<'static>>>,
+    /// Wrapped in `Arc` so the caller retains ownership without cloning.
+    pub cached_lines: Option<Arc<[Line<'static>]>>,
 }
 
 impl StatefulWidget for ChatWidget<'_> {
@@ -53,13 +57,15 @@ impl StatefulWidget for ChatWidget<'_> {
 
         let needs_render = self.cached_lines.is_none();
 
-        let lines: Vec<Line<'static>> = if let Some(cached) = self.cached_lines {
+        let lines: Arc<[Line<'static>]> = if let Some(cached) = self.cached_lines {
             cached
         } else {
-            self.messages
-                .iter()
-                .flat_map(|f| render::render_line_owned(f, area))
-                .collect()
+            Arc::from(
+                self.messages
+                    .iter()
+                    .flat_map(|f| render::render_line_owned(f, area))
+                    .collect::<Vec<_>>(),
+            )
         };
 
         // If we just freshly rendered, store back for next frame caching.
@@ -67,7 +73,7 @@ impl StatefulWidget for ChatWidget<'_> {
             state.rendered_lines = Some(lines.clone());
         }
 
-        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+        let paragraph = Paragraph::new(lines.to_vec()).wrap(Wrap { trim: true });
 
         state.total_lines = paragraph.line_count(area.width);
 

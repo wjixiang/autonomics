@@ -1,19 +1,20 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::{StatefulWidget, Widget},
-    widgets::{Block, Padding},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Padding, Paragraph},
 };
 
 use crate::state::{AgentTabState, InputMode};
 use crate::widgets::{
     chat_widget::{ChatWidget, ChatWidgetState},
-    input_area::{InputWidget, InputWidgetState},
+    input_area::{InputWidget, InputWidgetState, PROMPT_GUTTER},
     status_bar::StatusBar,
     tool_exec_widget::ToolExecWidget,
 };
 
 /// Composite widget that renders the entire Agent tab: status bar, chat area with
-/// scrollbar, and input area.
+/// scrollbar, borderless input area, and a keybinding hint footer.
 pub struct AgentTabWidget<'a> {
     pub state: &'a mut AgentTabState,
 }
@@ -27,13 +28,26 @@ impl Widget for AgentTabWidget<'_> {
             Constraint::Length(0)
         };
 
+        // Dynamic input height: the box grows with content (word-wrapped),
+        // capped at MAX_INPUT_ROWS, with a 1-row footer hint beneath it.
+        let running = self.state.status != crate::state::AgentStatus::Idle;
+        let text_width = area.width.saturating_sub(PROMPT_GUTTER);
+        let input_rows = if running && self.state.input.is_empty() {
+            // While the agent runs, keep the composer collapsed to one row.
+            1
+        } else {
+            self.state.input.display_height(text_width)
+        };
+        let input_constraint = Constraint::Length(input_rows);
+
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // StatusBar
                 task_constraint,       // ToolExecWidget (0 when empty)
-                Constraint::Min(5),    // Chat
-                Constraint::Length(3), // Input
+                Constraint::Min(3),    // Chat (shrinks as input grows)
+                input_constraint,      // Input (dynamic, borderless)
+                Constraint::Length(1), // Footer hints
             ])
             .split(area);
 
@@ -62,8 +76,6 @@ impl Widget for AgentTabWidget<'_> {
         let chat_inner_area = chat_block.inner(chat_area);
 
         let viewport_height = chat_inner_area.height;
-        ts.clamp_scroll(viewport_height);
-
         let width = chat_inner_area.width;
         let cache_hit = ts.cached_version == ts.messages_version
             && ts.cached_width == width
@@ -84,6 +96,9 @@ impl Widget for AgentTabWidget<'_> {
         chat_widget.render(chat_inner_area, buf, &mut chat_state);
         ts.content_line_count = chat_state.total_lines;
 
+        // Clamp scroll *after* render so we use the current frame's line count.
+        ts.clamp_scroll(viewport_height);
+
         // Update cache: store freshly rendered lines if this was a cache miss.
         if let Some(fresh) = chat_state.rendered_lines.take() {
             ts.cached_lines = fresh;
@@ -91,22 +106,86 @@ impl Widget for AgentTabWidget<'_> {
             ts.cached_version = ts.messages_version;
         }
 
-        // ── Input area ──
-        let running = ts.status != crate::state::AgentStatus::Idle;
-        let title: &str = match (running, ts.input_mode) {
-            (true, _) => " ■ input (running) ",
-            (false, InputMode::Browse) => "▏browse (Enter=edit) ",
-            (false, InputMode::Input) => " > input ",
+        // ── Input area (borderless, › prompt) ──
+        let placeholder: &str = if running {
+            "agent running… (Ctrl+C to cancel)"
+        } else {
+            match ts.input_mode {
+                InputMode::Browse => "Type a message, or press Enter to edit…",
+                InputMode::Input => "Type a message…",
+                InputMode::Normal => "— NORMAL —  (i insert, Esc back)",
+            }
         };
+        let title = ""; // surfaced by the footer hint line instead
 
         let input_widget = InputWidget {
             disabled: running,
             title,
-            placeholder: "Type a message...",
+            placeholder,
         };
         let mut input_state = InputWidgetState {
             input: &mut ts.input,
         };
         input_widget.render(layout[3], buf, &mut input_state);
+
+        // ── Footer hint line ──
+        render_footer_hint(
+            layout[4],
+            buf,
+            ts.input_mode,
+            running,
+            ts.in_history_search,
+            &ts.history_search_query,
+            ts.history_search_selected,
+            ts.history_search_matches.len(),
+        );
     }
+}
+
+/// Draw the 1-row keybinding hint at the bottom of the agent tab. The hint
+/// changes with the active input mode so the relevant shortcuts are always
+/// visible, mirroring codex's footer. While a Ctrl+R search is active, the
+/// query and current match position are shown instead.
+#[allow(clippy::too_many_arguments)]
+fn render_footer_hint(
+    area: Rect,
+    buf: &mut ratatui::prelude::Buffer,
+    mode: InputMode,
+    running: bool,
+    searching: bool,
+    query: &str,
+    selected: usize,
+    total: usize,
+) {
+    if area.width == 0 {
+        return;
+    }
+    let hint = if searching {
+        if total == 0 {
+            format!(" search: {query}  (no match)  Esc cancel ")
+        } else {
+            format!(
+                " search: {query}  ({}/{total})  ↑↓ navigate  Enter select  Esc cancel ",
+                selected + 1
+            )
+        }
+    } else if running {
+        " Ctrl+C cancel  Ctrl+R history ".to_string()
+    } else {
+        match mode {
+            InputMode::Browse => " Enter edit  j/k scroll  gg top  G bottom  Ctrl+C quit ".to_string(),
+            InputMode::Input => {
+                " Insert  Esc normal  Enter send  Shift+Enter newline  Ctrl+R history ".to_string()
+            }
+            InputMode::Normal => {
+                " NORMAL  i/a/o insert  h j k l w b e 0 $ gg G  x dd dw D u  Esc exit "
+                    .to_string()
+            }
+        }
+    };
+    let style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM);
+    Paragraph::new(hint)
+        .style(style)
+        .alignment(Alignment::Right)
+        .render(area, buf);
 }

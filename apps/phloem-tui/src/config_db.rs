@@ -194,3 +194,135 @@ impl ModelInput {
         }
     }
 }
+
+// ── ConfigTabState persistence ────────────────────────────
+//
+// Save / delete / reload methods that operate on `ConfigTabState`
+// using the database. Extracted from `app.rs` to keep persistence
+// logic next to the data model.
+
+use crate::state::{ConfigMode, ConfigPane, ConfigTabState, ProviderForm, ModelForm};
+
+/// Re-read providers and models from the database, clamping selections.
+pub fn reload_config(cs: &mut ConfigTabState, conn: &Connection) {
+    cs.providers = ProviderRow::all(conn).unwrap_or_default();
+    cs.models = ModelRow::all(conn).unwrap_or_default();
+    if !cs.providers.is_empty() && cs.selected_provider >= cs.providers.len() {
+        cs.selected_provider = cs.providers.len() - 1;
+    } else if cs.providers.is_empty() {
+        cs.selected_provider = 0;
+    }
+    if !cs.models.is_empty() && cs.selected_model >= cs.models.len() {
+        cs.selected_model = cs.models.len() - 1;
+    } else if cs.models.is_empty() {
+        cs.selected_model = 0;
+    }
+}
+
+/// Validate, persist, and reload after saving a provider form.
+/// Returns `Ok(message)` on success or `Err(message)` on failure.
+pub fn save_provider(cs: &mut ConfigTabState, conn: &Connection) -> Result<String, String> {
+    let form = match std::mem::replace(&mut cs.mode, ConfigMode::Browsing) {
+        ConfigMode::EditProvider(f) => f,
+        _ => return Ok(String::new()),
+    };
+
+    match form.collect() {
+        Err(e) => {
+            cs.message = e.clone();
+            cs.mode = ConfigMode::EditProvider(form);
+            Err(e)
+        }
+        Ok(input) => {
+            let id = form.id;
+            let res = match id {
+                Some(id) => ProviderRow::update(conn, id, &input),
+                None => ProviderRow::insert(conn, &input).map(|_| ()),
+            };
+            match res {
+                Ok(()) => {
+                    reload_config(cs, conn);
+                    Ok(match id {
+                        Some(_) => "provider updated".to_string(),
+                        None => "provider added".to_string(),
+                    })
+                }
+                Err(e) => {
+                    cs.message = format!("db error: {e}");
+                    cs.mode = ConfigMode::EditProvider(form);
+                    Err(cs.message.clone())
+                }
+            }
+        }
+    }
+}
+
+/// Validate, persist, and reload after saving a model form.
+/// Returns `Ok(message)` on success or `Err(message)` on failure.
+pub fn save_model(cs: &mut ConfigTabState, conn: &Connection) -> Result<String, String> {
+    let providers = cs.providers.clone();
+    let form = match std::mem::replace(&mut cs.mode, ConfigMode::Browsing) {
+        ConfigMode::EditModel(f) => f,
+        _ => return Ok(String::new()),
+    };
+
+    match form.collect(&providers) {
+        Err(e) => {
+            cs.message = e.clone();
+            cs.mode = ConfigMode::EditModel(form);
+            Err(e)
+        }
+        Ok(input) => {
+            let id = form.id;
+            let res = match id {
+                Some(id) => ModelRow::update(conn, id, &input),
+                None => ModelRow::insert(conn, &input).map(|_| ()),
+            };
+            match res {
+                Ok(()) => {
+                    reload_config(cs, conn);
+                    Ok(match id {
+                        Some(_) => "model updated".to_string(),
+                        None => "model added".to_string(),
+                    })
+                }
+                Err(e) => {
+                    cs.message = format!("db error: {e}");
+                    cs.mode = ConfigMode::EditModel(form);
+                    Err(cs.message.clone())
+                }
+            }
+        }
+    }
+}
+
+/// Delete the currently selected provider or model row and reload.
+/// Returns a status message.
+pub fn delete_selected(cs: &mut ConfigTabState, conn: &Connection) -> String {
+    match cs.pane {
+        ConfigPane::Providers => {
+            let Some(row) = cs.selected_provider_row().cloned() else {
+                return String::new();
+            };
+            match ProviderRow::delete(conn, row.id) {
+                Ok(()) => {
+                    reload_config(cs, conn);
+                    format!("deleted provider '{}'", row.name)
+                }
+                Err(e) => format!("db error: {e}"),
+            }
+        }
+        ConfigPane::Models => {
+            let Some(row) = cs.selected_model_row().cloned() else {
+                return String::new();
+            };
+            match ModelRow::delete(conn, row.id) {
+                Ok(()) => {
+                    reload_config(cs, conn);
+                    format!("deleted model '{}'", row.model_name)
+                }
+                Err(e) => format!("db error: {e}"),
+            }
+        }
+    }
+}
