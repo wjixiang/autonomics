@@ -9,7 +9,10 @@ rust-version.workspace = true
 agentik-core = { path = "../agentik-core" }
 agentik-proc = { path = "../agentik-proc" }
 agentik-sdk = { path = "../agentik-sdk" }
+arrow.workspace = true
+arrow-array.workspace = true
 data-engine = { path = "../data-engine" }
+datafusion.workspace = true
 async-trait.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true

@@ -498,9 +498,6 @@ impl Agent {
             )
             .await?;
         tracing::debug!(?tool_results, "tool execution results");
-        if tool_results.len() != toolcalls.len() {
-            panic!()
-        }
 
         for tr in &tool_results {
             // Background transitions are announced by the `Toolset` itself

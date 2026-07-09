@@ -1,4 +1,5 @@
 mod add_edge_tool;
+mod add_linear_regression_tool;
 mod add_sink_tool;
 mod add_source_tool;
 mod add_sql_tool;
@@ -68,6 +69,9 @@ pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
         ToolRegistration::from(add_source_tool::AddSourceNodeTool::new(client.clone())),
         ToolRegistration::from(add_sql_tool::AddSqlNodeTool::new(client.clone())),
         ToolRegistration::from(add_sink_tool::AddSinkNodeTool::new(client.clone())),
+        ToolRegistration::from(
+            add_linear_regression_tool::AddLinearRegressionNodeTool::new(client.clone()),
+        ),
         ToolRegistration::from(add_edge_tool::AddEdgeTool::new(client.clone())),
         ToolRegistration::from(run_dag_tool::RunDagTool::new(client.clone())),
         ToolRegistration::from(get_output_tool::GetOutputTool::new(client.clone())),
