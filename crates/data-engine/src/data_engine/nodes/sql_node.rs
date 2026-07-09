@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use datafusion::{common::HashMap, prelude::SessionContext};
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodeMeta, Port};
 
 use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
 
@@ -23,8 +23,19 @@ impl From<SqlNodeError> for DagError {
     }
 }
 
-/// A transform node: registers each upstream input as a named table/view
-/// (the edge `port`) and runs a SQL query over them. Single output.
+/// A transform node: registers each upstream input as a named table and runs a
+/// SQL query over them. Single output port.
+///
+/// Input ports are taken from the supplied [`NodeMeta`] (default: one port
+/// named `"default"`). To build a multi-input join, construct the meta with
+/// several input ports, e.g.:
+/// ```ignore
+/// let meta = NodeMeta::new("join")
+///     .with_inputs(vec![Port::new("left"), Port::new("right")]);
+/// SqlNode::new(meta, "SELECT ... FROM {node}__left JOIN {node}__right ...".into(), ctx, "result".into())
+/// ```
+/// Each input is registered in the shared `SessionContext` under its
+/// globally-unique `df_name` (`"{node_id}__{port}"`), which the SQL references.
 #[derive(Clone)]
 pub struct SqlNode {
     meta: NodeMeta,
@@ -40,6 +51,9 @@ impl SqlNode {
         ctx: SessionContext,
         output_df_name: String,
     ) -> Self {
+        // Output port is named after the output DataFrame. Input ports are
+        // whatever the caller declared on the meta (default single "default").
+        let meta = meta.with_outputs(vec![Port::new(output_df_name.clone())]);
         Self {
             meta,
             sql_query: query,

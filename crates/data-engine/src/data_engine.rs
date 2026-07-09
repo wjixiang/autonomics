@@ -181,17 +181,27 @@ impl<R: Catalog> DataEngine<R> {
         Ok(self)
     }
 
-    /// Add a dependency `from -> to`. The downstream node receives the upstream
-    /// output registered under the given `port` name (the table alias visible
-    /// in SQL queries). When `port` is `None`, a name is auto-generated as
-    /// `"{from}__{to}"`.
+    /// Add an edge from `from`'s default output port to `to`'s default input
+    /// port (convenience form for single-port nodes).
     pub fn add_edge(
         &mut self,
         from: impl Into<String>,
         to: impl Into<String>,
-        port: Option<String>,
     ) -> Result<&mut Self> {
-        self.dag.add_edge(from, to, port)?;
+        self.dag.add_edge(from, to)?;
+        Ok(self)
+    }
+
+    /// Add an edge connecting `from`'s `from_port` output port to `to`'s
+    /// `to_port` input port.
+    pub fn add_edge_port(
+        &mut self,
+        from: impl Into<String>,
+        from_port: impl Into<String>,
+        to: impl Into<String>,
+        to_port: impl Into<String>,
+    ) -> Result<&mut Self> {
+        self.dag.add_edge_port(from, from_port, to, to_port)?;
         Ok(self)
     }
 

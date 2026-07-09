@@ -4,12 +4,14 @@ use datafusion::common::HashMap;
 
 use crate::data_engine::dag::{NodeId, NodeInput, RuntimeStatus, graph::{EdgeLabel, NamedDataFrames}};
 
-/// Gather a node's predecessor outputs into [`NodeInput`]s, in declared edge
-/// order, cloning the [`DataFrame`] handles (cheap — they are `Arc` internally).
+/// Gather a node's predecessor outputs into [`NodeInput`]s, one per connected
+/// input port, in declared edge order. Cloning the [`DataFrame`] handles is
+/// cheap (they are `Arc` internally).
 ///
-/// Each input's `df_name` is taken from the edge's port label (not the
-/// upstream node's `output_df_name`), ensuring globally-unique table names
-/// in the shared `SessionContext`.
+/// Each edge routes exactly the DataFrame produced on its `from_port`. The
+/// injected `NodeInput.port` is the edge's `to_port`, and `df_name` is a
+/// globally-unique table name (`"{from}__{from_port}__{to}"`) so it never
+/// collides in the shared `SessionContext`.
 pub fn build_inputs(
     id: &str,
     incoming: &HashMap<NodeId, Vec<(NodeId, EdgeLabel)>>,
@@ -18,14 +20,21 @@ pub fn build_inputs(
     let mut inputs = Vec::new();
     if let Some(edges) = incoming.get(id) {
         for (from, edge) in edges {
-            if let Some(pred_outputs) = outputs.get(from) {
-                for (_df_name, df) in pred_outputs.iter() {
-                    inputs.push(NodeInput {
-                        df_name: edge.port.clone(),
-                        data: df.clone(),
-                    });
-                }
-            }
+            let Some(pred_outputs) = outputs.get(from) else {
+                continue;
+            };
+            // Pull exactly the DataFrame produced on this edge's output port.
+            let Some(df) = pred_outputs.get(&edge.from_port) else {
+                continue;
+            };
+            inputs.push(NodeInput {
+                port: edge.to_port.clone(),
+                // Minimal globally-unique table name: (to_node, to_port) uniquely
+                // identifies an edge under strict 1:1, so this never collides in
+                // the shared SessionContext.
+                df_name: format!("{id}__{}", edge.to_port),
+                data: df.clone(),
+            });
         }
     }
     inputs

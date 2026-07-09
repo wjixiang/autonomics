@@ -21,6 +21,7 @@ use iceberg::{
 };
 
 use crate::data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::NamedDataFrames};
+use crate::data_engine::nodes::Port;
 use super::source::normalize_path;
 
 #[derive(Debug, From)]
@@ -100,6 +101,11 @@ impl<R: Catalog> CacheSourceNode<R> {
         cache_table_ident: String,
         catalog: Arc<R>,
     ) -> Self {
+        // A cache source has no inputs and a single output port named after the
+        // cache table identifier.
+        let meta = meta
+            .with_inputs(vec![])
+            .with_outputs(vec![Port::new(cache_table_ident.clone())]);
         Self {
             meta,
             file_path,

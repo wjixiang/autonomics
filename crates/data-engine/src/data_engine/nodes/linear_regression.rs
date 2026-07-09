@@ -14,7 +14,7 @@ use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodeMeta, Port};
 use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
 
 // =====================================================================
@@ -203,6 +203,7 @@ impl LinearRegressionNode {
         intercept: bool,
         output_df_name: String,
     ) -> Self {
+        let meta = meta.with_outputs(vec![Port::new(output_df_name.clone())]);
         Self {
             meta,
             x_columns,
@@ -306,6 +307,7 @@ mod tests {
             "out".to_string(),
         );
         let input = super::super::meta::NodeInput {
+            port: "default".to_string(),
             df_name: "src".to_string(),
             data: datafusion::prelude::SessionContext::new()
                 .read_batch(batch)
@@ -371,6 +373,7 @@ mod tests {
             "out".to_string(),
         );
         let input = super::super::meta::NodeInput {
+            port: "default".to_string(),
             df_name: "src".to_string(),
             data: datafusion::prelude::SessionContext::new()
                 .read_batch(batch)

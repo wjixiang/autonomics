@@ -13,7 +13,7 @@ pub mod source;
 pub mod sql_node;
 
 pub use linear_regression::LinearRegressionNode;
-pub use meta::{DagNode, NodeId, NodeInput, NodeMeta};
+pub use meta::{DEFAULT_PORT, DagNode, NodeId, NodeInput, NodeMeta, Port};
 pub use sink::{Sink, SinkNode, WriteFormat};
 pub use source::{FileFormat, Source, SourceNode};
 pub use sql_node::SqlNode;

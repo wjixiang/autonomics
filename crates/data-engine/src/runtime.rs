@@ -59,8 +59,24 @@ impl DataEngineServer {
                         .map(|_| ()),
                 );
             }
-            DataEngineCmd::AddEdge { from, to, port, reply } => {
-                let _ = reply.send(self.engine.add_edge(from, to, port).map(|_| ()));
+            DataEngineCmd::AddEdge {
+                from,
+                from_port,
+                to,
+                to_port,
+                reply,
+            } => {
+                let res = match (from_port, to_port) {
+                    (Some(fp), Some(tp)) => {
+                        self.engine.add_edge_port(from, fp, to, tp).map(|_| ())
+                    }
+                    (None, None) => self.engine.add_edge(from, to).map(|_| ()),
+                    _ => Err(crate::data_engine::error::Error::Custom(
+                        "add_edge: from_port and to_port must both be Some or both None"
+                            .to_string(),
+                    )),
+                };
+                let _ = reply.send(res);
             }
             DataEngineCmd::RunDag { reply } => {
                 let _ = reply.send(self.engine.run().await);
@@ -177,13 +193,37 @@ impl DataEngineClient {
         .await
     }
 
-    pub async fn add_edge(&self, from: String, to: String, port: Option<String>) -> Result<()> {
+    /// Connect two nodes using their default (single) ports.
+    pub async fn add_edge(&self, from: String, to: String) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::AddEdge {
                 from,
+                from_port: None,
                 to,
-                port,
+                to_port: None,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
+    }
+
+    /// Connect `from`'s `from_port` output to `to`'s `to_port` input.
+    pub async fn add_edge_port(
+        &self,
+        from: String,
+        from_port: String,
+        to: String,
+        to_port: String,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::AddEdge {
+                from,
+                from_port: Some(from_port),
+                to,
+                to_port: Some(to_port),
                 reply: reply_tx,
             },
             reply_rx,

@@ -1,14 +1,17 @@
-//! End-to-end DAG pipeline tests.
+//! End-to-end DAG pipeline tests for the port-based engine.
 //!
 //! These build a `DataEngine` with a plain `SessionContext` (no opendal/iceberg
-//! backend) and exercise the scheduler through the three built-in node types:
-//! `SourceNode` (load), `SqlNode` (transform), `SinkNode` (write).
+//! backend) and exercise the scheduler through the built-in node types. Each
+//! upstream DataFrame is registered in the shared `SessionContext` under the
+//! globally-unique name `"{consuming_node}__{input_port}"`, so SQL references
+//! its own inputs as `FROM {self}__{port}`.
 
 use data_engine::data_engine::{
     DataEngine, Sink, Source, WriteFormat,
-    dag::{DagError, RuntimeStatus, SchedulerConfig},
     dag::graph::NamedDataFrames,
-    nodes::{DagNode, NodeInput, NodeMeta},
+    dag::{DagError, RuntimeStatus, SchedulerConfig},
+    error::Error,
+    nodes::{DagNode, NodeInput, NodeMeta, Port},
 };
 use datafusion::common::HashMap;
 
@@ -35,8 +38,9 @@ async fn insurance_pipeline_runs() {
         .unwrap()
         .sql_node(
             "agg",
+            // agg's single default input is registered as "agg__default".
             "SELECT region, CAST(AVG(charges) AS BIGINT) AS avg_chg \
-             FROM src GROUP BY region",
+             FROM agg__default GROUP BY region",
             "agg",
         )
         .unwrap()
@@ -48,9 +52,10 @@ async fn insurance_pipeline_runs() {
             },
         )
         .unwrap()
-        .add_edge("load", "agg", Some("src".to_string()))
+        // Default edges: each node has a single relevant port, resolved automatically.
+        .add_edge("load", "agg")
         .unwrap()
-        .add_edge("agg", "out", None)
+        .add_edge("agg", "out")
         .unwrap();
 
     let report = engine.run().await.expect("run should succeed");
@@ -66,7 +71,7 @@ async fn insurance_pipeline_runs() {
 
 #[tokio::test]
 async fn fanout_branch() {
-    // Source -> two independent SqlNodes (fan-out). Both should succeed.
+    // One source → two independent SqlNodes (fan-out from one output port).
     let mut engine = DataEngine::builder().build();
     let iris = datasets_dir().join("Iris.csv");
 
@@ -84,64 +89,19 @@ async fn fanout_branch() {
         // mixed-case column name "Species".
         .sql_node(
             "setosa",
-            r#"SELECT * FROM src WHERE "Species" = 'Iris-setosa'"#,
+            r#"SELECT * FROM setosa__default WHERE "Species" = 'Iris-setosa'"#,
             "setosa",
         )
         .unwrap()
         .sql_node(
             "virginica",
-            r#"SELECT * FROM src_2 WHERE "Species" = 'Iris-virginica'"#,
+            r#"SELECT * FROM virginica__default WHERE "Species" = 'Iris-virginica'"#,
             "virginica",
         )
         .unwrap()
-        .add_edge("load", "setosa", Some("src".to_string()))
+        .add_edge("load", "setosa")
         .unwrap()
-        .add_edge("load", "virginica", Some("src_2".to_string()))
-        .unwrap();
-
-    let report = engine.run().await.expect("run should succeed");
-    assert!(
-        report.ok,
-        "statuses: {:?}; errors: {:?}",
-        report.statuses, report.errors
-    );
-    for n in ["load", "setosa", "virginica"] {
-        assert_eq!(report.status(n), Some(RuntimeStatus::Success), "{n}");
-    }
-}
-
-#[tokio::test]
-async fn fanout_auto_port() {
-    // Same source → two SqlNodes using auto-generated port names.
-    // Auto-generated ports are "{from}__{to}", so SQL must reference those names.
-    let mut engine = DataEngine::builder().build();
-    let iris = datasets_dir().join("Iris.csv");
-
-    engine
-        .source_node(
-            "load",
-            Source::File {
-                path: iris.to_str().unwrap().to_string(),
-                format: None,
-            },
-            "load",
-        )
-        .unwrap()
-        .sql_node(
-            "setosa",
-            r#"SELECT * FROM load__setosa WHERE "Species" = 'Iris-setosa'"#,
-            "setosa",
-        )
-        .unwrap()
-        .sql_node(
-            "virginica",
-            r#"SELECT * FROM load__virginica WHERE "Species" = 'Iris-virginica'"#,
-            "virginica",
-        )
-        .unwrap()
-        .add_edge("load", "setosa", None)
-        .unwrap()
-        .add_edge("load", "virginica", None)
+        .add_edge("load", "virginica")
         .unwrap();
 
     let report = engine.run().await.expect("run should succeed");
@@ -157,11 +117,11 @@ async fn fanout_auto_port() {
 
 #[tokio::test]
 async fn fanout_concurrent() {
-    // Fan-out with concurrency=2 to exercise the concurrent registration path.
-    // Both SqlNodes use explicit port names to avoid any name collision.
-    let mut engine = DataEngine::builder().build().with_config(SchedulerConfig {
-        max_concurrency: 2,
-    });
+    // Fan-out under concurrency=2 — verifies no SessionContext registration
+    // collision between concurrent consumers of the same source port.
+    let mut engine = DataEngine::builder()
+        .build()
+        .with_config(SchedulerConfig { max_concurrency: 2 });
     let iris = datasets_dir().join("Iris.csv");
 
     engine
@@ -175,20 +135,20 @@ async fn fanout_concurrent() {
         )
         .unwrap()
         .sql_node(
-            "branch_a",
-            r#"SELECT COUNT(*) AS cnt FROM iris_a WHERE "Species" = 'Iris-setosa'"#,
-            "branch_a",
+            "a",
+            r#"SELECT COUNT(*) AS cnt FROM a__default WHERE "Species" = 'Iris-setosa'"#,
+            "a",
         )
         .unwrap()
         .sql_node(
-            "branch_b",
-            r#"SELECT COUNT(*) AS cnt FROM iris_b WHERE "Species" = 'Iris-virginica'"#,
-            "branch_b",
+            "b",
+            r#"SELECT COUNT(*) AS cnt FROM b__default WHERE "Species" = 'Iris-virginica'"#,
+            "b",
         )
         .unwrap()
-        .add_edge("load", "branch_a", Some("iris_a".to_string()))
+        .add_edge("load", "a")
         .unwrap()
-        .add_edge("load", "branch_b", Some("iris_b".to_string()))
+        .add_edge("load", "b")
         .unwrap();
 
     let report = engine.run().await.expect("run should succeed");
@@ -197,7 +157,74 @@ async fn fanout_concurrent() {
         "statuses: {:?}; errors: {:?}",
         report.statuses, report.errors
     );
-    for n in ["load", "branch_a", "branch_b"] {
+    for n in ["load", "a", "b"] {
+        assert_eq!(report.status(n), Some(RuntimeStatus::Success), "{n}");
+    }
+}
+
+/// A multi-input join: two sources feed a single SqlNode's `left`/`right`
+/// input ports, exercising named ports and `add_edge_port`.
+#[tokio::test]
+async fn join_named_ports() {
+    let mut engine = DataEngine::builder().build();
+    let iris = datasets_dir().join("Iris.csv");
+
+    engine
+        .source_node(
+            "src_a",
+            Source::File {
+                path: iris.to_str().unwrap().to_string(),
+                format: None,
+            },
+            "data",
+        )
+        .unwrap()
+        .source_node(
+            "src_b",
+            Source::File {
+                path: iris.to_str().unwrap().to_string(),
+                format: None,
+            },
+            "data",
+        )
+        .unwrap();
+
+    // A join node with two named input ports. Inputs are registered as
+    // "join__left" and "join__right" in the shared SessionContext.
+    let join_meta = NodeMeta::new("join").with_inputs(vec![Port::new("left"), Port::new("right")]);
+    engine
+        .add_node(
+            "join",
+            data_engine::data_engine::SqlNode::new(
+                join_meta,
+                r#"SELECT COUNT(*) AS cnt FROM join__left"#.to_string(),
+                engine.ctx(),
+                "result".to_string(),
+            ),
+        )
+        .unwrap()
+        .sink_node(
+            "out",
+            Sink::File {
+                path: "/tmp/dag_join_out.csv".into(),
+                format: WriteFormat::Csv,
+            },
+        )
+        .unwrap()
+        .add_edge_port("src_a", "data", "join", "left")
+        .unwrap()
+        .add_edge_port("src_b", "data", "join", "right")
+        .unwrap()
+        .add_edge("join", "out")
+        .unwrap();
+
+    let report = engine.run().await.expect("run should succeed");
+    assert!(
+        report.ok,
+        "statuses: {:?}; errors: {:?}",
+        report.statuses, report.errors
+    );
+    for n in ["src_a", "src_b", "join", "out"] {
         assert_eq!(report.status(n), Some(RuntimeStatus::Success), "{n}");
     }
 }
@@ -232,9 +259,9 @@ async fn cycle_is_rejected() {
         .unwrap()
         .sql_node("b", "SELECT 1", "b")
         .unwrap()
-        .add_edge("a", "b", None)
+        .add_edge("a", "b")
         .unwrap()
-        .add_edge("b", "a", None)
+        .add_edge("b", "a")
         .unwrap();
 
     let err = engine.run().await.unwrap_err();
@@ -242,7 +269,113 @@ async fn cycle_is_rejected() {
     assert!(msg.contains("cycle"), "{msg}");
 }
 
-/// A node that always fails — for the cascade test.
+#[tokio::test]
+async fn disconnected_input_port_rejected() {
+    // A SqlNode with no incoming edge → validation must reject the dangling
+    // default input port.
+    let mut engine = DataEngine::builder().build();
+    engine.sql_node("orphan", "SELECT 1", "out").unwrap();
+
+    let err = engine.run().await.unwrap_err();
+    assert!(
+        matches!(err, Error::Dag(DagError::PortDisconnected { ref node, .. }) if node == "orphan"),
+        "expected PortDisconnected, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn overconnected_input_port_rejected() {
+    // Two edges into one input port (strict 1:1 violation).
+    let mut engine = DataEngine::builder().build();
+    let iris = datasets_dir().join("Iris.csv");
+    engine
+        .source_node(
+            "s1",
+            Source::File {
+                path: iris.to_str().unwrap().to_string(),
+                format: None,
+            },
+            "d",
+        )
+        .unwrap()
+        .source_node(
+            "s2",
+            Source::File {
+                path: iris.to_str().unwrap().to_string(),
+                format: None,
+            },
+            "d",
+        )
+        .unwrap()
+        .sql_node("c", "SELECT 1", "o")
+        .unwrap()
+        .add_edge("s1", "c")
+        .unwrap()
+        .add_edge("s2", "c")
+        .unwrap();
+
+    let err = engine.run().await.unwrap_err();
+    assert!(
+        matches!(err, Error::Dag(DagError::PortOverconnected { ref node, .. }) if node == "c"),
+        "expected PortOverconnected, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn unknown_port_rejected() {
+    let mut engine = DataEngine::builder().build();
+    engine
+        .sql_node("a", "SELECT 1", "o")
+        .unwrap()
+        .sql_node("b", "SELECT 1", "o")
+        .unwrap()
+        // "a" has no output port named "nope".
+        .add_edge_port("a", "nope", "b", "default")
+        .unwrap();
+
+    let err = engine.run().await.unwrap_err();
+    assert!(
+        matches!(err, Error::Dag(DagError::PortNotFound { ref node, direction: "output", .. }) if node == "a"),
+        "expected PortNotFound(output), got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn ambiguous_default_edge_rejected() {
+    // A node with two input ports cannot be connected with the default add_edge.
+    let mut engine = DataEngine::builder().build();
+    let iris = datasets_dir().join("Iris.csv");
+    engine
+        .source_node(
+            "s",
+            Source::File {
+                path: iris.to_str().unwrap().to_string(),
+                format: None,
+            },
+            "d",
+        )
+        .unwrap();
+    let join_meta = NodeMeta::new("j").with_inputs(vec![Port::new("left"), Port::new("right")]);
+    engine
+        .add_node(
+            "j",
+            data_engine::data_engine::SqlNode::new(
+                join_meta,
+                "SELECT 1".to_string(),
+                engine.ctx(),
+                "o".to_string(),
+            ),
+        )
+        .unwrap();
+    // Default edge into a 2-input node → AmbiguousPort at add_edge time.
+    match engine.add_edge("s", "j") {
+        Err(Error::Dag(DagError::AmbiguousPort { ref node })) if node == "j" => {}
+        Err(e) => panic!("expected AmbiguousPort, got {e:?}"),
+        Ok(_) => panic!("expected AmbiguousPort, but add_edge succeeded"),
+    }
+}
+
+/// A node that always fails — for the cascade test. Source-like (no inputs).
 #[derive(Clone)]
 struct BoomNode(NodeMeta);
 #[async_trait::async_trait]
@@ -261,13 +394,15 @@ impl DagNode for BoomNode {
 #[tokio::test]
 async fn failure_cascades() {
     let mut engine = DataEngine::builder().build();
-    // Custom node: build meta in a separate statement (avoids self-borrow).
-    let boom_meta = NodeMeta::new("boom");
+    // Source-like boom node (no input ports) so it passes port validation.
+    let boom_meta = NodeMeta::new("boom")
+        .with_inputs(vec![])
+        .with_outputs(vec![Port::default_port()]);
     engine.add_node("boom", BoomNode(boom_meta)).unwrap();
     engine
         .sql_node("child", "SELECT 1", "child")
         .unwrap()
-        .add_edge("boom", "child", None)
+        .add_edge("boom", "child")
         .unwrap();
 
     let report = engine.run().await.expect("run completes even on failure");
@@ -280,7 +415,7 @@ async fn failure_cascades() {
     );
 }
 
-/// A node that sleeps — for the parallelism test.
+/// A node that sleeps — for the parallelism test. No inputs, no real output.
 #[derive(Clone)]
 struct SleepNode(NodeMeta);
 #[async_trait::async_trait]
@@ -308,7 +443,10 @@ async fn scheduler_runs_in_parallel() {
         });
         for i in 0..4 {
             let id = format!("s{i}");
-            let meta = NodeMeta::new(&id);
+            // No input ports: standalone nodes pass port validation.
+            let meta = NodeMeta::new(&id)
+                .with_inputs(vec![])
+                .with_outputs(vec![Port::default_port()]);
             engine.add_node(id, SleepNode(meta)).unwrap();
         }
         let start = Instant::now();

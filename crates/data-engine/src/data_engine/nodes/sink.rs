@@ -10,7 +10,7 @@ use datafusion::common::config::{CsvOptions, TableParquetOptions};
 use datafusion::dataframe::DataFrameWriteOptions;
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodeMeta, Port};
 use super::source::normalize_path;
 use crate::data_engine::dag::DagError;
 use crate::data_engine::dag::graph::NamedDataFrames;
@@ -59,6 +59,10 @@ pub struct SinkNode {
 
 impl SinkNode {
     pub fn new(meta: NodeMeta, sink: Sink) -> Self {
+        // A sink consumes one input and produces no outputs.
+        let meta = meta
+            .with_inputs(vec![Port::default_port()])
+            .with_outputs(vec![]);
         Self { meta, sink }
     }
 }

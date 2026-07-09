@@ -5,6 +5,7 @@ use datafusion::common::HashMap;
 
 use crate::{
     data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::NamedDataFrames},
+    data_engine::nodes::Port,
     dataset::{BuiltinDataset, get_builtin_dataset},
 };
 
@@ -37,7 +38,10 @@ impl From<&str> for MockNodeError {
 impl MockNode {}
 impl Default for MockNode {
     fn default() -> Self {
-        let meta = NodeMeta::new("test_node");
+        // A source-style mock: no inputs, one output port "iris".
+        let meta = NodeMeta::new("test_node")
+            .with_inputs(vec![])
+            .with_outputs(vec![Port::new("iris")]);
         Self { meta }
     }
 }

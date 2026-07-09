@@ -16,7 +16,7 @@ use datafusion::{
 };
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodeMeta, Port};
 use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
 
 /// Where a [`SourceNode`] reads from.
@@ -136,6 +136,11 @@ impl SourceNode {
         ctx: SessionContext,
         output_df_name: String,
     ) -> Self {
+        // A source has no inputs and a single output port named after the
+        // output DataFrame. The node's `execute` keys its output by this name.
+        let meta = meta
+            .with_inputs(vec![])
+            .with_outputs(vec![Port::new(output_df_name.clone())]);
         Self {
             meta,
             source,
