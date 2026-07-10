@@ -68,9 +68,9 @@ impl DataEngineServer {
             } => {
                 let res = match (from_port, to_port) {
                     (Some(fp), Some(tp)) => {
-                        self.engine.add_edge_port(from, fp, to, tp).map(|_| ())
+                        self.engine.add_edge(from, to, fp, tp).map(|_| ())
                     }
-                    (None, None) => self.engine.add_edge(from, to).map(|_| ()),
+                    (None, None) => self.engine.add_edge(from, to, 0, 0).map(|_| ()),
                     _ => Err(crate::data_engine::error::Error::Custom(
                         "add_edge: from_port and to_port must both be Some or both None"
                             .to_string(),
@@ -213,9 +213,9 @@ impl DataEngineClient {
     pub async fn add_edge_port(
         &self,
         from: String,
-        from_port: String,
+        from_port: u8,
         to: String,
-        to_port: String,
+        to_port: u8,
     ) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
@@ -240,7 +240,7 @@ impl DataEngineClient {
     pub async fn get_output(
         &self,
         id: String,
-    ) -> Result<Option<crate::data_engine::dag::graph::NamedDataFrames>> {
+    ) -> Result<Option<crate::data_engine::dag::graph::PortOutputs>> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::GetOutput {

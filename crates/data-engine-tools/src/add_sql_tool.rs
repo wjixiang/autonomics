@@ -11,30 +11,37 @@ use crate::ExecError;
 
 #[tool(
     name = "add_sql_node",
-    description = "Add a SQL transform node to the DAG. \
+    description = "Add a SQL transform node to the DAG: runs a SQL query over the upstream inputs. \
                   \
-                  CRITICAL — how to reference upstream data in your SQL query: \
-                  Each upstream input is registered as a temporary table in the shared \
-                  SessionContext. The table name follows the pattern `{THIS_NODE_ID}__{INPUT_PORT_NAME}` \
-                  (i.e. this node's own id, double underscore, then the input port name). \
+                  TABLES — how to reference upstream data: \
+                  Each upstream input is registered as a temp table `port_{N}`, where N is the \
+                  input port index (0-based). Single-input node (the common case) -> `port_0`. \
+                  Multi-input (e.g. a 2-input join) -> `port_0` and `port_1`, in the order edges \
+                  were added. Use ONLY `port_N` — never the upstream node id or any other name. \
                   \
-                  - For a node with a single default input port (the common case), \
-                    the table name is `{THIS_NODE_ID}__default`. \
-                  - For multi-input nodes joined via add_edge with explicit to_port names \
-                    (e.g. 'left', 'right'), use `{THIS_NODE_ID}__left` and `{THIS_NODE_ID}__right`. \
+                  COLUMNS — case sensitivity (the #1 cause of 'No field named ...' failures): \
+                  DataFusion is case-sensitive and lowercases UNQUOTED identifiers. Column names \
+                  from CSV/parquet keep their original casing (e.g. `Species`, `PetalLengthCm`, \
+                  `Id`), so an unquoted `species` or `petallengthcm` will NOT resolve. ALWAYS wrap \
+                  column names in double quotes using their exact case: `\"Species\"`, \
+                  `\"PetalLengthCm\"`. Table names `port_0` / `port_1` are already lowercase and \
+                  need no quoting. Read the exact column names and casing from the upstream node's \
+                  reported `output_schema` BEFORE writing the SQL. \
                   \
-                  Do NOT use the upstream node's id as the table name — it will not work. \
-                  \
-                  Example: if this node's id is 'agg' and it receives data from a source \
-                  node, write `SELECT * FROM agg__default`. If this node's id is 'join' with \
-                  input ports 'left' and 'right', write `SELECT * FROM join__left JOIN join__right ON ...`."
+                  Examples: \
+                  - Filter:     SELECT * FROM port_0 WHERE \"Species\" = 'Iris-setosa' \
+                  - Aggregate:  SELECT \"Species\", COUNT(*) AS n FROM port_0 GROUP BY \"Species\" \
+                  - 2-input join: SELECT * FROM port_0 JOIN port_1 ON port_0.\"Id\" = port_1.\"Id\""
 )]
 pub struct AddSqlNodeInput {
-    #[desc = "Unique identifier for this node in the DAG. This id is also used to form the SQL table name (e.g. if id='agg', reference data as agg__default in your query)."]
+    #[desc = "Unique identifier for this node in the DAG."]
     pub id: String,
-    #[desc = "SQL query. Upstream data is accessible as tables named {this_node_id}__{port_name}. For single-input nodes: FROM {id}__default. For multi-input: FROM {id}__left, FROM {id}__right, etc."]
+    #[desc = "SQL query. Reference upstream inputs as tables `port_0`, `port_1`, ... (never the node id). \
+              Column names are case-sensitive: ALWAYS double-quote them in exact case (e.g. `\"Species\"`, \
+              `\"PetalLengthCm\"`) as reported by the upstream node's output_schema — unquoted identifiers \
+              are lowercased and will not match mixed-case columns."]
     pub query: String,
-    #[desc = "Name for the output DataFrame / output port. Defaults to the node id if omitted. Downstream nodes will reference this name via their own table naming."]
+    #[desc = "Name for the output DataFrame. Defaults to the node id if omitted."]
     pub output_df_name: Option<String>,
 }
 

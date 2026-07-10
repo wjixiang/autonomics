@@ -13,6 +13,8 @@ pub struct AgentRuntime {
     internal_tx: tokio::sync::mpsc::UnboundedSender<InternalEvent>,
     event_rx: tokio::sync::mpsc::UnboundedReceiver<AgentEvent>,
     _engine_handle: tokio::task::JoinHandle<()>,
+    /// Handle for the spawned agent task, so we can abort it on forced shutdown.
+    agent_handle: tokio::task::JoinHandle<()>,
     cancel_token: CancellationToken,
 }
 
@@ -23,7 +25,7 @@ impl AgentRuntime {
 
         let file_storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
 
-        let (internal_tx, engine_handle) = runtime.block_on(async {
+        let (internal_tx, engine_handle, agent_handle) = runtime.block_on(async {
             // Build and spawn DataEngine actor
             let engine = DataEngine::builder()
                 .register_opendal_fs(file_storage.clone())
@@ -57,9 +59,10 @@ proactively rather than answering from memory alone.
 - Use this when a task requires multi-step data processing or transformation.
 - **DAG construction order**: always add all nodes first, then connect them with add_edge, then run_dag.
 - **SQL table naming**: in add_sql_node, upstream data is registered as tables named \
-  `{THIS_NODE_ID}__{INPUT_PORT}`. For single-input nodes the table is `{id}__default`. \
-  Never use the upstream node's id — always use this node's own id. \
-  Example: node id='agg' receiving from a source → write `FROM agg__default`.
+  `port_N` where N is the input port index (0-based). For single-input nodes the table is \
+  `port_0`. Never use the upstream node's id — always use `port_N`. \
+  Example: a filter node receiving one input → write `SELECT * FROM port_0 WHERE x > 1`. \
+  A two-input join node → write `SELECT * FROM port_0 JOIN port_1 ON port_0.id = port_1.id`.
 
 ### General
 - Read, write, and manage files on the local filesystem.
@@ -85,17 +88,18 @@ proactively rather than answering from memory alone.
 
             let tx = agent.internal_event_tx();
 
-            tokio::spawn(async move {
+            let agent_handle = tokio::spawn(async move {
                 agent.run().await;
             });
 
-            Ok::<_, anyhow::Error>((tx, engine_handle))
+            Ok::<_, anyhow::Error>((tx, engine_handle, agent_handle))
         })?;
 
         Ok(Self {
             internal_tx,
             event_rx,
             _engine_handle: engine_handle,
+            agent_handle,
             cancel_token,
         })
     }
@@ -118,6 +122,14 @@ proactively rather than answering from memory alone.
             .internal_tx
             .send(InternalEvent::ResetCancelToken(new_token.clone()));
         self.cancel_token = new_token;
+    }
+
+    /// Force-stop the agent: abort the background task and drop the event
+    /// channel so the TUI can exit immediately.  Used when the user
+    /// double-presses Ctrl+C (cooperative cancel didn't take effect).
+    pub fn shutdown(&mut self) {
+        let _ = self.internal_tx.send(InternalEvent::Shutdown);
+        self.agent_handle.abort();
     }
 
     pub fn poll_event(&mut self) -> Option<AgentEvent> {

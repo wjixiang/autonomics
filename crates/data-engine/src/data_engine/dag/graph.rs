@@ -15,12 +15,13 @@ use tracing::{debug, warn};
 
 use crate::data_engine::dag::utils::{build_inputs, cascade_skip};
 
-use super::error::DagError;
 use super::super::nodes::sink::SinkNode;
+use super::error::DagError;
 use super::runtime::{NodeReport, RunReport, RuntimeStatus, SchedulerConfig};
 use super::{DagNode, NodeId};
 
-pub type NamedDataFrames = HashMap<String, DataFrame>;
+/// Output DataFrames keyed by output port index.
+pub type PortOutputs = HashMap<u8, DataFrame>;
 
 /// Metadata attached to every edge in the graph: which output port of the
 /// source feeds which input port of the target. Exactly one [`DataFrame`] flows
@@ -28,9 +29,9 @@ pub type NamedDataFrames = HashMap<String, DataFrame>;
 #[derive(Debug, Clone)]
 pub struct EdgeLabel {
     /// Output port name on the `from` node.
-    pub from_port: String,
+    pub from_port: u8,
     /// Input port name on the `to` node.
-    pub to_port: String,
+    pub to_port: u8,
 }
 
 /// Module-local Result alias — every fallible operation in this module fails
@@ -55,7 +56,7 @@ pub struct DAG {
     pub id_to_idx: HashMap<NodeId, NodeIndex>,
     /// Per-node runtime status. Populated on [`Self::run`], queryable via [`Self::status`].
     pub statuses: HashMap<NodeId, RuntimeStatus>,
-    outputs: HashMap<NodeId, NamedDataFrames>,
+    outputs: HashMap<NodeId, PortOutputs>,
     errors: HashMap<NodeId, DagError>,
 }
 
@@ -63,7 +64,7 @@ pub struct DAG {
 enum JobResult {
     Success {
         id: NodeId,
-        outputs: NamedDataFrames,
+        outputs: PortOutputs,
         duration: std::time::Duration,
     },
     Failed {
@@ -80,7 +81,7 @@ impl DAG {
         self.statuses.get(id).copied()
     }
 
-    pub fn output(&self, id: &str) -> Option<NamedDataFrames> {
+    pub fn output(&self, id: &str) -> Option<PortOutputs> {
         self.outputs.get(id).cloned()
     }
 
@@ -302,7 +303,11 @@ impl DAG {
         all_ids
             .iter()
             .map(|id| {
-                let status = self.statuses.get(id).copied().unwrap_or(RuntimeStatus::Pending);
+                let status = self
+                    .statuses
+                    .get(id)
+                    .copied()
+                    .unwrap_or(RuntimeStatus::Pending);
                 let node_type = self
                     .nodes
                     .get(id)
@@ -365,54 +370,51 @@ impl DAG {
         Ok(())
     }
 
-    /// Add an edge from `from`'s single output port to `to`'s single input port.
-    /// Convenience form for single-port nodes: the actual port names are
-    /// resolved from each node's declaration, so a node whose lone output port
-    /// is named `"iris"` connects just as easily as one named `"default"`.
-    /// Errors immediately ([`DagError::AmbiguousPort`]) if either endpoint has
-    /// more than one relevant port.
-    pub fn add_edge(&mut self, from: impl Into<NodeId>, to: impl Into<NodeId>) -> Result<()> {
-        let from = from.into();
-        let to = to.into();
-        self.resolve_nodes(&from, &to)?;
-        let from_port = single_output_port(self.nodes[&from].as_ref())?;
-        let to_port = single_input_port(self.nodes[&to].as_ref())?;
-        if let (Some(&a), Some(&b)) = (self.id_to_idx.get(&from), self.id_to_idx.get(&to)) {
-            self.graph.add_edge(
-                a,
-                b,
-                EdgeLabel { from_port, to_port },
-            );
-        }
-        Ok(())
-    }
-
-    /// Add an edge connecting `from`'s `from_port` (an output port) to `to`'s
-    /// `to_port` (an input port). Port existence and 1:1 constraints are checked
-    /// in [`Self::validate`].
-    pub fn add_edge_port(
+    /// Add an edge from `from`'s `from_port` output port to `to`'s `to_port`
+    /// input port. Port existence and the strict 1:1 / completeness constraints
+    /// are checked later in [`Self::validate`].
+    pub fn add_edge(
         &mut self,
         from: impl Into<NodeId>,
-        from_port: impl Into<String>,
         to: impl Into<NodeId>,
-        to_port: impl Into<String>,
+        from_port: u8,
+        to_port: u8,
     ) -> Result<()> {
         let from = from.into();
         let to = to.into();
         self.resolve_nodes(&from, &to)?;
         if let (Some(&a), Some(&b)) = (self.id_to_idx.get(&from), self.id_to_idx.get(&to)) {
-            self.graph.add_edge(
-                a,
-                b,
-                EdgeLabel {
-                    from_port: from_port.into(),
-                    to_port: to_port.into(),
-                },
-            );
+            self.graph.add_edge(a, b, EdgeLabel { from_port, to_port });
         }
         Ok(())
     }
 
+    // /// Add an edge connecting `from`'s `from_port` (an output port) to `to`'s
+    // /// `to_port` (an input port). Port existence and 1:1 constraints are checked
+    // /// in [`Self::validate`].
+    // pub fn add_edge_port(
+    //     &mut self,
+    //     from: impl Into<NodeId>,
+    //     from_port: impl Into<String>,
+    //     to: impl Into<NodeId>,
+    //     to_port: impl Into<String>,
+    // ) -> Result<()> {
+    //     let from = from.into();
+    //     let to = to.into();
+    //     self.resolve_nodes(&from, &to)?;
+    //     if let (Some(&a), Some(&b)) = (self.id_to_idx.get(&from), self.id_to_idx.get(&to)) {
+    //         self.graph.add_edge(
+    //             a,
+    //             b,
+    //             EdgeLabel {
+    //                 from_port: from_port.into(),
+    //                 to_port: to_port.into(),
+    //             },
+    //         );
+    //     }
+    //     Ok(())
+    // }
+    //
     /// Validate that `from` and `to` refer to existing nodes.
     fn resolve_nodes(&self, from: &str, to: &str) -> Result<()> {
         if !self.nodes.contains_key(from) {
@@ -514,8 +516,8 @@ impl DAG {
     /// Port existence, default-edge disambiguation, strict-1:1, and completeness.
     fn validate_port_wiring(&self) -> Result<()> {
         use datafusion::common::HashMap;
-        // node id -> (input port name -> incoming edge count)
-        let mut incoming_counts: HashMap<NodeId, HashMap<String, usize>> = HashMap::new();
+        // node id -> (input port index -> incoming edge count)
+        let mut incoming_counts: HashMap<NodeId, HashMap<u8, usize>> = HashMap::new();
         for id in self.nodes.keys() {
             incoming_counts.insert(id.clone(), HashMap::new());
         }
@@ -527,31 +529,33 @@ impl DAG {
             let from_meta = self.nodes[&from].meta();
             let to_meta = self.nodes[&to].meta();
 
-            // Port existence. (`add_edge` resolves ports eagerly, but
-            // `add_edge_port` lets callers name arbitrary ports, so verify.)
-            if from_meta.output_port(&label.from_port).is_none() {
+            // Port existence.
+            if from_meta.output_port(label.from_port).is_none() {
                 return Err(DagError::PortNotFound {
                     node: from,
-                    port: label.from_port.clone(),
+                    port: label.from_port,
                     direction: "output",
                 });
             }
-            if to_meta.input_port(&label.to_port).is_none() {
-                return Err(DagError::PortNotFound {
-                    node: to.clone(),
-                    port: label.to_port.clone(),
-                    direction: "input",
-                });
+
+            if to_meta.is_fixed_input() {
+                if to_meta.input_port(label.to_port).is_none() {
+                    return Err(DagError::PortNotFound {
+                        node: to.clone(),
+                        port: label.to_port,
+                        direction: "input",
+                    });
+                }
             }
 
             // Strict 1:1 on the input port.
             let counter = incoming_counts.get_mut(&to).unwrap();
-            let entry = counter.entry(label.to_port.clone()).or_insert(0);
+            let entry = counter.entry(label.to_port).or_insert(0);
             *entry += 1;
             if *entry > 1 {
                 return Err(DagError::PortOverconnected {
                     node: to,
-                    port: label.to_port.clone(),
+                    port: label.to_port,
                 });
             }
         }
@@ -559,12 +563,12 @@ impl DAG {
         // Completeness: every declared input port must have exactly one edge.
         for (id, counts) in &incoming_counts {
             let meta = self.nodes[id].meta();
-            for port in meta.input_ports() {
-                let n = counts.get(&port.name).copied().unwrap_or(0);
+            for port in meta.input_ports().iter() {
+                let n = counts.get(&port.index).copied().unwrap_or(0);
                 if n == 0 {
                     return Err(DagError::PortDisconnected {
                         node: id.clone(),
-                        port: port.name.clone(),
+                        port: port.index,
                     });
                 }
             }
@@ -579,8 +583,8 @@ impl DAG {
             let from = self.graph[edge.source()].clone();
             let to = self.graph[edge.target()].clone();
             let label = edge.weight();
-            let from_port = self.nodes[&from].meta().output_port(&label.from_port);
-            let to_port = self.nodes[&to].meta().input_port(&label.to_port);
+            let from_port = self.nodes[&from].meta().output_port(label.from_port);
+            let to_port = self.nodes[&to].meta().input_port(label.to_port);
             let (Some(fp), Some(tp)) = (from_port, to_port) else {
                 continue;
             };
@@ -591,9 +595,9 @@ impl DAG {
             if let Err(reason) = schema_compatible(out_schema, in_schema) {
                 return Err(DagError::SchemaMismatch {
                     from_node: from,
-                    from_port: label.from_port.clone(),
+                    from_port: label.from_port,
                     to_node: to,
-                    to_port: label.to_port.clone(),
+                    to_port: label.to_port,
                     reason,
                 });
             }
@@ -664,10 +668,7 @@ impl DAG {
         loop {
             let &current = stack.last()?;
             // Look for a successor that is still on the stack (back-edge = cycle).
-            for neighbor in self
-                .graph
-                .neighbors_directed(current, Direction::Outgoing)
-            {
+            for neighbor in self.graph.neighbors_directed(current, Direction::Outgoing) {
                 if !idx_set.contains(&neighbor) {
                     continue;
                 }
@@ -700,26 +701,6 @@ impl DAG {
     /// Render DAG topology into dot code
     pub fn to_dot(&self) -> String {
         format!("{:?}", Dot::with_config(&self.graph, &[]))
-    }
-}
-
-/// Resolve the sole output port of a node, or error if there isn't exactly one.
-fn single_output_port(node: &dyn DagNode) -> Result<String> {
-    match node.meta().output_ports() {
-        [p] => Ok(p.name.clone()),
-        _ => Err(DagError::AmbiguousPort {
-            node: node.meta().id().to_string(),
-        }),
-    }
-}
-
-/// Resolve the sole input port of a node, or error if there isn't exactly one.
-fn single_input_port(node: &dyn DagNode) -> Result<String> {
-    match node.meta().input_ports() {
-        [p] => Ok(p.name.clone()),
-        _ => Err(DagError::AmbiguousPort {
-            node: node.meta().id().to_string(),
-        }),
     }
 }
 
@@ -775,10 +756,10 @@ mod tests {
         for id in ["a", "b", "c", "d"] {
             add(&mut dag, id);
         }
-        dag.add_edge("a", "b").unwrap();
-        dag.add_edge("a", "c").unwrap();
-        dag.add_edge("b", "d").unwrap();
-        dag.add_edge("c", "d").unwrap();
+        dag.add_edge("a", "b", 0, 0).unwrap();
+        dag.add_edge("a", "c", 0, 0).unwrap();
+        dag.add_edge("b", "d", 0, 0).unwrap();
+        dag.add_edge("c", "d", 0, 0).unwrap();
         dag
     }
 
@@ -802,7 +783,7 @@ mod tests {
         async fn execute(
             &mut self,
             _inputs: &[super::super::NodeInput],
-        ) -> std::result::Result<NamedDataFrames, super::super::DagError> {
+        ) -> std::result::Result<PortOutputs, super::super::DagError> {
             Ok(HashMap::new())
         }
     }
@@ -829,8 +810,8 @@ mod tests {
         let mut dag = DAG::default();
         add(&mut dag, "x");
         add(&mut dag, "y");
-        dag.add_edge("x", "y").unwrap();
-        dag.add_edge("y", "x").unwrap();
+        dag.add_edge("x", "y", 0, 0).unwrap();
+        dag.add_edge("y", "x", 0, 0).unwrap();
         let err = dag.validate().unwrap_err();
         assert!(matches!(err, DagError::Cycle(_)), "{err:?}");
         let err = dag.topo_order().unwrap_err();
@@ -844,7 +825,7 @@ mod tests {
         add(&mut dag, "a");
         // edge to missing node
         assert!(matches!(
-            dag.add_edge("a", "ghost"),
+            dag.add_edge("a", "ghost", 0, 0),
             Err(DagError::UnknownNode(_))
         ));
         // duplicate id
@@ -860,8 +841,8 @@ mod tests {
         for id in ["src", "a", "b"] {
             add(&mut dag, id);
         }
-        dag.add_edge("src", "a").unwrap();
-        dag.add_edge("src", "b").unwrap();
+        dag.add_edge("src", "a", 0, 0).unwrap();
+        dag.add_edge("src", "b", 0, 0).unwrap();
 
         assert_eq!(dag.predecessors("a").len(), 1);
         assert_eq!(dag.predecessors("a")[0], "src");
@@ -878,13 +859,13 @@ mod tests {
         for id in ["src", "a"] {
             add(&mut dag, id);
         }
-        dag.add_edge("src", "a").unwrap();
+        dag.add_edge("src", "a", 0, 0).unwrap();
 
         let edges = dag.incoming_edges_with_ports("a");
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].0, "src");
-        assert_eq!(edges[0].1.from_port, "default");
-        assert_eq!(edges[0].1.to_port, "default");
+        assert_eq!(edges[0].1.from_port, 0);
+        assert_eq!(edges[0].1.to_port, 0);
     }
 
     #[test]
@@ -893,12 +874,12 @@ mod tests {
         for id in ["x", "y"] {
             add(&mut dag, id);
         }
-        dag.add_edge_port("x", "out", "y", "in").unwrap();
+        dag.add_edge("x", "y", 1, 0).unwrap();
 
         let edges = dag.incoming_edges_with_ports("y");
         assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].1.from_port, "out");
-        assert_eq!(edges[0].1.to_port, "in");
+        assert_eq!(edges[0].1.from_port, 1);
+        assert_eq!(edges[0].1.to_port, 0);
     }
 
     #[test]
@@ -911,8 +892,8 @@ mod tests {
         assert!(from_nodes.contains(&"b"));
         assert!(from_nodes.contains(&"c"));
         for (_, e) in &edges_d {
-            assert_eq!(e.from_port, "default");
-            assert_eq!(e.to_port, "default");
+            assert_eq!(e.from_port, 0);
+            assert_eq!(e.to_port, 0);
         }
     }
 
@@ -936,7 +917,7 @@ mod tests {
         async fn execute(
             &mut self,
             _inputs: &[super::super::NodeInput],
-        ) -> std::result::Result<NamedDataFrames, super::super::DagError> {
+        ) -> std::result::Result<PortOutputs, super::super::DagError> {
             Ok(HashMap::new())
         }
     }
@@ -952,7 +933,10 @@ mod tests {
     #[test]
     fn schema_compatible_passes() {
         // Output schema is a superset of input schema → OK.
-        let out = make_schema(&[("a", arrow_schema::DataType::Int32), ("b", arrow_schema::DataType::Utf8)]);
+        let out = make_schema(&[
+            ("a", arrow_schema::DataType::Int32),
+            ("b", arrow_schema::DataType::Utf8),
+        ]);
         let inp = make_schema(&[("a", arrow_schema::DataType::Int32)]);
         assert!(schema_compatible(&out, &inp).is_ok());
     }
@@ -961,7 +945,10 @@ mod tests {
     fn schema_mismatch_rejected() {
         // Input requires a column the output lacks, and a type differs.
         let out = make_schema(&[("a", arrow_schema::DataType::Int32)]);
-        let inp = make_schema(&[("a", arrow_schema::DataType::Int64), ("b", arrow_schema::DataType::Utf8)]);
+        let inp = make_schema(&[
+            ("a", arrow_schema::DataType::Int64),
+            ("b", arrow_schema::DataType::Utf8),
+        ]);
         let err = schema_compatible(&out, &inp).unwrap_err();
         assert!(err.contains("a"), "{err}");
     }
@@ -977,7 +964,7 @@ mod tests {
             Box::new(PortedNode(
                 super::super::NodeMeta::new("src")
                     .with_inputs(vec![])
-                    .with_outputs(vec![Port::typed("o", out_schema)]),
+                    .with_outputs(vec![Port::typed(0, out_schema)]),
             )),
         )
         .unwrap();
@@ -985,15 +972,15 @@ mod tests {
             "dst".into(),
             Box::new(PortedNode(
                 super::super::NodeMeta::new("dst")
-                    .with_inputs(vec![Port::typed("i", in_schema)])
+                    .with_inputs(vec![Port::typed(0, in_schema)])
                     .with_outputs(vec![]),
             )),
         )
         .unwrap();
-        dag.add_edge_port("src", "o", "dst", "i").unwrap();
+        dag.add_edge("src", "dst", 0, 0).unwrap();
         let err = dag.validate().unwrap_err();
         assert!(
-            matches!(err, DagError::SchemaMismatch { ref from_node, ref to_port, .. } if from_node == "src" && to_port == "i"),
+            matches!(err, DagError::SchemaMismatch { ref from_node, ref to_port, .. } if from_node == "src" && *to_port == 0),
             "expected SchemaMismatch, got {err:?}"
         );
     }
@@ -1018,7 +1005,10 @@ mod tests {
         }
 
         // 4 edges: a→b, a→c, b→d, c→d — petgraph uses "N -> M" notation
-        assert!(dot.contains("->"), "DOT output should contain directed edges");
+        assert!(
+            dot.contains("->"),
+            "DOT output should contain directed edges"
+        );
 
         // Smoke-check: non-trivial output (a 4-node DAG should be > 20 chars)
         assert!(dot.len() > 20, "DOT output seems too short, got: {dot}");

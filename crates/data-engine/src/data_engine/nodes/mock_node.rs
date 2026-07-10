@@ -4,8 +4,7 @@ use async_trait::async_trait;
 use datafusion::common::HashMap;
 
 use crate::{
-    data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::NamedDataFrames},
-    data_engine::nodes::Port,
+    data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::PortOutputs},
     dataset::{BuiltinDataset, get_builtin_dataset},
 };
 
@@ -39,9 +38,7 @@ impl MockNode {}
 impl Default for MockNode {
     fn default() -> Self {
         // A source-style mock: no inputs, one output port "iris".
-        let meta = NodeMeta::new("test_node")
-            .with_inputs(vec![])
-            .with_outputs(vec![Port::new("iris")]);
+        let meta = NodeMeta::new("test_node");
         Self { meta }
     }
 }
@@ -64,10 +61,10 @@ impl DagNode for MockNode {
     }
 
     /// Input data injected by the scheduler when the node runs.
-    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
+    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
         let test_dataset = get_builtin_dataset(BuiltinDataset::Iris).await;
-        let mut res: NamedDataFrames = HashMap::new();
-        res.insert("iris".to_string(), test_dataset);
+        let mut res: PortOutputs = HashMap::new();
+        res.insert(0, test_dataset);
         Ok(res)
     }
 }

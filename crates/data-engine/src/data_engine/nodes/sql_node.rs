@@ -1,10 +1,13 @@
 use async_trait::async_trait;
-use datafusion::{common::HashMap, prelude::SessionContext};
+use datafusion::{
+    common::HashMap,
+    prelude::{SessionConfig, SessionContext},
+};
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta, Port};
+use super::meta::{DagNode, NodeInput, NodeMeta};
 
-use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
+use crate::data_engine::dag::{DagError, graph::PortOutputs};
 
 #[derive(Debug, Error)]
 pub enum SqlNodeError {
@@ -24,18 +27,12 @@ impl From<SqlNodeError> for DagError {
 }
 
 /// A transform node: registers each upstream input as a named table and runs a
-/// SQL query over them. Single output port.
+/// SQL query over them. Single output port, variadic input.
 ///
-/// Input ports are taken from the supplied [`NodeMeta`] (default: one port
-/// named `"default"`). To build a multi-input join, construct the meta with
-/// several input ports, e.g.:
-/// ```ignore
-/// let meta = NodeMeta::new("join")
-///     .with_inputs(vec![Port::new("left"), Port::new("right")]);
-/// SqlNode::new(meta, "SELECT ... FROM {node}__left JOIN {node}__right ...".into(), ctx, "result".into())
-/// ```
-/// Each input is registered in the shared `SessionContext` under its
-/// globally-unique `df_name` (`"{node_id}__{port}"`), which the SQL references.
+/// Each upstream input arriving on port `N` is registered as the table
+/// `port_{N}`, so the SQL references it as e.g. `FROM port_0` (or
+/// `JOIN port_1` for a multi-input node). Input port count is not fixed
+/// (`set_fixed_input(false)`); the ports are whatever the wiring connects.
 #[derive(Clone)]
 pub struct SqlNode {
     meta: NodeMeta,
@@ -46,14 +43,33 @@ pub struct SqlNode {
 
 impl SqlNode {
     pub fn new(
-        meta: NodeMeta,
+        id: impl Into<String>,
         query: String,
         ctx: SessionContext,
         output_df_name: String,
     ) -> Self {
         // Output port is named after the output DataFrame. Input ports are
         // whatever the caller declared on the meta (default single "default").
-        let meta = meta.with_outputs(vec![Port::new(output_df_name.clone())]);
+
+        let mut meta = NodeMeta::new(id)
+            .add_output_port(None)
+            .set_fixed_input(false);
+        Self {
+            meta,
+            sql_query: query,
+            ctx,
+            output_df_name,
+        }
+    }
+
+    /// Create a [`SqlNode`] from a pre-built [`NodeMeta`] (useful for
+    /// multi-input join nodes that declare several input ports).
+    pub fn from_meta(
+        meta: NodeMeta,
+        query: String,
+        ctx: SessionContext,
+        output_df_name: String,
+    ) -> Self {
         Self {
             meta,
             sql_query: query,
@@ -85,7 +101,7 @@ impl DagNode for SqlNode {
         self
     }
 
-    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
         if inputs.is_empty() {
             return Err(SqlNodeError::InvalidInput {
                 message: "SqlNode requires at least one upstream input".to_string(),
@@ -93,22 +109,29 @@ impl DagNode for SqlNode {
             .into());
         }
 
-        let ctx = self.ctx.clone();
+        let ctx = SessionContext::new_with_config_rt(
+            SessionConfig::new(),
+            self.ctx.runtime_env(),
+        );
         for inp in inputs {
-            // register_table errors if the name already exists, so deregister
-            // first.
+            // Register each upstream DataFrame under `port_{port}`. The fresh
+            // context isolates the table namespace so concurrent SqlNodes never
+            // collide on the same `port_N` slot, while sharing the engine's
+            // `RuntimeEnv` keeps its object stores reachable.
             //
-            // NOTE: SqlNodes share the engine's SessionContext, so a port
-            // name is a single shared slot — give each upstream a distinct port
-            // name when they carry different data.
-            let _ = ctx.deregister_table(&inp.df_name);
+            // `DataFrame::into_view()` discards the DataFrame's own
+            // `SessionState` and replans the scan against whichever context
+            // consumes the view, so this context MUST carry the object store:
+            // a bare `SessionContext::new()` registers only the default
+            // `LocalFileSystem` under `file://`, so a CSV-backed upstream
+            // ListingTable would find no file and silently return 0 rows.
             let view = inp.data.clone().into_view();
-            ctx.register_table(&inp.df_name, view)
+            ctx.register_table(&format!("port_{}", inp.port), view)
                 .map_err(SqlNodeError::RegisterView)?;
         }
         let out = ctx.sql(&self.sql_query).await?;
-        let mut res: NamedDataFrames = HashMap::new();
-        res.insert(self.output_df_name.clone(), out);
+        let mut res: PortOutputs = HashMap::new();
+        res.insert(0, out);
         Ok(res)
     }
 }
@@ -119,9 +142,21 @@ mod tests {
 
     use arrow_array::{Int32Array, RecordBatch};
     use arrow_schema::{DataType, Field, Schema};
+    use datafusion::prelude::DataFrame;
     use std::sync::Arc;
 
-    use super::super::meta::NodeMeta;
+    /// Create a [`SessionContext`] with a simple int32 column `x` (values `[1, 2, 3]`)
+    /// registered as table `"src"`, and a [`SqlNode`] wired to the given `sql` query.
+    fn setup_test_node(sql: &str) -> (SessionContext, SqlNode, DataFrame) {
+        let ctx = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();
+        let df = ctx.read_batch(batch).unwrap();
+        ctx.register_table("src", df.clone().into_view()).unwrap();
+        let node = SqlNode::new("sql", sql.into(), ctx.clone(), "out".into());
+        (ctx, node, df)
+    }
 
     #[tokio::test]
     async fn test_smoke_register_table() {
@@ -129,19 +164,7 @@ mod tests {
         // registered — this exercises the API path used by `execute`. The
         // DAG plumbing / schema wiring lives in higher-level integration
         // tests.
-        let ctx = SessionContext::new();
-        let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
-        let batch =
-            RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();
-        let df = ctx.read_batch(batch).unwrap();
-        let node = SqlNode::new(
-            NodeMeta::new("sql"),
-            "SELECT * FROM src WHERE x > 1".into(),
-            ctx.clone(),
-            "out".into(),
-        );
-        let view = df.into_view();
-        ctx.register_table("src", view).unwrap();
+        let (ctx, node, _df) = setup_test_node("SELECT * FROM src WHERE x > 1");
         let result = ctx
             .sql(&node.sql_query)
             .await
@@ -150,6 +173,15 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result[0].num_rows(), 2);
-        let _ = node;
+    }
+
+    #[tokio::test]
+    async fn test_data_intake() {
+        let (_ctx, mut node, df) = setup_test_node("SELECT * FROM port_0 WHERE x > 1");
+        let input = NodeInput { port: 0, data: df };
+
+        // Verify SQL node input mapping: it should use 'port_0' to reference data.
+        let output = node.execute(&[input]).await.unwrap();
+        dbg!(output);
     }
 }

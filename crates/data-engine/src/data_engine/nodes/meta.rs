@@ -8,9 +8,9 @@
 
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
-use datafusion::prelude::DataFrame;
+use datafusion::{common::HashMap, prelude::DataFrame};
 
-use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
+use crate::data_engine::dag::{DagError, graph::PortOutputs};
 
 /// Unique identifier for a node in the DAG.
 pub type NodeId = String;
@@ -26,30 +26,83 @@ pub const DEFAULT_PORT: &str = "default";
 /// of an edge declare a schema, the engine validates compatibility in [`DAG::validate`].
 #[derive(Debug, Clone)]
 pub struct Port {
-    pub name: String,
+    pub index: u8,
     pub schema: Option<SchemaRef>,
 }
 
 impl Port {
     /// An untyped port (schema discovered at runtime).
-    pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            schema: None,
-        }
+    pub fn new(index: u8, schema: Option<SchemaRef>) -> Self {
+        Self { index, schema }
     }
 
     /// A port with a known schema.
-    pub fn typed(name: impl Into<String>, schema: SchemaRef) -> Self {
+    pub fn typed(index: u8, schema: SchemaRef) -> Self {
         Self {
-            name: name.into(),
+            index,
             schema: Some(schema),
         }
     }
 
     /// Convenience: the unnamed default port.
+    #[deprecated]
     pub fn default_port() -> Self {
-        Self::new(DEFAULT_PORT)
+        Self::new(0, None)
+    }
+
+    pub fn get_code(&self) -> String {
+        format!("port_{0}", self.index.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct Ports {
+    ports: HashMap<u8, Port>,
+    is_fixed: bool,
+}
+impl Default for Ports {
+    fn default() -> Self {
+        Self {
+            ports: Default::default(),
+            is_fixed: true,
+        }
+    }
+}
+
+impl Ports {
+    pub fn add_port(&mut self, schema: Option<SchemaRef>) {
+        let length = self.ports.len();
+        self.ports
+            .insert(length as u8, Port::new(length as u8, schema));
+    }
+
+    pub fn get(&self, index: u8) -> Option<&Port> {
+        self.ports.get(&index)
+    }
+
+    pub fn len(&self) -> usize {
+        self.ports.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ports.is_empty()
+    }
+
+    /// Iterate over ports in index order.
+    pub fn iter(&self) -> impl Iterator<Item = &Port> {
+        let mut keys: Vec<_> = self.ports.keys().copied().collect();
+        keys.sort();
+        keys.into_iter().filter_map(move |k| self.ports.get(&k))
+    }
+}
+
+impl From<Vec<Port>> for Ports {
+    fn from(ports: Vec<Port>) -> Self {
+        let map = ports.into_iter().map(|p| (p.index, p)).collect();
+        Self {
+            ports: map,
+            is_fixed: true,
+        }
     }
 }
 
@@ -59,11 +112,14 @@ impl Port {
 pub struct NodeInput {
     /// The consuming node's INPUT port name this data arrived on (e.g. `"left"`,
     /// `"right"`, or `"default"`). The node looks up its inputs by this name.
-    pub port: String,
+    pub port: u8,
     /// Globally-unique table name under which `data` is registered in the shared
     /// `SessionContext` (derived from the edge: `"{from_node}__{from_port}__{to_node}"`).
     /// Guaranteed not to collide with any other node's registration.
-    pub df_name: String,
+    ///
+    /// TODO: Need to remove this field, DAG node should use auto-generated port index to reference
+    /// instead of naming dataframe explicitly.
+    // pub df_name: String,
     pub data: DataFrame,
 }
 
@@ -71,8 +127,8 @@ pub struct NodeInput {
 #[derive(Clone)]
 pub struct NodeMeta {
     id: NodeId,
-    input_ports: Vec<Port>,
-    output_ports: Vec<Port>,
+    input_ports: Ports,
+    output_ports: Ports,
 }
 
 impl NodeMeta {
@@ -81,8 +137,8 @@ impl NodeMeta {
     pub fn new(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            input_ports: vec![Port::default_port()],
-            output_ports: vec![Port::default_port()],
+            input_ports: Ports::default(),
+            output_ports: Ports::default(),
         }
     }
 
@@ -90,8 +146,8 @@ impl NodeMeta {
     pub fn source(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            input_ports: vec![],
-            output_ports: vec![Port::default_port()],
+            input_ports: vec![].into(),
+            output_ports: vec![Port::default_port()].into(),
         }
     }
 
@@ -99,20 +155,37 @@ impl NodeMeta {
     pub fn sink(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            input_ports: vec![Port::default_port()],
-            output_ports: vec![],
+            input_ports: vec![Port::default_port()].into(),
+            output_ports: vec![].into(),
         }
     }
 
+    pub fn set_fixed_input(mut self, is_fixed: bool) -> Self {
+        self.input_ports.is_fixed = is_fixed;
+        self
+    }
+
     /// Replace the input ports.
+    #[deprecated]
     pub fn with_inputs(mut self, ports: Vec<Port>) -> Self {
-        self.input_ports = ports;
+        self.input_ports = ports.into();
         self
     }
 
     /// Replace the output ports.
+    #[deprecated]
     pub fn with_outputs(mut self, ports: Vec<Port>) -> Self {
-        self.output_ports = ports;
+        self.output_ports = ports.into();
+        self
+    }
+
+    pub fn add_output_port(mut self, schema: Option<SchemaRef>) -> Self {
+        self.output_ports.add_port(schema);
+        self
+    }
+
+    pub fn add_input_port(mut self, schema: Option<SchemaRef>) -> Self {
+        self.input_ports.add_port(schema);
         self
     }
 
@@ -120,22 +193,26 @@ impl NodeMeta {
         &self.id
     }
 
-    pub fn input_ports(&self) -> &[Port] {
+    pub fn input_ports(&self) -> &Ports {
         &self.input_ports
     }
 
-    pub fn output_ports(&self) -> &[Port] {
+    pub fn output_ports(&self) -> &Ports {
         &self.output_ports
     }
 
-    /// Look up a declared input port by name.
-    pub fn input_port(&self, name: &str) -> Option<&Port> {
-        self.input_ports.iter().find(|p| p.name == name)
+    /// Look up a declared input port by index.
+    pub fn input_port(&self, index: u8) -> Option<&Port> {
+        self.input_ports.get(index)
     }
 
-    /// Look up a declared output port by name.
-    pub fn output_port(&self, name: &str) -> Option<&Port> {
-        self.output_ports.iter().find(|p| p.name == name)
+    /// Look up a declared output port by index.
+    pub fn output_port(&self, index: u8) -> Option<&Port> {
+        self.output_ports.get(index)
+    }
+
+    pub fn is_fixed_input(&self) -> bool {
+        self.input_ports.is_fixed
     }
 }
 
@@ -149,7 +226,7 @@ impl NodeMeta {
 #[async_trait]
 pub trait DagNode: Send + Sync {
     fn meta(&self) -> &NodeMeta;
-    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError>;
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError>;
     fn clone_box(&self) -> Box<dyn DagNode>;
 
     /// Human-readable node kind (e.g. `"source"`, `"sql"`, `"sink"`).
@@ -158,6 +235,9 @@ pub trait DagNode: Send + Sync {
     /// Downcast helper for concrete-type introspection (e.g. extracting
     /// sink-specific details at report time).
     fn as_any(&self) -> &dyn std::any::Any;
+
+    // fn write_output(&self, port_id: &str, df: DataFrame) -> Result<(), DagError>;
+    // fn get_input(&self, port_id: &str) -> Result<DataFrame, DagError>;
 }
 
 impl Clone for Box<dyn DagNode> {

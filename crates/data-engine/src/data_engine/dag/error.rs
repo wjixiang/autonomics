@@ -34,31 +34,26 @@ pub enum DagError {
     #[error("node `{node}` has no {direction} port `{port}`")]
     PortNotFound {
         node: String,
-        port: String,
+        port: u8,
         direction: &'static str,
     },
 
     /// A declared input port has no incoming edge (every input port must be
     /// connected).
     #[error("input port `{port}` on node `{node}` is not connected")]
-    PortDisconnected { node: String, port: String },
+    PortDisconnected { node: String, port: u8 },
 
     /// More than one edge connects to the same input port (strict 1:1).
     #[error("input port `{port}` on node `{node}` has multiple incoming edges")]
-    PortOverconnected { node: String, port: String },
-
-    /// `add_edge` (the default-port form) was used on a node with more than one
-    /// relevant port, so the port is ambiguous.
-    #[error("node `{node}` has multiple ports; use `add_edge_port` to specify which")]
-    AmbiguousPort { node: String },
+    PortOverconnected { node: String, port: u8 },
 
     /// Connected ports declare incompatible schemas.
     #[error("schema mismatch on edge {from_node}.{from_port} -> {to_node}.{to_port}: {reason}")]
     SchemaMismatch {
         from_node: String,
-        from_port: String,
+        from_port: u8,
         to_node: String,
-        to_port: String,
+        to_port: u8,
         reason: String,
     },
 
@@ -103,12 +98,6 @@ impl DagError {
                 kind: "port_overconnected".into(),
                 message: format!(
                     "input port `{port}` on node `{node}` has multiple incoming edges"
-                ),
-            },
-            Self::AmbiguousPort { node } => super::runtime::DagErrorReport {
-                kind: "ambiguous_port".into(),
-                message: format!(
-                    "node `{node}` has multiple ports; use `add_edge_port` to specify which"
                 ),
             },
             Self::SchemaMismatch {

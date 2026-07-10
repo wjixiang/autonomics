@@ -17,7 +17,7 @@ use datafusion::{
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta, Port};
-use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
+use crate::data_engine::dag::{DagError, graph::PortOutputs};
 
 /// Where a [`SourceNode`] reads from.
 #[derive(Debug, Clone)]
@@ -131,16 +131,15 @@ pub struct SourceNode {
 
 impl SourceNode {
     pub fn new(
-        meta: NodeMeta,
+        id: impl Into<String>,
         source: Source,
         ctx: SessionContext,
         output_df_name: String,
     ) -> Self {
         // A source has no inputs and a single output port named after the
         // output DataFrame. The node's `execute` keys its output by this name.
-        let meta = meta
-            .with_inputs(vec![])
-            .with_outputs(vec![Port::new(output_df_name.clone())]);
+        let meta = NodeMeta::new(id.into());
+        let meta = meta.add_output_port(None);
         Self {
             meta,
             source,
@@ -181,7 +180,7 @@ impl DagNode for SourceNode {
         self
     }
 
-    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
+    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
         let ctx = self.ctx.clone();
         let df = match &self.source {
             Source::File { path, format } => {
@@ -197,8 +196,8 @@ impl DagNode for SourceNode {
                 ctx.sql(&format!("SELECT * FROM iceberg.{ident}")).await?
             }
         };
-        let mut res: NamedDataFrames = HashMap::new();
-        res.insert(self.output_df_name.clone(), df);
+        let mut res: PortOutputs = HashMap::new();
+        res.insert(0, df);
         Ok(res)
     }
 }

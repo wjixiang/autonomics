@@ -431,7 +431,21 @@ impl Agent {
             }
         }
 
-        if !self.lifecycle.is_running() {
+        // Post-loop cleanup: ensure the TUI always receives a terminal
+        // event and the lifecycle is reset, regardless of how the loop
+        // exited.
+        //
+        // Normally the `cancelled` select! branch sends the Error event and
+        // sets the lifecycle to aborted, which then becomes idle here.
+        // But when a `ResetCancelToken` InternalEvent arrives via `rx.recv()`
+        // before the `cancelled.cancelled()` branch fires (a race in
+        // `cancel()`), the loop breaks via the condition check at the top
+        // without sending any event or touching the lifecycle.  Detect that
+        // case and emit the expected shutdown sequence.
+        if cancelled.is_cancelled() && self.lifecycle.is_running() {
+            self.lifecycle.set_idle();
+            self.send_event(AgentEvent::Error("Task cancelled by user".into()));
+        } else if !self.lifecycle.is_running() {
             self.lifecycle.set_idle();
         }
     }

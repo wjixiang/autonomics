@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use agentik_sdk::AuthMethod;
 use agentik_sdk::model::model_pool::ModelPoolConfig;
@@ -24,6 +24,10 @@ const POLL_TIMEOUT_IDLE: Duration = Duration::from_millis(100);
 
 /// Lines scrolled by a vim-style half-page motion (`d` / `u` in browse mode).
 const HALF_PAGE: usize = 12;
+
+/// If the user presses Ctrl+C again within this window after a cooperative
+/// cancel, the app force-quits regardless of agent status.
+const FORCE_QUIT_WINDOW: Duration = Duration::from_secs(3);
 
 /// Restore the terminal to its normal state: disable mouse capture, leave
 /// alternate screen, and disable raw mode. Called on both normal exit and
@@ -67,6 +71,9 @@ pub struct App {
     dirty: bool,
     /// Set to break the main event loop so `ratatui::run()` can call `restore()`.
     should_quit: bool,
+    /// Timestamp of the last cooperative cancel (Ctrl+C while agent running).
+    /// A second Ctrl+C within `FORCE_QUIT_WINDOW` forces an immediate quit.
+    cancel_requested_at: Option<Instant>,
 }
 
 impl App {
@@ -99,6 +106,7 @@ impl App {
             app_event_tx: crate::app_event_sender::AppEventSender::new(app_event_tx),
             dirty: true, // render the initial frame
             should_quit: false,
+            cancel_requested_at: None,
         }
     }
 
@@ -210,6 +218,10 @@ impl App {
 
         let result = self.app(&mut terminal);
 
+        // Ensure the agent and engine tasks are torn down even if the main
+        // loop exited without a cooperative shutdown (e.g. force-quit).
+        self.agent_runtime.shutdown();
+
         // Restore terminal on exit (whether normal or error).
         let _ = restore_terminal();
 
@@ -292,6 +304,11 @@ impl App {
             state::apply_event(&mut self.state.agent_tab_state, event);
             had_events = true;
         }
+        // Clear the cancel-pending flag once the agent is idle so a single
+        // Ctrl+C will quit normally next time.
+        if had_events && matches!(self.state.agent_tab_state.status, AgentStatus::Idle) {
+            self.clear_cancel_pending();
+        }
         had_events
     }
 
@@ -316,6 +333,11 @@ impl App {
             }
             _ => 0,
         }
+    }
+
+    /// Reset the cancel-request timestamp (called when the agent returns to Idle).
+    fn clear_cancel_pending(&mut self) {
+        self.cancel_requested_at = None;
     }
 
     /// Handle mouse events: scroll wheel scrolls the chat in Agent tab.
@@ -356,13 +378,30 @@ impl App {
     }
 
     fn handle_key(&mut self, key: &KeyEvent) {
-        // Ctrl+C: cancel running agent first, then quit on second press
+        // Ctrl+C: cancel running agent first, then quit on second press.
+        // If the agent is blocked and doesn't transition to Idle after the
+        // first cancel, a second Ctrl+C within FORCE_QUIT_WINDOW force-quits.
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            if !matches!(self.state.agent_tab_state.status, AgentStatus::Idle) {
-                self.agent_runtime.cancel();
+            if self.should_quit {
+                // Already quitting — no-op.
                 return;
             }
-            self.should_quit = true;
+            if matches!(self.state.agent_tab_state.status, AgentStatus::Idle) {
+                self.should_quit = true;
+                return;
+            }
+            // Agent is running — check for force-quit (double Ctrl+C).
+            if let Some(ts) = self.cancel_requested_at {
+                if ts.elapsed() < FORCE_QUIT_WINDOW {
+                    tracing::info!("force-quit: second Ctrl+C within {:?}", FORCE_QUIT_WINDOW);
+                    self.agent_runtime.shutdown();
+                    self.should_quit = true;
+                    return;
+                }
+            }
+            // First Ctrl+C: cooperative cancel.
+            self.agent_runtime.cancel();
+            self.cancel_requested_at = Some(Instant::now());
             return;
         }
 

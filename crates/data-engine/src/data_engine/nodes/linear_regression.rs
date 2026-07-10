@@ -14,8 +14,8 @@ use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta, Port};
-use crate::data_engine::dag::{DagError, graph::NamedDataFrames};
+use super::meta::{DagNode, NodeInput, NodeMeta};
+use crate::data_engine::dag::{DagError, graph::PortOutputs};
 
 // =====================================================================
 // Error type
@@ -202,13 +202,13 @@ pub struct LinearRegressionNode {
 
 impl LinearRegressionNode {
     pub fn new(
-        meta: NodeMeta,
+        id: impl Into<String>,
         x_columns: Vec<String>,
         y_column: String,
         intercept: bool,
         output_df_name: String,
     ) -> Self {
-        let meta = meta.with_outputs(vec![Port::new(output_df_name.clone())]);
+        let meta = NodeMeta::new(id).add_output_port(None).add_input_port(None);
         Self {
             meta,
             x_columns,
@@ -237,7 +237,7 @@ impl DagNode for LinearRegressionNode {
         self
     }
 
-    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
         let input = inputs.first().ok_or(LinearRegressionError::EmptyInput)?;
         let batches = input
             .data
@@ -272,8 +272,8 @@ impl DagNode for LinearRegressionNode {
             msg: format!("read_batch failed: {e}"),
         })?;
 
-        let mut res: NamedDataFrames = NamedDataFrames::new();
-        res.insert(self.output_df_name.clone(), df);
+        let mut res: PortOutputs = PortOutputs::new();
+        res.insert(0, df);
         Ok(res)
     }
 }
@@ -309,24 +309,23 @@ mod tests {
         let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 1.0).collect();
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
-        let meta = NodeMeta::new("lr");
         let mut node = LinearRegressionNode::new(
-            meta,
+            "lr",
             vec!["x".to_string()],
             "y".to_string(),
             true,
             "out".to_string(),
         );
         let input = super::super::meta::NodeInput {
-            port: "default".to_string(),
-            df_name: "src".to_string(),
+            port: 0,
+            // df_name: "src".to_string(),
             data: datafusion::prelude::SessionContext::new()
                 .read_batch(batch)
                 .unwrap(),
         };
         let outs = node.execute(&[input]).await.unwrap();
         assert_eq!(outs.len(), 1);
-        let df = outs["out"].clone();
+        let df = outs[&0].clone();
         let rows = df.collect().await.unwrap();
         let total: usize = rows.iter().map(|b| b.num_rows()).sum();
         assert_eq!(total, 2); // intercept + x1
@@ -377,21 +376,21 @@ mod tests {
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
         let mut node = LinearRegressionNode::new(
-            NodeMeta::new("lr"),
+            "lr",
             vec!["x".to_string()],
             "y".to_string(),
             false,
             "out".to_string(),
         );
         let input = super::super::meta::NodeInput {
-            port: "default".to_string(),
-            df_name: "src".to_string(),
+            port: 0,
+            // df_name: "src".to_string(),
             data: datafusion::prelude::SessionContext::new()
                 .read_batch(batch)
                 .unwrap(),
         };
         let outs = node.execute(&[input]).await.unwrap();
-        let rows = outs["out"].clone().collect().await.unwrap();
+        let rows = outs[&0].clone().collect().await.unwrap();
         assert_eq!(rows.iter().map(|b| b.num_rows()).sum::<usize>(), 1); // only slope
     }
 }

@@ -11,10 +11,10 @@ use datafusion::dataframe::DataFrameWriteOptions;
 use datafusion::prelude::SessionContext;
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta, Port};
+use super::meta::{DagNode, NodeInput, NodeMeta};
 use super::source::normalize_path;
 use crate::data_engine::dag::DagError;
-use crate::data_engine::dag::graph::NamedDataFrames;
+use crate::data_engine::dag::graph::PortOutputs;
 
 /// Where a [`SinkNode`] writes to.
 #[derive(Debug, Clone)]
@@ -60,11 +60,8 @@ pub struct SinkNode {
 }
 
 impl SinkNode {
-    pub fn new(meta: NodeMeta, sink: Sink, ctx: SessionContext) -> Self {
-        // A sink consumes one input and produces no outputs.
-        let meta = meta
-            .with_inputs(vec![Port::default_port()])
-            .with_outputs(vec![]);
+    pub fn new(id: impl Into<String>, sink: Sink, ctx: SessionContext) -> Self {
+        let meta = NodeMeta::new(id).add_input_port(None);
         Self { meta, sink, ctx }
     }
 
@@ -98,7 +95,7 @@ impl DagNode for SinkNode {
         self
     }
 
-    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
         let input = inputs.first().ok_or(SinkError::InvalidInput {
             message: "SinkNode requires exactly one upstream input".to_string(),
         })?;

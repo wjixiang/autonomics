@@ -2,7 +2,10 @@ use std::collections::VecDeque;
 
 use datafusion::common::HashMap;
 
-use crate::data_engine::dag::{NodeId, NodeInput, RuntimeStatus, graph::{EdgeLabel, NamedDataFrames}};
+use crate::data_engine::dag::{
+    NodeId, NodeInput, RuntimeStatus,
+    graph::{EdgeLabel, PortOutputs},
+};
 
 /// Gather a node's predecessor outputs into [`NodeInput`]s, one per connected
 /// input port, in declared edge order. Cloning the [`DataFrame`] handles is
@@ -15,7 +18,7 @@ use crate::data_engine::dag::{NodeId, NodeInput, RuntimeStatus, graph::{EdgeLabe
 pub fn build_inputs(
     id: &str,
     incoming: &HashMap<NodeId, Vec<(NodeId, EdgeLabel)>>,
-    outputs: &HashMap<NodeId, NamedDataFrames>,
+    outputs: &HashMap<NodeId, PortOutputs>,
 ) -> Vec<NodeInput> {
     let mut inputs = Vec::new();
     if let Some(edges) = incoming.get(id) {
@@ -28,11 +31,11 @@ pub fn build_inputs(
                 continue;
             };
             inputs.push(NodeInput {
-                port: edge.to_port.clone(),
+                port: edge.to_port,
                 // Minimal globally-unique table name: (to_node, to_port) uniquely
                 // identifies an edge under strict 1:1, so this never collides in
                 // the shared SessionContext.
-                df_name: format!("{id}__{}", edge.to_port),
+                // df_name: edge.to_port.clone(),
                 data: df.clone(),
             });
         }

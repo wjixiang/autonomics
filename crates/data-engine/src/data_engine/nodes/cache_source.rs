@@ -20,9 +20,8 @@ use iceberg::{
     arrow::arrow_schema_to_schema_auto_assign_ids,
 };
 
-use crate::data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::NamedDataFrames};
-use crate::data_engine::nodes::Port;
 use super::source::normalize_path;
+use crate::data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::PortOutputs};
 
 #[derive(Debug, From)]
 enum Error {
@@ -94,18 +93,14 @@ pub struct CacheSourceNode<R: Catalog> {
 
 impl<R: Catalog> CacheSourceNode<R> {
     pub fn new(
-        meta: NodeMeta,
+        id: impl Into<String>,
         file_path: String,
         format: FileFormat,
         ctx: SessionContext,
         cache_table_ident: String,
         catalog: Arc<R>,
     ) -> Self {
-        // A cache source has no inputs and a single output port named after the
-        // cache table identifier.
-        let meta = meta
-            .with_inputs(vec![])
-            .with_outputs(vec![Port::new(cache_table_ident.clone())]);
+        let meta = NodeMeta::new(id).add_output_port(None);
         Self {
             meta,
             file_path,
@@ -240,7 +235,7 @@ impl<R: Catalog + Clone + 'static> DagNode for CacheSourceNode<R> {
         &self.meta
     }
 
-    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
+    async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
         // Content-address the source file once.
         let mut file = self.load_file().await?;
         if self.cached_hash.is_none() {
@@ -270,8 +265,8 @@ impl<R: Catalog + Clone + 'static> DagNode for CacheSourceNode<R> {
             .sql(&format!("SELECT * FROM iceberg.cache.{hash}"))
             .await?;
 
-        let mut res = NamedDataFrames::new();
-        res.insert(self.df_name.clone(), df);
+        let mut res = PortOutputs::new();
+        res.insert(0, df);
         Ok(res)
     }
 

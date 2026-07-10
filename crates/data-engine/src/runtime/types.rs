@@ -1,7 +1,7 @@
 use tokio::sync::oneshot;
 
 use crate::data_engine::dag::RunReport;
-use crate::data_engine::dag::graph::NamedDataFrames;
+use crate::data_engine::dag::graph::PortOutputs;
 use crate::data_engine::error::Result as EngineResult;
 use crate::data_engine::{Sink, Source};
 
@@ -33,9 +33,9 @@ pub enum DataEngineCmd {
     },
     AddEdge {
         from: String,
-        from_port: Option<String>,
+        from_port: Option<u8>,
         to: String,
-        to_port: Option<String>,
+        to_port: Option<u8>,
         reply: oneshot::Sender<EngineResult<()>>,
     },
     RunDag {
@@ -43,7 +43,7 @@ pub enum DataEngineCmd {
     },
     GetOutput {
         id: String,
-        reply: oneshot::Sender<EngineResult<Option<NamedDataFrames>>>,
+        reply: oneshot::Sender<EngineResult<Option<PortOutputs>>>,
     },
     RemoveNode {
         id: String,

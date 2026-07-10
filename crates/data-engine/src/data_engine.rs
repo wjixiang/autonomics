@@ -7,7 +7,7 @@ use iceberg_catalog_rest::RestCatalog;
 
 use crate::data_engine::dag::{DAG, RunReport, SchedulerConfig};
 use crate::data_engine::error::{Error, Result};
-use crate::data_engine::nodes::{DagNode, NodeMeta};
+use crate::data_engine::nodes::DagNode;
 use datalake::Datalake;
 
 pub mod dag;
@@ -60,11 +60,6 @@ impl<R: Catalog> DataEngine<R> {
         self.ctx.clone()
     }
 
-    /// Build a [`NodeMeta`] with the given id.
-    fn crate_node_meta(&self, id: impl Into<String>) -> NodeMeta {
-        NodeMeta::new(id.into())
-    }
-
     /// Register a node under `id`.
     ///
     /// Prefer the typed helpers ([`Self::source_node`], [`Self::sql_node`],
@@ -110,11 +105,10 @@ impl<R: Catalog> DataEngine<R> {
     ) -> Result<&mut Self> {
         let id = id.into();
         let output_df_name = output_df_name.into();
-        let meta = self.crate_node_meta(id.clone());
         self.dag.add_node(
-            id,
+            id.clone(),
             Box::new(SourceNode::new(
-                meta,
+                id,
                 source,
                 self.ctx.clone(),
                 output_df_name,
@@ -132,11 +126,10 @@ impl<R: Catalog> DataEngine<R> {
     ) -> Result<&mut Self> {
         let id = id.into();
         let output_df_name = output_df_name.into();
-        let meta = self.crate_node_meta(id.clone());
         self.dag.add_node(
-            id,
+            id.clone(),
             Box::new(SqlNode::new(
-                meta,
+                id,
                 query.into(),
                 self.ctx.clone(),
                 output_df_name,
@@ -148,9 +141,10 @@ impl<R: Catalog> DataEngine<R> {
     /// Convenience: add a [`SinkNode`] (chaining-safe).
     pub fn sink_node(&mut self, id: impl Into<String>, sink: Sink) -> Result<&mut Self> {
         let id = id.into();
-        let meta = self.crate_node_meta(id.clone());
-        self.dag
-            .add_node(id, Box::new(SinkNode::new(meta, sink, self.ctx.clone())))?;
+        self.dag.add_node(
+            id.clone(),
+            Box::new(SinkNode::new(id, sink, self.ctx.clone())),
+        )?;
         Ok(self)
     }
 
@@ -168,11 +162,10 @@ impl<R: Catalog> DataEngine<R> {
         output_df_name: impl Into<String>,
     ) -> Result<&mut Self> {
         let id = id.into();
-        let meta = self.crate_node_meta(id.clone());
         self.dag.add_node(
-            id,
+            id.clone(),
             Box::new(LinearRegressionNode::new(
-                meta,
+                id,
                 x_columns,
                 y_column.into(),
                 intercept,
@@ -188,24 +181,26 @@ impl<R: Catalog> DataEngine<R> {
         &mut self,
         from: impl Into<String>,
         to: impl Into<String>,
+        from_port: u8,
+        to_port: u8,
     ) -> Result<&mut Self> {
-        self.dag.add_edge(from, to)?;
+        self.dag.add_edge(from, to, from_port, to_port)?;
         Ok(self)
     }
 
-    /// Add an edge connecting `from`'s `from_port` output port to `to`'s
-    /// `to_port` input port.
-    pub fn add_edge_port(
-        &mut self,
-        from: impl Into<String>,
-        from_port: impl Into<String>,
-        to: impl Into<String>,
-        to_port: impl Into<String>,
-    ) -> Result<&mut Self> {
-        self.dag.add_edge_port(from, from_port, to, to_port)?;
-        Ok(self)
-    }
-
+    // /// Add an edge connecting `from`'s `from_port` output port to `to`'s
+    // /// `to_port` input port.
+    // pub fn add_edge_port(
+    //     &mut self,
+    //     from: impl Into<String>,
+    //     from_port: impl Into<String>,
+    //     to: impl Into<String>,
+    //     to_port: impl Into<String>,
+    // ) -> Result<&mut Self> {
+    //     self.dag.add_edge_port(from, from_port, to, to_port)?;
+    //     Ok(self)
+    // }
+    //
     /// Replace the scheduler configuration (concurrency, retry, …).
     pub fn with_config(mut self, config: SchedulerConfig) -> Self {
         self.config = config;
@@ -220,7 +215,7 @@ impl<R: Catalog> DataEngine<R> {
     pub async fn get_output(
         &self,
         node_id: impl Into<String>,
-    ) -> Option<crate::data_engine::dag::graph::NamedDataFrames> {
+    ) -> Option<crate::data_engine::dag::graph::PortOutputs> {
         self.dag.output(node_id.into().as_ref())
     }
 }
@@ -267,10 +262,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::{DataEngine, Sink, Source, WriteFormat};
-    use crate::data_engine::dag::graph::NamedDataFrames;
+    use crate::data_engine::dag::graph::PortOutputs;
     use crate::data_engine::dag::{DagError, RuntimeStatus, SchedulerConfig};
     use crate::data_engine::error::Error;
-    use crate::data_engine::nodes::{DagNode, NodeInput, NodeMeta, Port};
+    use crate::data_engine::nodes::{DagNode, NodeInput, NodeMeta};
     use datafusion::common::HashMap;
     use datafusion::prelude::CsvReadOptions;
     use fs::OpendalFileStorage;
@@ -331,9 +326,9 @@ mod tests {
             .unwrap()
             .sql_node(
                 "agg",
-                // agg's single default input is registered as "agg__default".
+                // agg's single input (port 0) is registered as "port_0".
                 "SELECT region, CAST(AVG(charges) AS BIGINT) AS avg_chg \
-                 FROM agg__default GROUP BY region",
+                 FROM port_0 GROUP BY region",
                 "agg",
             )
             .unwrap()
@@ -346,9 +341,9 @@ mod tests {
             )
             .unwrap()
             // Default edges: each node has a single relevant port, resolved automatically.
-            .add_edge("load", "agg")
+            .add_edge("load", "agg", 0, 0)
             .unwrap()
-            .add_edge("agg", "out")
+            .add_edge("agg", "out", 0, 0)
             .unwrap();
 
         let report = engine.run().await.expect("run should succeed");
@@ -382,19 +377,19 @@ mod tests {
             // mixed-case column name "Species".
             .sql_node(
                 "setosa",
-                r#"SELECT * FROM setosa__default WHERE "Species" = 'Iris-setosa'"#,
+                r#"SELECT * FROM port_0 WHERE "Species" = 'Iris-setosa'"#,
                 "setosa",
             )
             .unwrap()
             .sql_node(
                 "virginica",
-                r#"SELECT * FROM virginica__default WHERE "Species" = 'Iris-virginica'"#,
+                r#"SELECT * FROM port_0 WHERE "Species" = 'Iris-virginica'"#,
                 "virginica",
             )
             .unwrap()
-            .add_edge("load", "setosa")
+            .add_edge("load", "setosa", 0, 0)
             .unwrap()
-            .add_edge("load", "virginica")
+            .add_edge("load", "virginica", 0, 0)
             .unwrap();
 
         let report = engine.run().await.expect("run should succeed");
@@ -429,19 +424,19 @@ mod tests {
             .unwrap()
             .sql_node(
                 "a",
-                r#"SELECT COUNT(*) AS cnt FROM a__default WHERE "Species" = 'Iris-setosa'"#,
+                r#"SELECT COUNT(*) AS cnt FROM port_0 WHERE "Species" = 'Iris-setosa'"#,
                 "a",
             )
             .unwrap()
             .sql_node(
                 "b",
-                r#"SELECT COUNT(*) AS cnt FROM b__default WHERE "Species" = 'Iris-virginica'"#,
+                r#"SELECT COUNT(*) AS cnt FROM port_0 WHERE "Species" = 'Iris-virginica'"#,
                 "b",
             )
             .unwrap()
-            .add_edge("load", "a")
+            .add_edge("load", "a", 0, 0)
             .unwrap()
-            .add_edge("load", "b")
+            .add_edge("load", "b", 0, 0)
             .unwrap();
 
         let report = engine.run().await.expect("run should succeed");
@@ -483,15 +478,17 @@ mod tests {
             .unwrap();
 
         // A join node with two named input ports. Inputs are registered as
-        // "join__left" and "join__right" in the shared SessionContext.
-        let join_meta =
-            NodeMeta::new("join").with_inputs(vec![Port::new("left"), Port::new("right")]);
+        // "port_0" and "port_1" by the SqlNode (one table per upstream port).
+        let join_meta = NodeMeta::new("join")
+            .add_input_port(None)
+            .add_input_port(None)
+            .add_output_port(None);
         engine
             .add_node(
                 "join",
-                super::SqlNode::new(
+                super::SqlNode::from_meta(
                     join_meta,
-                    r#"SELECT COUNT(*) AS cnt FROM join__left"#.to_string(),
+                    r#"SELECT COUNT(*) AS cnt FROM port_0"#.to_string(),
                     engine.ctx(),
                     "result".to_string(),
                 ),
@@ -505,11 +502,11 @@ mod tests {
                 },
             )
             .unwrap()
-            .add_edge_port("src_a", "data", "join", "left")
+            .add_edge("src_a", "join", 0, 0)
             .unwrap()
-            .add_edge_port("src_b", "data", "join", "right")
+            .add_edge("src_b", "join", 0, 1)
             .unwrap()
-            .add_edge("join", "out")
+            .add_edge("join", "out", 0, 0)
             .unwrap();
 
         let report = engine.run().await.expect("run should succeed");
@@ -553,9 +550,9 @@ mod tests {
             .unwrap()
             .sql_node("b", "SELECT 1", "b")
             .unwrap()
-            .add_edge("a", "b")
+            .add_edge("a", "b", 0, 0)
             .unwrap()
-            .add_edge("b", "a")
+            .add_edge("b", "a", 0, 0)
             .unwrap();
 
         let err = engine.run().await.unwrap_err();
@@ -565,14 +562,20 @@ mod tests {
 
     #[tokio::test]
     async fn disconnected_input_port_rejected() {
-        // A SqlNode with no incoming edge → validation must reject the dangling
-        // default input port.
+        // A fixed-input node with no incoming edge → validation must reject the
+        // dangling input port. LinearRegressionNode declares exactly one required
+        // (fixed) input port. Variadic nodes like SqlNode are exempt: they
+        // declare no ports and accept any number of inputs, so this check only
+        // applies to fixed-input nodes. Validation runs before execution, so the
+        // placeholder column names never get used.
         let mut engine = DataEngine::builder().build();
-        engine.sql_node("orphan", "SELECT 1", "out").unwrap();
+        engine
+            .linear_regression_node("lr", vec!["x".into()], "y", true, "out")
+            .unwrap();
 
         let err = engine.run().await.unwrap_err();
         assert!(
-            matches!(err, Error::Dag(DagError::PortDisconnected { ref node, .. }) if node == "orphan"),
+            matches!(err, Error::Dag(DagError::PortDisconnected { ref node, .. }) if node == "lr"),
             "expected PortDisconnected, got {err:?}"
         );
     }
@@ -603,9 +606,9 @@ mod tests {
             .unwrap()
             .sql_node("c", "SELECT 1", "o")
             .unwrap()
-            .add_edge("s1", "c")
+            .add_edge("s1", "c", 0, 0)
             .unwrap()
-            .add_edge("s2", "c")
+            .add_edge("s2", "c", 0, 0)
             .unwrap();
 
         let err = engine.run().await.unwrap_err();
@@ -624,7 +627,7 @@ mod tests {
             .sql_node("b", "SELECT 1", "o")
             .unwrap()
             // "a" has no output port named "nope".
-            .add_edge_port("a", "nope", "b", "default")
+            .add_edge("a", "b", 99, 0)
             .unwrap();
 
         let err = engine.run().await.unwrap_err();
@@ -632,41 +635,6 @@ mod tests {
             matches!(err, Error::Dag(DagError::PortNotFound { ref node, direction: "output", .. }) if node == "a"),
             "expected PortNotFound(output), got {err:?}"
         );
-    }
-
-    #[tokio::test]
-    async fn ambiguous_default_edge_rejected() {
-        // A node with two input ports cannot be connected with the default add_edge.
-        let mut engine = DataEngine::builder().build();
-        let iris = datasets_dir().join("Iris.csv");
-        engine
-            .source_node(
-                "s",
-                Source::File {
-                    path: iris.to_str().unwrap().to_string(),
-                    format: None,
-                },
-                "d",
-            )
-            .unwrap();
-        let join_meta = NodeMeta::new("j").with_inputs(vec![Port::new("left"), Port::new("right")]);
-        engine
-            .add_node(
-                "j",
-                super::SqlNode::new(
-                    join_meta,
-                    "SELECT 1".to_string(),
-                    engine.ctx(),
-                    "o".to_string(),
-                ),
-            )
-            .unwrap();
-        // Default edge into a 2-input node → AmbiguousPort at add_edge time.
-        match engine.add_edge("s", "j") {
-            Err(Error::Dag(DagError::AmbiguousPort { ref node })) if node == "j" => {}
-            Err(e) => panic!("expected AmbiguousPort, got {e:?}"),
-            Ok(_) => panic!("expected AmbiguousPort, but add_edge succeeded"),
-        }
     }
 
     /// A node that always fails — for the cascade test. Source-like (no inputs).
@@ -686,7 +654,7 @@ mod tests {
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
-        async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
+        async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
             Err(DagError::Schedule("kaboom".into()))
         }
     }
@@ -695,14 +663,12 @@ mod tests {
     async fn failure_cascades() {
         let mut engine = DataEngine::builder().build();
         // Source-like boom node (no input ports) so it passes port validation.
-        let boom_meta = NodeMeta::new("boom")
-            .with_inputs(vec![])
-            .with_outputs(vec![Port::default_port()]);
+        let boom_meta = NodeMeta::source("boom");
         engine.add_node("boom", BoomNode(boom_meta)).unwrap();
         engine
             .sql_node("child", "SELECT 1", "child")
             .unwrap()
-            .add_edge("boom", "child")
+            .add_edge("boom", "child", 0, 0)
             .unwrap();
 
         let report = engine.run().await.expect("run completes even on failure");
@@ -732,7 +698,7 @@ mod tests {
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
-        async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
+        async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             Ok(HashMap::new())
         }
@@ -750,9 +716,7 @@ mod tests {
             for i in 0..4 {
                 let id = format!("s{i}");
                 // No input ports: standalone nodes pass port validation.
-                let meta = NodeMeta::new(&id)
-                    .with_inputs(vec![])
-                    .with_outputs(vec![Port::default_port()]);
+                let meta = NodeMeta::source(&id);
                 engine.add_node(id, SleepNode(meta)).unwrap();
             }
             let start = Instant::now();
