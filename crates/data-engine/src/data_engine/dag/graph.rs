@@ -16,7 +16,8 @@ use tracing::{debug, warn};
 use crate::data_engine::dag::utils::{build_inputs, cascade_skip};
 
 use super::error::DagError;
-use super::runtime::{RunReport, RuntimeStatus, SchedulerConfig};
+use super::super::nodes::sink::SinkNode;
+use super::runtime::{NodeReport, RunReport, RuntimeStatus, SchedulerConfig};
 use super::{DagNode, NodeId};
 
 pub type NamedDataFrames = HashMap<String, DataFrame>;
@@ -63,10 +64,12 @@ enum JobResult {
     Success {
         id: NodeId,
         outputs: NamedDataFrames,
+        duration: std::time::Duration,
     },
     Failed {
         id: NodeId,
         error: DagError,
+        duration: std::time::Duration,
     },
 }
 
@@ -136,6 +139,10 @@ impl DAG {
         let sem = Arc::new(Semaphore::new(cfg.max_concurrency.max(1)));
         let (tx, mut rx) = mpsc::channel::<JobResult>(all_ids.len().max(1));
 
+        // Per-node execution duration and skip root-cause tracking.
+        let mut durations: HashMap<NodeId, std::time::Duration> = HashMap::new();
+        let mut skipped_because: HashMap<NodeId, NodeId> = HashMap::new();
+
         // Seed the ready queue with source nodes.
         let mut ready: VecDeque<NodeId> = all_ids
             .iter()
@@ -167,19 +174,28 @@ impl DAG {
                 tokio::spawn(async move {
                     let _permit = sem.acquire().await.ok();
                     let mut node = node_box;
+                    let start = std::time::Instant::now();
                     let result = node.execute(&inputs).await;
+                    let duration = start.elapsed();
                     match result {
                         Ok(outs) => {
                             let _ = tx
                                 .send(JobResult::Success {
                                     id: job_id,
                                     outputs: outs,
+                                    duration,
                                 })
                                 .await;
                         }
                         Err(error) => {
                             warn!(node = %job_id, error = %error, "node failed");
-                            let _ = tx.send(JobResult::Failed { id: job_id, error }).await;
+                            let _ = tx
+                                .send(JobResult::Failed {
+                                    id: job_id,
+                                    error,
+                                    duration,
+                                })
+                                .await;
                         }
                     }
                 });
@@ -198,9 +214,14 @@ impl DAG {
             in_flight -= 1;
 
             match msg {
-                JobResult::Success { id, outputs: outs } => {
+                JobResult::Success {
+                    id,
+                    outputs: outs,
+                    duration,
+                } => {
                     self.outputs.insert(id.clone(), outs);
                     self.statuses.insert(id.clone(), RuntimeStatus::Success);
+                    durations.insert(id.clone(), duration);
                     debug!(node = %id, "node succeeded");
                     for succ in &successors[&id] {
                         let left = {
@@ -213,11 +234,22 @@ impl DAG {
                         }
                     }
                 }
-                JobResult::Failed { id, error } => {
+                JobResult::Failed {
+                    id,
+                    error,
+                    duration,
+                } => {
                     self.statuses.insert(id.clone(), RuntimeStatus::Failed);
+                    durations.insert(id.clone(), duration);
                     debug!(node = %id, error = %error, "node failed; cascading skip to descendants");
                     self.errors.insert(id.clone(), error);
-                    cascade_skip(&id, &successors, &mut self.statuses, &mut ready);
+                    cascade_skip(
+                        &id,
+                        &successors,
+                        &mut self.statuses,
+                        &mut ready,
+                        &mut skipped_because,
+                    );
                 }
             }
         }
@@ -227,11 +259,97 @@ impl DAG {
             .values()
             .any(|s| matches!(s, RuntimeStatus::Failed));
 
+        // Build per-node reports for the agent-friendly result.
+        let node_reports = self
+            .build_node_reports(&all_ids, &durations, &skipped_because)
+            .await;
+
         Ok(RunReport {
-            statuses: self.statuses.clone(),
             ok,
+            nodes: node_reports,
+            statuses: self.statuses.clone(),
             errors: self.errors.drain().collect(),
         })
+    }
+
+    /// Build per-node [`NodeReport`] summaries from the execution state
+    /// available after the scheduler loop.
+    async fn build_node_reports(
+        &self,
+        all_ids: &[NodeId],
+        durations: &HashMap<NodeId, std::time::Duration>,
+        skipped_because: &HashMap<NodeId, NodeId>,
+    ) -> Vec<NodeReport> {
+        // We collect all futures for row counts at once to avoid sequential awaits.
+        let mut count_futs = Vec::new();
+        for id in all_ids {
+            if let Some(dfs) = self.outputs.get(id) {
+                // Take the first output port's DataFrame for the row count.
+                if let Some((_name, df)) = dfs.iter().next() {
+                    count_futs.push((id.clone(), df.clone().count()));
+                }
+            }
+        }
+
+        let counts: HashMap<NodeId, usize> = {
+            let mut map = HashMap::new();
+            for (id, fut) in count_futs {
+                map.insert(id, fut.await.unwrap_or(0));
+            }
+            map
+        };
+
+        all_ids
+            .iter()
+            .map(|id| {
+                let status = self.statuses.get(id).copied().unwrap_or(RuntimeStatus::Pending);
+                let node_type = self
+                    .nodes
+                    .get(id)
+                    .map(|n| n.node_type())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                // Extract output schema from the first output port's DataFrame.
+                let output_schema = self.outputs.get(id).and_then(|dfs| {
+                    dfs.values().next().map(|df| {
+                        df.schema()
+                            .fields()
+                            .iter()
+                            .map(|f| (f.name().clone(), f.data_type().to_string()))
+                            .collect()
+                    })
+                });
+
+                let output_rows = counts.get(id).copied();
+                let elapsed_ms = durations.get(id).map(|d| d.as_millis() as u64);
+
+                // Extract sink path via downcast.
+                let sink_path = self
+                    .nodes
+                    .get(id)
+                    .and_then(|n| n.as_any().downcast_ref::<SinkNode>())
+                    .and_then(|sn| match sn.sink() {
+                        super::super::Sink::File { path, .. } => Some(path.clone()),
+                        _ => None,
+                    });
+
+                let error = self.errors.get(id).map(|e| e.to_report());
+                let skipped_because = skipped_because.get(id).cloned();
+
+                NodeReport {
+                    id: id.clone(),
+                    status,
+                    node_type,
+                    output_schema,
+                    output_rows,
+                    elapsed_ms,
+                    sink_path,
+                    error,
+                    skipped_because,
+                }
+            })
+            .collect()
     }
 }
 
@@ -675,6 +793,12 @@ mod tests {
         fn clone_box(&self) -> Box<dyn super::super::DagNode> {
             Box::new((*self).clone())
         }
+        fn node_type(&self) -> &str {
+            "echo"
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
         async fn execute(
             &mut self,
             _inputs: &[super::super::NodeInput],
@@ -802,6 +926,12 @@ mod tests {
         }
         fn clone_box(&self) -> Box<dyn super::super::DagNode> {
             Box::new((*self).clone())
+        }
+        fn node_type(&self) -> &str {
+            "ported"
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
         async fn execute(
             &mut self,

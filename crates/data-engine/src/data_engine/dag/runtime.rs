@@ -4,12 +4,18 @@
 //! defines the types it produces and accepts.
 
 use datafusion::common::HashMap;
+use serde::Serialize;
 
 use super::NodeId;
 use super::error::DagError;
 
+/// Schema map serializable via serde (uses `std::collections::HashMap` since
+/// `datafusion::common::HashMap` is `hashbrown` and may not impl `Serialize`).
+type SchemaMap = std::collections::HashMap<String, String>;
+
 /// Per-node runtime lifecycle state tracked by the scheduler.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RuntimeStatus {
     #[default]
     Pending,
@@ -39,13 +45,55 @@ impl Default for SchedulerConfig {
     }
 }
 
+/// A serializable error summary extracted from [`DagError`].
+///
+/// Carries only the agent-relevant fields (kind + message) rather than the
+/// full structured variant, because [`datafusion::error::DataFusionError`]
+/// does not implement `Serialize`.
+#[derive(Debug, Clone, Serialize)]
+pub struct DagErrorReport {
+    /// Error variant category (e.g. `"datafusion"`, `"schema_mismatch"`,
+    /// `"node_error"`).
+    pub kind: String,
+    /// Full human-readable error message.
+    pub message: String,
+}
+
+/// Per-node execution summary produced by [`super::graph::DAG::run`].
+///
+/// Contains everything an agent needs to understand what each node did
+/// without a follow-up `get_output` call — type, output shape, timing,
+/// sink destination, and error/skip details.
+#[derive(Debug, Serialize)]
+pub struct NodeReport {
+    pub id: String,
+    pub status: RuntimeStatus,
+    pub node_type: String,
+    /// Output column schema: `{ column_name: data_type }`.
+    pub output_schema: Option<SchemaMap>,
+    /// Row count of the primary output DataFrame.
+    pub output_rows: Option<usize>,
+    /// Milliseconds spent in `execute()`.
+    pub elapsed_ms: Option<u64>,
+    /// For `SinkNode`: the file path data was written to.
+    pub sink_path: Option<String>,
+    /// Structured error info when `status` is `Failed`.
+    pub error: Option<DagErrorReport>,
+    /// For `Skipped` nodes: the id of the root-cause failed node.
+    pub skipped_because: Option<String>,
+}
+
 /// Result of a `DAG::run` invocation: the final status of every node and
 /// whether the whole run succeeded.
 #[derive(Debug)]
 pub struct RunReport {
-    pub statuses: HashMap<NodeId, RuntimeStatus>,
-    pub errors: HashMap<NodeId, DagError>,
     pub ok: bool,
+    /// Rich per-node reports (serializable, agent-friendly).
+    pub nodes: Vec<NodeReport>,
+    /// Flat status map kept for backward-compatible programmatic access.
+    pub statuses: HashMap<NodeId, RuntimeStatus>,
+    /// Per-node errors (only populated for `Failed` nodes).
+    pub errors: HashMap<NodeId, DagError>,
 }
 
 impl RunReport {

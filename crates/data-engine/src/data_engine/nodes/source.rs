@@ -173,6 +173,14 @@ impl DagNode for SourceNode {
         Box::new((*self).clone())
     }
 
+    fn node_type(&self) -> &str {
+        "source"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         let ctx = self.ctx.clone();
         let df = match &self.source {
@@ -252,8 +260,7 @@ mod tests {
     async fn test_load_vcf_gz() {
         let (ctx, fs) = OpendalFileStorage::new_temp().register_to_ctx();
         dbg!("start copy data");
-        let test_vcf_gz =
-            std::fs::read("/mnt/disk3/test/ebi-a-GCST90012005/ebi-a-GCST90012005.vcf.gz").unwrap();
+        let test_vcf_gz = std::fs::read("test_datasets/sample.vcf.gz").unwrap();
         fs.op.write("/sample.vcf.gz", test_vcf_gz).await.unwrap();
         dbg!("copy data finished");
 
@@ -266,6 +273,5 @@ mod tests {
 
         // let schema = res.schema();
         // dbg!(schema);
-        panic!()
     }
 }

@@ -55,6 +55,11 @@ proactively rather than answering from memory alone.
 - Build and execute data processing pipelines: add data sources, apply SQL transforms, \
   connect nodes into a DAG, run the pipeline, and retrieve output.
 - Use this when a task requires multi-step data processing or transformation.
+- **DAG construction order**: always add all nodes first, then connect them with add_edge, then run_dag.
+- **SQL table naming**: in add_sql_node, upstream data is registered as tables named \
+  `{THIS_NODE_ID}__{INPUT_PORT}`. For single-input nodes the table is `{id}__default`. \
+  Never use the upstream node's id — always use this node's own id. \
+  Example: node id='agg' receiving from a source → write `FROM agg__default`.
 
 ### General
 - Read, write, and manage files on the local filesystem.
@@ -103,8 +108,16 @@ proactively rather than answering from memory alone.
             }]));
     }
 
-    pub fn cancel(&self) {
+    pub fn cancel(&mut self) {
         self.cancel_token.cancel();
+        // Create a fresh token for the next session.  CancellationToken is
+        // one-shot, so without this every subsequent session would see
+        // `is_cancelled() == true` and abort immediately.
+        let new_token = CancellationToken::new();
+        let _ = self
+            .internal_tx
+            .send(InternalEvent::ResetCancelToken(new_token.clone()));
+        self.cancel_token = new_token;
     }
 
     pub fn poll_event(&mut self) -> Option<AgentEvent> {

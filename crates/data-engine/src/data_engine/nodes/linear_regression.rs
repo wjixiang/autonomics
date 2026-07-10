@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use arrow_array::{
-    Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array,
-    RecordBatch, StringArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+    Array, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, RecordBatch,
+    StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
@@ -57,7 +57,9 @@ fn extract_column(batches: &[RecordBatch], name: &str) -> Result<Vec<f64>, Linea
         .ok_or(LinearRegressionError::EmptyInput)?;
     let idx = schema
         .index_of(name)
-        .map_err(|_| LinearRegressionError::MissingColumn { name: name.to_string() })?;
+        .map_err(|_| LinearRegressionError::MissingColumn {
+            name: name.to_string(),
+        })?;
 
     let dtype = schema.field(idx).data_type().clone();
     let is_numeric = matches!(
@@ -133,7 +135,10 @@ fn extract_numeric_column(col: &dyn Array, out: &mut Vec<f64>) {
 ///
 /// Columns: `term` (Utf8), `coefficient`, `std_error`, `t_stat`, `p_value`,
 /// `r_squared`, `n_obs` (all Float64 except term).
-fn build_result_batch(reg: &stat_primitives::regression::Regression, intercept: bool) -> RecordBatch {
+fn build_result_batch(
+    reg: &stat_primitives::regression::Regression,
+    intercept: bool,
+) -> RecordBatch {
     let n = reg.n_params;
     let mut terms = Vec::with_capacity(n);
     let mut coefficients = Vec::with_capacity(n);
@@ -224,6 +229,14 @@ impl DagNode for LinearRegressionNode {
         Box::new((*self).clone())
     }
 
+    fn node_type(&self) -> &str {
+        "linear_regression"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         let input = inputs.first().ok_or(LinearRegressionError::EmptyInput)?;
         let batches = input
@@ -254,12 +267,10 @@ impl DagNode for LinearRegressionNode {
         // Build output batch → DataFrame.
         let batch = build_result_batch(&reg, self.intercept);
         let ctx = datafusion::prelude::SessionContext::new();
-        let df = ctx
-            .read_batch(batch)
-            .map_err(|e| DagError::NodeError {
-                node_type: "linear_regression".to_string(),
-                msg: format!("read_batch failed: {e}"),
-            })?;
+        let df = ctx.read_batch(batch).map_err(|e| DagError::NodeError {
+            node_type: "linear_regression".to_string(),
+            msg: format!("read_batch failed: {e}"),
+        })?;
 
         let mut res: NamedDataFrames = NamedDataFrames::new();
         res.insert(self.output_df_name.clone(), df);

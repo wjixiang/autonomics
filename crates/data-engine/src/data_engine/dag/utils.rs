@@ -43,11 +43,15 @@ pub fn build_inputs(
 /// Mark every transitive descendant of `failed` as [`RuntimeStatus::Skipped`].
 /// Stops at nodes that already have a terminal status so independent branches
 /// keep running.
+///
+/// `skipped_because` records the *root-cause* failed node id for every skipped
+/// descendant so agents can trace the failure chain.
 pub fn cascade_skip(
     failed: &str,
     successors: &HashMap<NodeId, Vec<NodeId>>,
     statuses: &mut HashMap<NodeId, RuntimeStatus>,
     ready: &mut VecDeque<NodeId>,
+    skipped_because: &mut HashMap<NodeId, NodeId>,
 ) {
     let mut queue: VecDeque<NodeId> = successors
         .get(failed)
@@ -60,6 +64,7 @@ pub fn cascade_skip(
             continue;
         }
         statuses.insert(id.clone(), RuntimeStatus::Skipped);
+        skipped_because.insert(id.clone(), failed.to_string());
         ready.retain(|r| r != &id);
         if let Some(succs) = successors.get(&id) {
             for s in succs {

@@ -151,6 +151,13 @@ pub trait DagNode: Send + Sync {
     fn meta(&self) -> &NodeMeta;
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError>;
     fn clone_box(&self) -> Box<dyn DagNode>;
+
+    /// Human-readable node kind (e.g. `"source"`, `"sql"`, `"sink"`).
+    fn node_type(&self) -> &str;
+
+    /// Downcast helper for concrete-type introspection (e.g. extracting
+    /// sink-specific details at report time).
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 impl Clone for Box<dyn DagNode> {

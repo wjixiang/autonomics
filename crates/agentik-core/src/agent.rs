@@ -64,6 +64,10 @@ pub enum InternalEvent {
     Abort,
     /// External Runtime requests the agent to shut down.
     Shutdown,
+    /// Replace the agent's cancellation token with a fresh one.
+    /// Sent by `AgentRuntime::cancel()` after cancelling the current
+    /// session so that the next session can run normally.
+    ResetCancelToken(CancellationToken),
 }
 
 pub struct Agent {
@@ -271,6 +275,10 @@ impl Agent {
                 self.stop();
                 false
             }
+            InternalEvent::ResetCancelToken(token) => {
+                self.cancel_token = token;
+                true
+            }
         }
     }
 
@@ -281,33 +289,37 @@ impl Agent {
     /// returns to idle when the LLM produces no tool calls.
     ///
     /// Exit paths:
-    /// - [`InternalEvent::Shutdown` received
+    /// - [`InternalEvent::Shutdown`] received
     /// - Channel closed (all senders dropped)
-    /// - External cancellation token fired
+    ///
+    /// Cancellation is handled inside [`run_session()`]; it interrupts the
+    /// current session but the outer loop stays alive to process future
+    /// messages. The cancel token is replaced via [`InternalEvent::ResetCancelToken`]
+    /// so that subsequent sessions see a fresh (non-cancelled) token.
     pub async fn run(&mut self) {
         let mut rx = self
             .internal_event_rx
             .take()
             .expect("internal_event_rx already consumed by a prior run()");
-        let cancelled = self.cancel_token.clone();
 
         loop {
-            tokio::select! {
-                Some(event) = rx.recv() => {
-                    let keep_going = self.apply_internal_event(event).await;
-                    if !keep_going {
-                        break;
-                    }
-                }
-                _ = cancelled.cancelled() => {
-                    self.lifecycle.set_aborted();
-                    self.snapshot().await;
-                    self.send_event(AgentEvent::Error("Agent cancelled".into()));
-                    return;
-                }
+            let event = match rx.recv().await {
+                Some(e) => e,
+                None => break, // channel closed → shutdown
+            };
+
+            let should_run = matches!(
+                event,
+                InternalEvent::MessageInject(_) | InternalEvent::BgTaskComplete(_)
+            );
+            let keep_going = self.apply_internal_event(event).await;
+            if !keep_going {
+                break;
             }
 
-            self.run_session(&mut rx, &cancelled).await;
+            if should_run {
+                self.run_session(&mut rx).await;
+            }
         }
 
         self.lifecycle.set_aborted();
@@ -321,12 +333,12 @@ impl Agent {
     async fn run_session(
         &mut self,
         rx: &mut tokio::sync::mpsc::UnboundedReceiver<InternalEvent>,
-        cancelled: &CancellationToken,
     ) {
         self.lifecycle.set_running();
         self.send_event(agentik_sdk::types::AgentEvent::LlmResponse(
             "🤖 Agent started".into(),
         ));
+        let cancelled = self.cancel_token.clone();
 
         let mut iteration = 0;
         let mut consecutive_retries = 0;

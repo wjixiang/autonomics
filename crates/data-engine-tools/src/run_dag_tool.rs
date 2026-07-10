@@ -12,8 +12,9 @@ use crate::ExecError;
 #[tool(
     name = "run_dag",
     description = "Execute the current DAG pipeline. All nodes are validated \
-                  and run according to their dependency order. Returns a report \
-                  with the status of every node."
+                  and run according to their dependency order. Returns a \
+                  detailed report with per-node status, type, output schema, \
+                  row counts, timing, sink paths, and error/skip details."
 )]
 pub struct RunDagInput {}
 
@@ -34,34 +35,68 @@ impl ToolFunction for RunDagTool {
     async fn run(&self, _input: Self::Input) -> Result<ToolResult, ToolError> {
         let report = self.client.run_dag().await.map_err(ExecError::from)?;
 
-        let nodes: serde_json::Map<String, serde_json::Value> = report
-            .statuses
-            .iter()
-            .map(|(id, status)| (id.clone(), serde_json::json!(format!("{:?}", status))))
+        // Build per-node entries.
+        let nodes: Vec<serde_json::Value> = report
+            .nodes
+            .into_iter()
+            .map(|nr| {
+                let mut obj = serde_json::Map::new();
+                obj.insert("id".into(), serde_json::json!(nr.id));
+                obj.insert("status".into(), serde_json::json!(nr.status));
+                obj.insert("node_type".into(), serde_json::json!(nr.node_type));
+
+                if let Some(schema) = nr.output_schema {
+                    obj.insert("output_schema".into(), serde_json::json!(schema));
+                }
+                if let Some(rows) = nr.output_rows {
+                    obj.insert("output_rows".into(), serde_json::json!(rows));
+                }
+                if let Some(ms) = nr.elapsed_ms {
+                    obj.insert("elapsed_ms".into(), serde_json::json!(ms));
+                }
+                if let Some(path) = nr.sink_path {
+                    obj.insert("sink_path".into(), serde_json::json!(path));
+                }
+                if let Some(err) = nr.error {
+                    obj.insert("error".into(), serde_json::json!(err));
+                }
+                if let Some(cause) = nr.skipped_because {
+                    obj.insert("skipped_because".into(), serde_json::json!(cause));
+                }
+
+                serde_json::Value::Object(obj)
+            })
             .collect();
 
-        if report.ok {
-            let content = serde_json::json!({
-                "ok": report.ok,
-                "nodes": serde_json::Value::Object(nodes),
-                "errors": report.errors.len(),
-            });
-            Ok(ToolResult::success_json(content))
-        } else {
-            // let mut res: Vec<String> = Vec::new();
-            let errors: serde_json::Map<String, serde_json::Value> = report
-                .errors
-                .iter()
-                .map(|(id, e)| (id.clone(), serde_json::json!(e.to_string())))
-                .collect();
-            let content = serde_json::json!({
-                "ok": report.ok,
-                "nodes": serde_json::Value::Object(nodes),
-                "errors": serde_json::Value::Object(errors),
-            });
-            Ok(ToolResult::error(
-                serde_json::to_string(&content).unwrap_or_default(),
-            ))
+        // Summary counts.
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+        let mut skipped = 0usize;
+        for node in &nodes {
+            let status = node.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            match status {
+                "success" => succeeded += 1,
+                "failed" => failed += 1,
+                "skipped" => skipped += 1,
+                _ => {}
+            }
         }
+        let total = nodes.len();
+
+        let content = serde_json::json!({
+            "ok": report.ok,
+            "summary": {
+                "total": total,
+                "succeeded": succeeded,
+                "failed": failed,
+                "skipped": skipped,
+            },
+            "nodes": nodes,
+        });
+
+        // Always return structured JSON — the `ok` flag tells the agent the outcome.
+        // Using success_json (not ToolResult::error) ensures agents always get
+        // parseable JSON even on partial failure.
+        Ok(ToolResult::success_json(content))
     }
 }

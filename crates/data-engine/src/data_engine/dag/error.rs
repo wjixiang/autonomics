@@ -70,3 +70,67 @@ pub enum DagError {
     #[error("node `{node_type}` failed: {msg}")]
     NodeError { node_type: String, msg: String },
 }
+
+impl DagError {
+    /// Extract a serializable error summary for agent-facing reports.
+    pub fn to_report(&self) -> super::runtime::DagErrorReport {
+        match self {
+            Self::DataFusion(e) => super::runtime::DagErrorReport {
+                kind: "datafusion".into(),
+                message: e.to_string(),
+            },
+            Self::Cycle(s) => super::runtime::DagErrorReport {
+                kind: "cycle".into(),
+                message: s.clone(),
+            },
+            Self::UnknownNode(s) => super::runtime::DagErrorReport {
+                kind: "unknown_node".into(),
+                message: s.clone(),
+            },
+            Self::DuplicateNode(s) => super::runtime::DagErrorReport {
+                kind: "duplicate_node".into(),
+                message: s.clone(),
+            },
+            Self::PortNotFound { node, port, direction } => super::runtime::DagErrorReport {
+                kind: "port_not_found".into(),
+                message: format!("node `{node}` has no {direction} port `{port}`"),
+            },
+            Self::PortDisconnected { node, port } => super::runtime::DagErrorReport {
+                kind: "port_disconnected".into(),
+                message: format!("input port `{port}` on node `{node}` is not connected"),
+            },
+            Self::PortOverconnected { node, port } => super::runtime::DagErrorReport {
+                kind: "port_overconnected".into(),
+                message: format!(
+                    "input port `{port}` on node `{node}` has multiple incoming edges"
+                ),
+            },
+            Self::AmbiguousPort { node } => super::runtime::DagErrorReport {
+                kind: "ambiguous_port".into(),
+                message: format!(
+                    "node `{node}` has multiple ports; use `add_edge_port` to specify which"
+                ),
+            },
+            Self::SchemaMismatch {
+                from_node,
+                from_port,
+                to_node,
+                to_port,
+                reason,
+            } => super::runtime::DagErrorReport {
+                kind: "schema_mismatch".into(),
+                message: format!(
+                    "edge {from_node}.{from_port} -> {to_node}.{to_port}: {reason}"
+                ),
+            },
+            Self::Schedule(s) => super::runtime::DagErrorReport {
+                kind: "schedule".into(),
+                message: s.clone(),
+            },
+            Self::NodeError { node_type, msg } => super::runtime::DagErrorReport {
+                kind: "node_error".into(),
+                message: format!("node `{node_type}` failed: {msg}"),
+            },
+        }
+    }
+}

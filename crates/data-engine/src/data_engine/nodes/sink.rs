@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use datafusion::common::HashMap;
 use datafusion::common::config::{CsvOptions, TableParquetOptions};
 use datafusion::dataframe::DataFrameWriteOptions;
+use datafusion::prelude::SessionContext;
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta, Port};
@@ -55,15 +56,21 @@ impl From<SinkError> for DagError {
 pub struct SinkNode {
     meta: NodeMeta,
     sink: Sink,
+    ctx: SessionContext,
 }
 
 impl SinkNode {
-    pub fn new(meta: NodeMeta, sink: Sink) -> Self {
+    pub fn new(meta: NodeMeta, sink: Sink, ctx: SessionContext) -> Self {
         // A sink consumes one input and produces no outputs.
         let meta = meta
             .with_inputs(vec![Port::default_port()])
             .with_outputs(vec![]);
-        Self { meta, sink }
+        Self { meta, sink, ctx }
+    }
+
+    /// The destination this sink writes to.
+    pub fn sink(&self) -> &Sink {
+        &self.sink
     }
 }
 
@@ -77,9 +84,18 @@ impl DagNode for SinkNode {
         let cp_node = Self {
             meta: self.meta.clone(),
             sink: self.sink.clone(),
+            ctx: self.ctx.clone(),
         };
 
         Box::new(cp_node)
+    }
+
+    fn node_type(&self) -> &str {
+        "sink"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {

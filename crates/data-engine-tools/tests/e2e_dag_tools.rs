@@ -62,7 +62,7 @@ async fn test_add_source_sql_run_dag() {
         .execute(
             &[build_tooluse("tc2", "add_sql_node", json!({
                 "id": "sql",
-                "query": "SELECT age, charges FROM src WHERE age > 30 LIMIT 5"
+                "query": "SELECT age, charges FROM sql__default WHERE age > 30 LIMIT 5"
             }))],
             None,
             None,

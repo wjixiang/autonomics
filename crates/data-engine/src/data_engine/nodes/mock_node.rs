@@ -55,6 +55,14 @@ impl DagNode for MockNode {
         Box::new((*self).clone())
     }
 
+    fn node_type(&self) -> &str {
+        "mock"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// Input data injected by the scheduler when the node runs.
     async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         let test_dataset = get_builtin_dataset(BuiltinDataset::Iris).await;

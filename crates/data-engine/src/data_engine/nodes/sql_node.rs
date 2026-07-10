@@ -77,6 +77,14 @@ impl DagNode for SqlNode {
         Box::new((*self).clone())
     }
 
+    fn node_type(&self) -> &str {
+        "sql"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<NamedDataFrames, DagError> {
         if inputs.is_empty() {
             return Err(SqlNodeError::InvalidInput {

@@ -278,4 +278,12 @@ impl<R: Catalog + Clone + 'static> DagNode for CacheSourceNode<R> {
     fn clone_box(&self) -> Box<dyn DagNode> {
         Box::new(self.clone())
     }
+
+    fn node_type(&self) -> &str {
+        "cache_source"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
