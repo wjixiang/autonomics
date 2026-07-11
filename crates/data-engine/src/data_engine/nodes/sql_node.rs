@@ -109,10 +109,7 @@ impl DagNode for SqlNode {
             .into());
         }
 
-        let ctx = SessionContext::new_with_config_rt(
-            SessionConfig::new(),
-            self.ctx.runtime_env(),
-        );
+        let ctx = SessionContext::new_with_config_rt(SessionConfig::new(), self.ctx.runtime_env());
         for inp in inputs {
             // Register each upstream DataFrame under `port_{port}`. The fresh
             // context isolates the table namespace so concurrent SqlNodes never

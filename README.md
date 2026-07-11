@@ -1,27 +1,49 @@
-# agentik
+# autonomics / agentik
 
-A Rust workspace for building LLM agents on top of the Anthropic-compatible API surface. It ships a type-safe SDK, a proc-macro for declarative tool schemas, and a domain-agnostic agent runtime with a multi-agent process manager.
+`autonomics` is a Rust 2024 workspace for agent-assisted bioinformatics and data analysis. It combines an Anthropic-compatible LLM SDK and agent runtime with a DataFusion-based DAG engine, readers for common genomic formats, and Iceberg data-lake integration.
 
-This project is a hard fork of [dimichgh/anthropic-sdk-rust](https://github.com/dimichgh/anthropic-sdk-rust), extended with an agent framework on top.
+The Agent SDK originated as a hard fork of [dimichgh/anthropic-sdk-rust](https://github.com/dimichgh/anthropic-sdk-rust). The repository has since grown into a broader analysis platform.
+
+## Architecture
+
+```text
+phloem-tui
+  └── runtime + agentik-core
+        └── data-engine-tools
+              └── data-engine (DataFusion DAG scheduler)
+                    ├── biofusion (genomics file readers)
+                    └── datalake (Iceberg catalog and storage)
+```
+
+An agent receives tools from `agentik-core`. The data-engine tools communicate with one serialized `DataEngineServer` through channels, so a conversation can create, inspect, run, and clear a data-processing DAG without sharing mutable engine state directly. The DAG reads data into DataFusion `DataFrame`s, transforms it, and can persist file outputs.
 
 ## Workspace
 
-`agentik` is a Cargo workspace containing four crates:
+| Area | Members | Responsibility |
+| --- | --- | --- |
+| Agent platform | `agentik-types`, `agentik-sdk`, `agentik-proc`, `agentik-core`, `agentik-tools`, `runtime` | API types and clients, declarative tool schemas, agent lifecycle/memory, tool implementations, and sync-to-async hosting. |
+| Data analysis | `data-engine`, `data-engine-tools`, `stat-primitives`, `fs`, `datalake`, `biofusion`, `biofusion-cache` | DAG execution, Agent-exposed DAG operations, statistics, OpenDAL files, Iceberg, and biological-format ingestion. |
+| Scientific data clients | `eutils-rs`, `opengwas-rs`, `gwascatalog-sdk` | Clients for NCBI E-utilities, OpenGWAS, and the GWAS Catalog. |
+| User interface and rendering | `phloem-tui`, `mermaid-text` | Terminal Agent UI plus text-mode Mermaid rendering. |
 
-| Crate                                   | Description                                                                                                                                                 |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`agentik-types`](crates/agentik-types) | Shared type definitions for the Anthropic API — messages, tools, batches, files, models, streaming events, agent events, errors.                            |
-| [`agentik-sdk`](crates/agentik-sdk)     | Full-featured async client: HTTP layer, SSE streaming engine, retry/backoff, multi-provider abstraction, model pool, token counter, file utilities.         |
-| [`agentik-proc`](crates/agentik-proc)   | Proc-macro crate. Provides `#[derive(ToolInput)]` so tool input structs auto-generate their own JSON Schema `Tool` definition.                              |
-| [`agentik-core`](crates/agentik-core)   | Domain-agnostic agent runtime. Plug in any `AgentContext` to specialize behavior: agent loop, memory with compaction, lifecycle, toolset, `ProcessManager`. |
+`fixtures/` contains representative and malformed genomics files used by reader and integration tests.
 
+## Getting started
+
+Requirements:
+
+- Rust 1.85 or later (edition 2024)
+- A writable Cargo target directory. This checkout configures `/mnt/disk2/target`; override it if unavailable.
+
+```bash
+# Compile tests without running network-dependent integration tests.
+CARGO_TARGET_DIR=/tmp/autonomics-target cargo test --workspace --no-run
+
+# Run the terminal UI. Configure a provider and model in its Config tab.
+CARGO_TARGET_DIR=/tmp/autonomics-target cargo run -p phloem-tui
 ```
-crates/
-├── agentik-types/   # Shared types (no deps on the rest of the workspace)
-├── agentik-sdk/     # Async client + provider abstraction (depends on -types)
-├── agentik-proc/    # #[derive(ToolInput)] (depends on -sdk at expansion site)
-└── agentik-core/    # Agent runtime (depends on -sdk and -proc)
-```
+
+For direct SDK use, copy `.env.example` to `.env` and provide only the credentials for the provider you intend to use.
 
 ## Features
 
@@ -256,52 +278,38 @@ MIMO_API_KEY="your-api-key-here"
 ## Workspace structure
 
 ```
-agentik/
-├── Cargo.toml                          # Workspace manifest
-└── crates/
-    ├── agentik-types/                  # Shared type definitions
-    │   └── src/
-    │       ├── messages.rs             # Message, Role, ContentBlock, Builder
-    │       ├── tools.rs                # Tool, ToolChoice, ToolUse, ToolResult, ToolInput
-    │       ├── models.rs               # Model enum (Anthropic, Google, etc.)
-    │       ├── models_api.rs           # ModelObject, ModelList, pricing, capabilities
-    │       ├── streaming.rs            # SSE event types
-    │       ├── batches.rs              # Batch types
-    │       ├── files_api.rs            # File types
-    │       ├── agent_events.rs         # AgentEvent / AgentUiEvent
-    │       ├── shared.rs               # RequestId, Usage
-    │       └── errors.rs               # AnthropicError
-    ├── agentik-sdk/                    # Full SDK implementation
-    │   └── src/
-    │       ├── client.rs               # Anthropic client (entry point)
-    │       ├── config.rs               # ClientConfig, LogLevel
-    │       ├── http/                   # HTTP client, auth, retry, SSE parser
-    │       ├── streaming.rs            # MessageStream (events + Stream trait)
-    │       ├── resources/              # messages, batches, files, models APIs
-    │       ├── provider/               # deepseek, minimax, sensenova, mimo, zai, ApiClient
-    │       ├── model/                  # Model, ModelInfo, ModelPool
-    │       ├── tokens.rs               # TokenCounter, pricing, cost tracking
-    │       └── files.rs                # File, FileBuilder, integrity checks
-    ├── agentik-proc/                   # Proc macros
-    │   └── src/lib.rs                  # #[derive(ToolInput)]
-    └── agentik-core/                   # Agent runtime
-        └── src/
-            ├── lib.rs
-            ├── agent.rs                # Agent + agent_workflow loop
-            ├── agent_builder.rs        # Fluent AgentBuilder
-            ├── context.rs              # AgentContext trait, InMemoryAgentContext
-            ├── lifecycle.rs            # AgentLifecycle (IDLE/RUNNING/ABORTED)
-            ├── memory.rs               # Memory with summarization/compaction
-            ├── message_ext.rs          # AgentMessageExt helpers
-            ├── prompt/                 # SystemPromptBuilder, context, compact prompts
-            ├── process/                # ProcessManager + commands + events
-            ├── storage/                # AgentSnapshotStorage + SQLite impl
-            ├── testing.rs              # Test helpers (dummy ModelInfo, mock pool)
-            ├── toolset.rs              # Re-exports ToolRegistration / Toolset
-            ├── tools/                  # ToolFunction trait, registry, executor,
-            │                           #   bash_tool, lifecycle_tools, errors
-            └── types.rs                # Re-exports ToolError
+autonomics/
+├── apps/
+│   └── phloem-tui/          # Ratatui terminal application
+├── crates/
+│   ├── agentik-*/           # LLM API client, type system, macros, and Agent runtime
+│   ├── data-engine/         # DataFusion DAG model, nodes, and scheduler
+│   ├── data-engine-tools/   # ToolFunction adapters for data-engine operations
+│   ├── biofusion/           # DataFusion readers for genomics file formats
+│   ├── datalake/            # Iceberg REST catalog and DataFusion integration
+│   ├── fs/                  # OpenDAL-backed file storage and file tools
+│   ├── eutils-rs/           # NCBI E-utilities client
+│   ├── opengwas-rs/         # OpenGWAS client
+│   ├── gwascatalog-sdk/     # GWAS Catalog client
+│   ├── stat-primitives/     # Descriptive statistics, distributions, regression
+│   ├── runtime/             # Synchronous host bridge for Agentik
+│   └── mermaid-text/        # Terminal Mermaid renderer
+├── fixtures/                # Valid and malformed genomics input fixtures
+├── Cargo.toml               # Workspace manifest
+└── .cargo/config.toml       # Default Cargo target directory
 ```
+
+## Development
+
+Run an individual package while iterating on it:
+
+```bash
+CARGO_TARGET_DIR=/tmp/autonomics-target cargo test -p data-engine
+CARGO_TARGET_DIR=/tmp/autonomics-target cargo test -p biofusion
+CARGO_TARGET_DIR=/tmp/autonomics-target cargo test -p agentik-core
+```
+
+Some integration tests call external public APIs or require provider credentials. Treat those as opt-in when running in CI or offline environments.
 
 ## Requirements
 
