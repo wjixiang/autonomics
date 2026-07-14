@@ -19,6 +19,7 @@ members = [
   "crates/data-engine-tools",
   "crates/mermaid-text",
   "crates/biofusion-cache",
+  "bio_crates/ldsc",
 ]
 
 [workspace.package]
@@ -59,9 +60,14 @@ datafusion = { version = "53" }
 noodles = { version = "0.107.0", features = ["vcf"] }
 oxbow = "0.8.0"
 
+faer = "0.24.4"
+
 # Suppress unused-warnings for the public-API workspace.dependencies that
 # the umbrella doesn't directly import. Keep this list as a hint for
 # future members; do not delete entries just because a single member
 # doesn't use them.
 [workspace.lints.rust]
 unused_imports = "allow"
+
+[profile.dev.package.faer]
+opt-level = 3
