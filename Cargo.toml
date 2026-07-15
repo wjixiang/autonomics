@@ -9,7 +9,7 @@ members = [
   "crates/stat-primitives",
   "crates/gwascatalog-sdk",
   "crates/data-engine",
-  "apps/phloem-tui",
+  "apps/tui",
   "crates/opengwas-rs",
   "crates/eutils-rs",
   "crates/runtime",

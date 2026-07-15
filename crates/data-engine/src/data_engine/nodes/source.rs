@@ -16,7 +16,7 @@ use datafusion::{
 };
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta, Port};
+use super::meta::{DagNode, NodeInput, NodeMeta};
 use crate::data_engine::dag::{DagError, graph::PortOutputs};
 
 /// Where a [`SourceNode`] reads from.
@@ -129,19 +129,11 @@ pub struct SourceNode {
 }
 
 impl SourceNode {
-    pub fn new(
-        id: impl Into<String>,
-        source: Source,
-        ctx: SessionContext,
-    ) -> Self {
+    pub fn new(id: impl Into<String>, source: Source, ctx: SessionContext) -> Self {
         // A source has no inputs and a single output port.
         let meta = NodeMeta::new(id.into());
         let meta = meta.add_output_port(None);
-        Self {
-            meta,
-            source,
-            ctx,
-        }
+        Self { meta, source, ctx }
     }
 }
 

@@ -13,8 +13,8 @@ use crossterm::{
 };
 use ratatui::{Frame, prelude::*, widgets::Paragraph};
 
-use phloem_tui::state::{ChatLine, TurnUsage};
-use phloem_tui::widgets::chat_widget::{ChatWidget, ChatWidgetState};
+use tui::state::{ChatLine, TurnUsage};
+use tui::widgets::chat_widget::{ChatWidget, ChatWidgetState};
 
 /// Sample messages that exercise every rendering path.
 fn sample_messages() -> Vec<ChatLine> {

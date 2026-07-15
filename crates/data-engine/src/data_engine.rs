@@ -15,8 +15,8 @@ pub mod error;
 pub mod nodes;
 
 pub use nodes::{
-    FileFormat, LdscHsqNode, LinearRegressionNode, Sink, SinkNode, Source, SourceNode, SqlNode,
-    WriteFormat,
+    FileFormat, LdscHsqConfig, LdscHsqNode, LinearRegressionNode, Sink, SinkNode, Source,
+    SourceNode, SqlNode, WriteFormat,
 };
 
 /// Convenience alias for the default engine backed by a REST Iceberg catalog.
@@ -169,10 +169,7 @@ impl<R: Catalog> DataEngine<R> {
         z_column: String,
         n_column: String,
         rsid_column: String,
-        ld_score_table: String,
-        m: Vec<f64>,
-        n_blocks: usize,
-        intercept: Option<f64>,
+        ldsc: LdscHsqConfig,
     ) -> Result<&mut Self> {
         let id = id.into();
         self.dag.add_node(
@@ -183,10 +180,7 @@ impl<R: Catalog> DataEngine<R> {
                 z_column,
                 n_column,
                 rsid_column,
-                ld_score_table,
-                m,
-                n_blocks,
-                intercept,
+                ldsc,
             )),
         )?;
         Ok(self)

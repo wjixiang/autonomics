@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Shared test helpers for eutils-rs E2E tests.
 //!
 //! # Concurrency model

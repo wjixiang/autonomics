@@ -1,6 +1,6 @@
 use crate::config;
 use crate::config::IcebergConfig;
-use datafusion::prelude::SessionContext;
+use datafusion::prelude::{SessionConfig, SessionContext};
 use iceberg::{Catalog, CatalogBuilder, NamespaceIdent, TableIdent, table};
 use iceberg_catalog_rest::RestCatalog;
 use iceberg_datafusion::IcebergCatalogProvider;
@@ -143,6 +143,15 @@ impl Datalake {
 
         Ok(ctx)
     }
+
+    // /// Get a new SessionContext with shared runtime_env.
+    // ///
+    // /// This method provider a better SessionContext that keeps object store and iceberg connected
+    // /// while isolate namespace of tables.
+    // pub async fn get_iso_ctx(&self) -> crate::error::Result<SessionContext> {
+    //     let ctx = SessionContext::new_with_config_rt(SessionConfig::new(), self.ctx.runtime_env());
+    //     todo!()
+    // }
 
     pub async fn create_namespace_if_not_exist(
         &self,

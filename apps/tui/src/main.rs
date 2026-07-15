@@ -2,12 +2,12 @@ use std::path::PathBuf;
 use time::macros::format_description;
 use tracing::Level;
 use tracing_appender::rolling::{RollingFileAppender, Rotation};
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
-use tracing_subscriber::EnvFilter;
 
-use phloem_tui::app::App;
+use tui::app::App;
 
 fn init_logging() -> color_eyre::Result<()> {
     color_eyre::install()?;
@@ -24,10 +24,9 @@ fn init_logging() -> color_eyre::Result<()> {
     );
 
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("phloem_tui=debug,agentik_core=debug,agentik_sdk=debug")),
-        )
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            EnvFilter::new("phloem_tui=debug,agentik_core=debug,agentik_sdk=debug")
+        }))
         .with_writer(file_writer)
         .with_ansi(false)
         .with_target(false)
@@ -37,7 +36,10 @@ fn init_logging() -> color_eyre::Result<()> {
         .with_timer(timer)
         .init();
 
-    tracing::info!("logging initialized — logs directory: {}", log_dir.display());
+    tracing::info!(
+        "logging initialized — logs directory: {}",
+        log_dir.display()
+    );
     Ok(())
 }
 

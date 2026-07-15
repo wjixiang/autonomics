@@ -4,6 +4,7 @@ use agentik_core::tools::{ToolError, ToolFunction};
 use agentik_proc::tool;
 use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
+use data_engine::LdscHsqConfig;
 use data_engine::runtime::DataEngineClient;
 use datalake::Datalake;
 
@@ -30,8 +31,8 @@ pub struct AddLdscNodeInput {
     pub n_column: String,
     #[desc = "Name of the rsid (SNP identifier) column used for the join. Defaults to 'rsid'."]
     pub rsid_column: Option<String>,
-    #[desc = "LD Score panel table name under the genetics.ld_score namespace (e.g. 'panel'). Defaults to 'panel'."]
-    pub ld_score_table: Option<String>,
+    // #[desc = "LD Score panel table name under the genetics.ld_score namespace (e.g. 'panel'). Defaults to 'panel'."]
+    // pub ld_score_table: Option<String>,
     #[desc = "Per-annotation L2-summed M values (one per annotation; baseline LDSC uses a single value)"]
     pub m: Vec<f64>,
     #[desc = "Number of block-jackknife blocks for standard error estimation. Defaults to 200."]
@@ -61,7 +62,7 @@ impl ToolFunction for AddLdscNodeTool {
         }
         let n_blocks = input.n_blocks.unwrap_or(200);
         let rsid_column = input.rsid_column.unwrap_or_else(|| "rsid".to_string());
-        let ld_score_table = input.ld_score_table.unwrap_or_else(|| "panel".to_string());
+        let ldsc = LdscHsqConfig::new(input.m, n_blocks, input.intercept);
         self.client
             .add_ldsc_node(
                 input.id,
@@ -69,10 +70,7 @@ impl ToolFunction for AddLdscNodeTool {
                 input.z_column,
                 input.n_column,
                 rsid_column,
-                ld_score_table,
-                input.m,
-                n_blocks,
-                input.intercept,
+                ldsc,
             )
             .await
             .map_err(ExecError::from)?;

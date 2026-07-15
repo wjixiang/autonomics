@@ -12,15 +12,16 @@ use crate::ExecError;
 
 #[tool(
     name = "add_source_node",
-    description = "Add a source node to the DAG that loads data from a file. \
-                  The file format is auto-detected from the extension if not specified."
+    description = "Add a source node to the DAG that loads data from a file or Iceberg table. \
+                  For local files, the format is auto-detected from the extension if not specified. \
+                  For Iceberg tables, use the 'iceberg://' URI scheme (e.g. 'iceberg://genetics.ld_score.ukbb_eur')."
 )]
 pub struct AddSourceNodeInput {
     #[desc = "Unique identifier for this node in the DAG"]
     pub id: String,
-    #[desc = "Path to the data file (CSV, Parquet, VCF, etc.)"]
+    #[desc = "Path to the data file (CSV, Parquet, VCF, etc.) or Iceberg URI (iceberg://namespace.table)."]
     pub path: String,
-    #[desc = "Explicit file format (csv, parquet, vcf, etc.). Auto-detected from path if omitted."]
+    #[desc = "Explicit file format (csv, parquet, vcf, etc.). Auto-detected from path if omitted. Ignored for Iceberg URIs."]
     pub format: Option<String>,
 }
 
@@ -39,14 +40,20 @@ impl ToolFunction for AddSourceNodeTool {
     type Input = AddSourceNodeInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
-        let format = input
-            .format
-            .map(|f| parse_file_format(&f))
-            .transpose()?;
+        let source = if let Some(ident) = input.path.strip_prefix("iceberg://") {
+            Source::Iceberg {
+                ident: ident.to_string(),
+            }
+        } else {
+            let format = input
+                .format
+                .map(|f| parse_file_format(&f))
+                .transpose()?;
 
-        let source = Source::File {
-            path: input.path,
-            format,
+            Source::File {
+                path: input.path,
+                format,
+            }
         };
 
         self.client

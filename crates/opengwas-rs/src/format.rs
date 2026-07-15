@@ -443,28 +443,151 @@ pub fn format_ld_clump(value: &Value) -> String {
 
 /// Format LD matrix as an SNP×SNP correlation table.
 ///
-/// Expected shape: an object keyed by rsID, where each value is an object
-/// of `{ other_rsid: r_value, ... }`.
+/// The OpenGWAS `/ld/matrix` endpoint returns a flat array in row-major
+/// order, paired with a SNP list whose entries carry allele suffixes
+/// (`rs1205_A_G`). We reshape the flat array into an N×N table and
+/// present it as a Markdown correlation matrix.
+///
+/// Two shapes are accepted (defensive):
+///
+/// 1. **Canonical** — `{ "snplist": ["rs1205_A_G", ...],
+///                       "matrix":  [r00, r01, ..., r10, r11, ...] }`
+/// 2. **Nested**   — `{ "rs1205": { "rs174546": 0.92, ... }, ... }`
+///    (a more verbose, symmetrical per-row map — kept for compatibility)
 pub fn format_ld_matrix(value: &Value) -> String {
-    let map = match value.as_object() {
-        Some(m) => m,
-        None => return obj_to_kv(value),
-    };
+    // -- Canonical {snplist, matrix} response --------------------------------
+    if let Some(obj) = value.as_object() {
+        if let (Some(snplist), Some(matrix)) =
+            (obj.get("snplist"), obj.get("matrix"))
+        {
+            if let (Some(snps), Some(values)) =
+                (snplist.as_array(), matrix.as_array())
+            {
+                return format_ld_matrix_canonical(snps, values);
+            }
+        }
+    }
 
-    if map.is_empty() {
+    // -- Nested {rsid: {other_rsid: r}} response -----------------------------
+    if let Some(map) = value.as_object() {
+        if !map.is_empty() && map.values().all(|v| v.is_object()) {
+            return format_ld_matrix_nested(map);
+        }
+    }
+
+    // -- Anything else: dump as key-value so nothing is lost ------------------
+    obj_to_kv(value)
+}
+
+/// Render the canonical `{snplist, matrix}` response as an N×N table.
+fn format_ld_matrix_canonical(snps: &[Value], values: &[Value]) -> String {
+    if snps.is_empty() {
         return "No LD matrix data returned.".to_string();
     }
 
-    // Collect ordered list of SNP rsIDs.
+    let n = snps.len();
+    let expected = n * n;
+    let have = values.len();
+
+    // Strip trailing `_REF_ALT` allele suffixes so headers stay readable.
+    let labels: Vec<String> = snps
+        .iter()
+        .map(|v| {
+            let raw = match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            strip_allele_suffix(&raw)
+        })
+        .collect();
+
+    // Coerce every entry to f64; nulls / non-numerics become `None`.
+    let flat: Vec<Option<f64>> = values
+        .iter()
+        .map(|v| match v {
+            Value::Number(num) => num.as_f64(),
+            Value::String(s) => s.parse::<f64>().ok(),
+            _ => None,
+        })
+        .collect();
+
+    // Reshape: row-major. If the count doesn't match an N×N square we still
+    // emit what we can and surface the size mismatch to the model.
+    let mut rows: Vec<Vec<Option<f64>>> = Vec::with_capacity(n);
+    if have == expected {
+        for i in 0..n {
+            let start = i * n;
+            rows.push(flat[start..start + n].to_vec());
+        }
+    } else {
+        // Fall back to chunking by `n` so the model still sees row order.
+        for chunk in flat.chunks(n.max(1)) {
+            let mut row = chunk.to_vec();
+            // Pad short final row so columns line up.
+            while row.len() < n {
+                row.push(None);
+            }
+            rows.push(row);
+        }
+        if rows.len() != n {
+            // Hard mismatch — render as a flat list rather than a fake matrix.
+            return format!(
+                "LD matrix shape mismatch: snplist has {n} entries but matrix has \
+                 {have} values (expected {expected}). Raw values:\n\n{}",
+                obj_to_kv(&Value::Array(values.to_vec()))
+            );
+        }
+    }
+
+    let mut out = format!(
+        "LD matrix ({} SNPs, R values)\n\n",
+        n
+    );
+    if have != expected {
+        out.push_str(&format!(
+            "_Warning: snplist has {n} entries but matrix has {have} values \
+             (expected {expected}). Showing partial data._\n\n"
+        ));
+    }
+
+    // Header: | | rs1 | rs2 | ... |
+    out.push_str("| | ");
+    out.push_str(&labels.join(" | "));
+    out.push_str(" |\n");
+
+    out.push('|');
+    out.push_str("------|");
+    for _ in &labels {
+        out.push_str("--------|");
+    }
+    out.push('\n');
+
+    // Rows
+    for (i, row) in rows.iter().enumerate() {
+        out.push_str(&format!("| **{}** | ", labels[i]));
+        for (j, cell) in row.iter().enumerate() {
+            if i == j {
+                out.push_str("1.000 | ");
+            } else {
+                match cell {
+                    Some(f) => out.push_str(&format!("{f:.3} | ")),
+                    None => out.push_str("- | "),
+                }
+            }
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Render the nested `{rsid: {other_rsid: r}}` response as an N×N table.
+fn format_ld_matrix_nested(map: &serde_json::Map<String, Value>) -> String {
     let mut snps: Vec<String> = map.keys().cloned().collect();
     snps.sort();
 
-    let mut out = format!(
-        "LD matrix ({} SNPs)\n\n",
-        snps.len()
-    );
+    let mut out = format!("LD matrix ({} SNPs, R values)\n\n", snps.len());
 
-    // Header: | | rs1 | rs2 | ... |
     out.push_str("| | ");
     out.push_str(&snps.join(" | "));
     out.push_str(" |\n");
@@ -476,7 +599,6 @@ pub fn format_ld_matrix(value: &Value) -> String {
     }
     out.push('\n');
 
-    // Rows
     for snp in &snps {
         out.push_str(&format!("| **{}** | ", snp));
         let row_data = map.get(snp).and_then(|v| v.as_object());
@@ -494,6 +616,31 @@ pub fn format_ld_matrix(value: &Value) -> String {
     }
 
     out
+}
+
+/// Strip a trailing `_REF_ALT` allele suffix from an `rsID_REF_ALT` label.
+///
+/// `rs1205_A_G` → `rs1205`
+/// `rs174546`    → `rs174546` (no suffix, returned as-is)
+///
+/// Splits at the **first** underscore because rsIDs themselves never
+/// contain underscores — the suffix is always at the tail.
+fn strip_allele_suffix(label: &str) -> String {
+    if let Some(idx) = label.find('_') {
+        let (rsid, tail) = label.split_at(idx);
+        let tail = &tail[1..]; // drop the leading '_'
+        let parts: Vec<&str> = tail.split('_').collect();
+        if parts.len() == 2
+            && parts.iter().all(|p| p.len() == 1 && is_allele_char(p))
+        {
+            return rsid.to_string();
+        }
+    }
+    label.to_string()
+}
+
+fn is_allele_char(c: &str) -> bool {
+    matches!(c, "A" | "C" | "G" | "T" | "N" | "a" | "c" | "g" | "t" | "n")
 }
 
 /// Format download results (already structured as `{ count, files }`).
@@ -754,15 +901,75 @@ mod tests {
     // -- format_ld_matrix --
 
     #[test]
-    fn test_format_ld_matrix() {
+    fn test_format_ld_matrix_canonical() {
+        // The actual OpenGWAS /ld/matrix response: flat matrix + snplist
+        // with `_REF_ALT` allele suffixes, row-major.
+        let v = json!({
+            "snplist": ["rs1205_A_G", "rs174546_C_T"],
+            "matrix": [1.0, 0.92, 0.92, 1.0]
+        });
+        let result = format_ld_matrix(&v);
+        assert!(result.contains("LD matrix (2 SNPs"));
+        assert!(result.contains("rs1205"));
+        assert!(result.contains("rs174546"));
+        // Allele suffixes must be stripped from the headers.
+        assert!(!result.contains("rs1205_A_G"));
+        // Diagonal is 1.000; off-diagonal is 0.92.
+        assert!(result.contains("1.000"));
+        assert!(result.contains("0.920"));
+    }
+
+    #[test]
+    fn test_format_ld_matrix_nested_fallback() {
+        // Defensive: if the API ever returns the nested shape, still render.
         let v = json!({
             "rs1205": {"rs174546": 0.92},
             "rs174546": {"rs1205": 0.92}
         });
         let result = format_ld_matrix(&v);
-        assert!(result.contains("LD matrix (2 SNPs)"));
+        assert!(result.contains("LD matrix (2 SNPs"));
         assert!(result.contains("1.000"));
         assert!(result.contains("0.920"));
+    }
+
+    #[test]
+    fn test_format_ld_matrix_size_mismatch() {
+        // snplist has 3 entries but matrix has 5 values — should warn.
+        let v = json!({
+            "snplist": ["rs1_A_G", "rs2_C_T", "rs3_G_A"],
+            "matrix":   [1.0, 0.5, 0.3, 0.5, 1.0]
+        });
+        let result = format_ld_matrix(&v);
+        assert!(
+            result.contains("shape mismatch")
+                || result.contains("Warning"),
+            "expected mismatch warning, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_format_ld_matrix_empty() {
+        let v = json!({"snplist": [], "matrix": []});
+        assert_eq!(format_ld_matrix(&v), "No LD matrix data returned.");
+    }
+
+    #[test]
+    fn test_format_ld_matrix_unknown_shape() {
+        // Falls back to key-value dump.
+        let v = json!("not an object");
+        let result = format_ld_matrix(&v);
+        assert!(result.contains("not an object"));
+    }
+
+    #[test]
+    fn test_strip_allele_suffix() {
+        assert_eq!(strip_allele_suffix("rs1205_A_G"), "rs1205");
+        assert_eq!(strip_allele_suffix("rs174546_C_T"), "rs174546");
+        assert_eq!(strip_allele_suffix("rs1234"), "rs1234");
+        // Insufficient tokens — leave untouched.
+        assert_eq!(strip_allele_suffix("rs1234_A"), "rs1234_A");
+        // Non-allele trailing tokens — leave untouched.
+        assert_eq!(strip_allele_suffix("rs1234_foo_bar"), "rs1234_foo_bar");
     }
 
     // -- format_download --

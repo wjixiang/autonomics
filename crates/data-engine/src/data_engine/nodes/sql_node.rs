@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use datafusion::{
     common::HashMap,
+    execution::SessionStateBuilder,
     prelude::{SessionConfig, SessionContext},
 };
 use thiserror::Error;
@@ -45,7 +46,7 @@ impl SqlNode {
         // Output port is named after the output DataFrame. Input ports are
         // whatever the caller declared on the meta (default single "default").
 
-        let mut meta = NodeMeta::new(id)
+        let meta = NodeMeta::new(id)
             .add_output_port(None)
             .set_fixed_input(false);
         Self {
@@ -57,11 +58,7 @@ impl SqlNode {
 
     /// Create a [`SqlNode`] from a pre-built [`NodeMeta`] (useful for
     /// multi-input join nodes that declare several input ports).
-    pub fn from_meta(
-        meta: NodeMeta,
-        query: String,
-        ctx: SessionContext,
-    ) -> Self {
+    pub fn from_meta(meta: NodeMeta, query: String, ctx: SessionContext) -> Self {
         Self {
             meta,
             sql_query: query,
@@ -100,7 +97,12 @@ impl DagNode for SqlNode {
             .into());
         }
 
-        let ctx = SessionContext::new_with_config_rt(SessionConfig::new(), self.ctx.runtime_env());
+        let state = SessionStateBuilder::new()
+            .with_runtime_env(self.ctx.runtime_env())
+            .with_catalog_list(self.ctx.state().catalog_list().clone())
+            .build();
+
+        let ctx = SessionContext::new_with_state(state);
         for inp in inputs {
             // Register each upstream DataFrame under `port_{port}`. The fresh
             // context isolates the table namespace so concurrent SqlNodes never
@@ -114,7 +116,7 @@ impl DagNode for SqlNode {
             // `LocalFileSystem` under `file://`, so a CSV-backed upstream
             // ListingTable would find no file and silently return 0 rows.
             let view = inp.data.clone().into_view();
-            ctx.register_table(&format!("port_{}", inp.port), view)
+            ctx.register_table(format!("port_{}", inp.port), view)
                 .map_err(SqlNodeError::RegisterView)?;
         }
         let out = ctx.sql(&self.sql_query).await?;

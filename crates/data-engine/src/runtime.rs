@@ -22,16 +22,8 @@ impl DataEngineServer {
 
     async fn handle(&mut self, cmd: DataEngineCmd) {
         match cmd {
-            DataEngineCmd::AddSourceNode {
-                id,
-                source,
-                reply,
-            } => {
-                let _ = reply.send(
-                    self.engine
-                        .source_node(id, source)
-                        .map(|_| ()),
-                );
+            DataEngineCmd::AddSourceNode { id, source, reply } => {
+                let _ = reply.send(self.engine.source_node(id, source).map(|_| ()));
             }
             DataEngineCmd::AddSqlNode { id, query, reply } => {
                 let _ = reply.send(self.engine.sql_node(id, query).map(|_| ()));
@@ -58,25 +50,12 @@ impl DataEngineServer {
                 z_column,
                 n_column,
                 rsid_column,
-                ld_score_table,
-                m,
-                n_blocks,
-                intercept,
+                ldsc,
                 reply,
             } => {
                 let _ = reply.send(
                     self.engine
-                        .ldsc_node(
-                            id,
-                            datalake,
-                            z_column,
-                            n_column,
-                            rsid_column,
-                            ld_score_table,
-                            m,
-                            n_blocks,
-                            intercept,
-                        )
+                        .ldsc_node(id, datalake, z_column, n_column, rsid_column, ldsc)
                         .map(|_| ()),
                 );
             }
@@ -209,10 +188,7 @@ impl DataEngineClient {
         z_column: String,
         n_column: String,
         rsid_column: String,
-        ld_score_table: String,
-        m: Vec<f64>,
-        n_blocks: usize,
-        intercept: Option<f64>,
+        ldsc: crate::data_engine::LdscHsqConfig,
     ) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
@@ -222,10 +198,7 @@ impl DataEngineClient {
                 z_column,
                 n_column,
                 rsid_column,
-                ld_score_table,
-                m,
-                n_blocks,
-                intercept,
+                ldsc,
                 reply: reply_tx,
             },
             reply_rx,

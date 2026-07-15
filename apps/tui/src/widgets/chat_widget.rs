@@ -73,7 +73,9 @@ impl StatefulWidget for ChatWidget<'_> {
             state.rendered_lines = Some(lines.clone());
         }
 
-        let paragraph = Paragraph::new(lines.to_vec()).wrap(Wrap { trim: true });
+        // `trim: false` preserves leading whitespace so that pretty-printed JSON
+        // (and indented markdown code blocks) keep their indentation when rendered.
+        let paragraph = Paragraph::new(lines.to_vec()).wrap(Wrap { trim: false });
 
         state.total_lines = paragraph.line_count(area.width);
 

@@ -3,7 +3,7 @@ use tokio::sync::oneshot;
 use crate::data_engine::dag::RunReport;
 use crate::data_engine::dag::graph::PortOutputs;
 use crate::data_engine::error::Result as EngineResult;
-use crate::data_engine::{Sink, Source};
+use crate::data_engine::{LdscHsqConfig, Sink, Source};
 
 pub enum DataEngineCmd {
     AddSourceNode {
@@ -34,10 +34,7 @@ pub enum DataEngineCmd {
         z_column: String,
         n_column: String,
         rsid_column: String,
-        ld_score_table: String,
-        m: Vec<f64>,
-        n_blocks: usize,
-        intercept: Option<f64>,
+        ldsc: LdscHsqConfig,
         reply: oneshot::Sender<EngineResult<()>>,
     },
     AddEdge {

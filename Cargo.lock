@@ -5588,34 +5588,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "phloem-tui"
-version = "0.1.0"
-dependencies = [
- "agentik-core",
- "agentik-sdk",
- "anyhow",
- "color-eyre",
- "crossterm",
- "mermaid-text",
- "pulldown-cmark",
- "ratatui",
- "ratatui-comfy-tabs",
- "ratatui-textarea",
- "runtime",
- "rusqlite",
- "serde_json",
- "syntect",
- "time",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "unicode-segmentation",
- "unicode-width",
- "uuid",
-]
-
-[[package]]
 name = "pin-project"
 version = "1.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7865,6 +7837,34 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "tui"
+version = "0.1.0"
+dependencies = [
+ "agentik-core",
+ "agentik-sdk",
+ "anyhow",
+ "color-eyre",
+ "crossterm",
+ "mermaid-text",
+ "pulldown-cmark",
+ "ratatui",
+ "ratatui-comfy-tabs",
+ "ratatui-textarea",
+ "runtime",
+ "rusqlite",
+ "serde_json",
+ "syntect",
+ "time",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "unicode-segmentation",
+ "unicode-width",
+ "uuid",
+]
 
 [[package]]
 name = "twox-hash"

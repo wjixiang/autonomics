@@ -66,8 +66,12 @@ pub fn format_esummary(data: &Value) -> String {
             if !jname.is_empty() {
                 let mut jline = format!("**Journal:** {jname}");
                 let mut parts: Vec<String> = Vec::new();
-                if !vol.is_empty() { parts.push(vol.to_string()); }
-                if !iss.is_empty() { parts.push(format!("({iss})")); }
+                if !vol.is_empty() {
+                    parts.push(vol.to_string());
+                }
+                if !iss.is_empty() {
+                    parts.push(format!("({iss})"));
+                }
                 if !parts.is_empty() {
                     jline.push_str(&format!(", {}", parts.join(" ")));
                 }
@@ -91,8 +95,7 @@ pub fn format_esummary(data: &Value) -> String {
             .replace("doi: ", "")
             .trim()
             .to_string();
-        let doi_printed = if !doi_from_location.is_empty()
-            && !doi_from_location.starts_with("doi:")
+        let doi_printed = if !doi_from_location.is_empty() && !doi_from_location.starts_with("doi:")
         {
             out.push_str(&format!("**DOI:** {doi_from_location}\n"));
             true
@@ -253,7 +256,10 @@ pub fn format_elink(data: &Value) -> String {
                     .and_then(|v| v.as_array())
                     .map(|a| a.as_slice())
                     .unwrap_or(&[]);
-                out.push_str(&format!("**Related (→ {db_name}):** {} articles\n\n", links.len()));
+                out.push_str(&format!(
+                    "**Related (→ {db_name}):** {} articles\n\n",
+                    links.len()
+                ));
                 for link in links.iter().take(30) {
                     let id = match link.as_str() {
                         Some(s) => s,
@@ -284,12 +290,8 @@ pub fn format_elink(data: &Value) -> String {
 pub fn format_espell(data: &Value) -> String {
     let mut out = String::with_capacity(256);
 
-    let corrected = data
-        .get("CorrectedQuery")
-        .and_then(|v| v.as_str());
-    let original = data
-        .get("OriginalQuery")
-        .and_then(|v| v.as_str());
+    let corrected = data.get("CorrectedQuery").and_then(|v| v.as_str());
+    let original = data.get("OriginalQuery").and_then(|v| v.as_str());
 
     if let Some(corr) = corrected {
         out.push_str("**Corrected spelling:**\n");
@@ -301,7 +303,9 @@ pub fn format_espell(data: &Value) -> String {
     } else {
         let db = str_field(data, "Database");
         let query = str_field(data, "Query");
-        out.push_str(&format!("No spelling correction needed for \"{query}\" in {db}.\n"));
+        out.push_str(&format!(
+            "No spelling correction needed for \"{query}\" in {db}.\n"
+        ));
     }
 
     out
@@ -321,7 +325,10 @@ pub fn format_einfo(data: &Value) -> String {
         .and_then(|r| r.get("dblist"))
         .and_then(|v| v.as_array())
     {
-        out.push_str(&format!("**{} Entrez databases available:**\n\n", dblist.len()));
+        out.push_str(&format!(
+            "**{} Entrez databases available:**\n\n",
+            dblist.len()
+        ));
         for db in dblist.iter().take(60) {
             if let Some(name) = db.as_str() {
                 out.push_str(&format!("- {name}\n"));
@@ -349,9 +356,15 @@ pub fn format_einfo(data: &Value) -> String {
         let update = str_field(info, "lastupdate");
 
         out.push_str(&format!("## {name}\n"));
-        if !menu.is_empty() { out.push_str(&format!("**Name:** {menu}\n")); }
-        if !count.is_empty() { out.push_str(&format!("**Records:** {count}\n")); }
-        if !update.is_empty() { out.push_str(&format!("**Last updated:** {update}\n")); }
+        if !menu.is_empty() {
+            out.push_str(&format!("**Name:** {menu}\n"));
+        }
+        if !count.is_empty() {
+            out.push_str(&format!("**Records:** {count}\n"));
+        }
+        if !update.is_empty() {
+            out.push_str(&format!("**Last updated:** {update}\n"));
+        }
         if !desc.is_empty() {
             let cleaned = strip_html_tags(&desc);
             out.push_str(&format!("**Description:** {cleaned}\n"));
@@ -432,7 +445,10 @@ pub fn format_egquery(data: &Value) -> String {
         out.push_str(&format!("| {name} | {count} |\n"));
     }
     if entries.len() > 25 {
-        out.push_str(&format!("| ... | {} more databases |\n", entries.len() - 25));
+        out.push_str(&format!(
+            "| ... | {} more databases |\n",
+            entries.len() - 25
+        ));
     }
 
     out.trim_end().to_string()
