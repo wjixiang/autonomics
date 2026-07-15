@@ -1678,6 +1678,7 @@ dependencies = [
  "futures",
  "iceberg",
  "iceberg-catalog-rest",
+ "ldsc",
  "nanoid",
  "petgraph",
  "serde",
@@ -1700,6 +1701,7 @@ dependencies = [
  "async-trait",
  "data-engine",
  "datafusion",
+ "datalake",
  "fs",
  "serde",
  "serde_json",
@@ -2379,6 +2381,23 @@ dependencies = [
  "iceberg-catalog-rest",
  "iceberg-datafusion",
  "iceberg-storage-opendal",
+ "tokio",
+]
+
+[[package]]
+name = "datalake-tools"
+version = "0.1.0"
+dependencies = [
+ "agentik-core",
+ "agentik-proc",
+ "agentik-sdk",
+ "arrow-array",
+ "arrow-schema",
+ "async-trait",
+ "datafusion",
+ "datalake",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -6496,6 +6515,8 @@ dependencies = [
  "anyhow",
  "data-engine",
  "data-engine-tools",
+ "datalake",
+ "datalake-tools",
  "eutils-rs",
  "fs",
  "opengwas-rs",

@@ -41,7 +41,10 @@ async fn test_add_source_sql_run_dag() {
     let (client, _handle) = spawn_with_engine(engine);
 
     // 3. Register tools
-    let tools = data_engine_tools::registrations(Arc::new(client.clone()));
+    let tools = data_engine_tools::registrations(
+        Arc::new(client.clone()),
+        Arc::new(datalake::Datalake::new()),
+    );
     let mut toolset = Toolset::new(None);
     toolset.register_all(tools).unwrap();
 

@@ -22,8 +22,6 @@ pub struct AddSourceNodeInput {
     pub path: String,
     #[desc = "Explicit file format (csv, parquet, vcf, etc.). Auto-detected from path if omitted."]
     pub format: Option<String>,
-    #[desc = "Name for the output DataFrame. Defaults to the node id if omitted."]
-    pub output_df_name: Option<String>,
 }
 
 pub struct AddSourceNodeTool {
@@ -51,9 +49,8 @@ impl ToolFunction for AddSourceNodeTool {
             format,
         };
 
-        let output_df_name = input.output_df_name.unwrap_or_else(|| input.id.clone());
         self.client
-            .add_source_node(input.id, source, output_df_name)
+            .add_source_node(input.id, source)
             .await
             .map_err(ExecError::from)?;
 

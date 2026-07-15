@@ -1,4 +1,5 @@
 mod add_edge_tool;
+mod add_ldsc_tool;
 mod add_linear_regression_tool;
 mod add_sink_tool;
 mod add_source_tool;
@@ -13,6 +14,7 @@ use std::sync::Arc;
 
 use agentik_core::tools::{ToolError, ToolRegistration};
 use data_engine::runtime::DataEngineClient;
+use datalake::Datalake;
 
 /// Shared tool execution error — replaces `anyhow` with typed variants
 /// so each error source is identifiable without string matching.
@@ -63,8 +65,12 @@ impl From<ExecError> for ToolError {
 /// Build the default set of data-engine DAG tools.
 ///
 /// Each tool sends commands to the [`DataEngineClient`] actor and awaits
-/// replies via oneshot channels.
-pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
+/// replies via oneshot channels. `datalake` is shared with tools that need
+/// direct Iceberg catalog access (e.g. the LDSC node queries LD scores).
+pub fn registrations(
+    client: Arc<DataEngineClient>,
+    datalake: Arc<Datalake>,
+) -> Vec<ToolRegistration> {
     vec![
         ToolRegistration::from(add_source_tool::AddSourceNodeTool::new(client.clone())),
         ToolRegistration::from(add_sql_tool::AddSqlNodeTool::new(client.clone())),
@@ -72,6 +78,10 @@ pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
         ToolRegistration::from(
             add_linear_regression_tool::AddLinearRegressionNodeTool::new(client.clone()),
         ),
+        ToolRegistration::from(add_ldsc_tool::AddLdscNodeTool::new(
+            client.clone(),
+            datalake,
+        )),
         ToolRegistration::from(add_edge_tool::AddEdgeTool::new(client.clone())),
         ToolRegistration::from(run_dag_tool::RunDagTool::new(client.clone())),
         ToolRegistration::from(get_output_tool::GetOutputTool::new(client.clone())),

@@ -52,17 +52,44 @@ impl Datalake {
     }
 
     pub async fn list_all_tables(&self) -> crate::error::Result<Vec<(Vec<String>, String)>> {
-        let catalog = self.get_catalog().await.unwrap();
-        let namespaces = catalog.list_namespaces(None).await?;
+        let catalog = self.get_catalog().await?;
         let mut result = Vec::new();
+        // Recursively walk the namespace tree so nested namespaces
+        // (e.g. `genetics.ld_score`) are not skipped. Per-namespace errors
+        // are tolerated: a single unreadable namespace must not abort the
+        // whole listing.
+        Self::collect_tables_recursive(&catalog, None, &mut result).await;
+        Ok(result)
+    }
 
-        for ns in &namespaces {
-            let tables = catalog.list_tables(ns).await?;
-            for t in tables {
-                result.push((t.namespace.inner(), t.name));
+    /// Recursively collect `(namespace, table)` pairs under `parent`.
+    ///
+    /// `parent = None` lists the root level. For each namespace we record its
+    /// direct tables, then descend into its child namespaces. Errors at any
+    /// single namespace/table listing are swallowed so a partial catalog
+    /// still yields a (possibly incomplete) result rather than failing.
+    async fn collect_tables_recursive(
+        catalog: &Arc<RestCatalog>,
+        parent: Option<&NamespaceIdent>,
+        out: &mut Vec<(Vec<String>, String)>,
+    ) {
+        // Direct tables at this namespace level.
+        if let Some(ns) = parent {
+            if let Ok(tables) = catalog.list_tables(ns).await {
+                for t in tables {
+                    out.push((t.namespace.inner(), t.name));
+                }
             }
         }
-        Ok(result)
+        // Descend into child namespaces (e.g. `genetics` → `genetics.ld_score`).
+        let children = match catalog.list_namespaces(parent).await {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        for child in children {
+            // async recursion requires boxing the future.
+            Box::pin(Self::collect_tables_recursive(catalog, Some(&child), out)).await;
+        }
     }
 
     pub async fn list_tables_in_namespace(
@@ -70,6 +97,31 @@ impl Datalake {
         namespace: &NamespaceIdent,
     ) -> crate::error::Result<Vec<TableIdent>> {
         Ok(self.get_catalog().await?.list_tables(namespace).await?)
+    }
+
+    /// Load a table's current schema directly from the Iceberg catalog,
+    /// bypassing DataFusion entirely (so multi-level/nested namespaces like
+    /// `genetics.ld_score` work — DataFusion's SQL parser caps identifiers
+    /// at 3 parts).
+    ///
+    /// `ident` is a dotted `namespace...table` string (e.g.
+    /// `genetics.ld_score.ukbb_eur`); the last segment is the table name,
+    /// the rest form the (possibly nested) namespace.
+    pub async fn table_schema(
+        &self,
+        ident: &str,
+    ) -> crate::error::Result<Vec<iceberg::spec::NestedField>> {
+        let catalog = self.get_catalog().await?;
+        let table_ident = parse_table_ident(ident)?;
+        let table = catalog.load_table(&table_ident).await?;
+        let schema = table.current_schema_ref();
+        let fields: Vec<iceberg::spec::NestedField> = schema
+            .as_struct()
+            .fields()
+            .iter()
+            .map(|f| (**f).clone())
+            .collect();
+        Ok(fields)
     }
 
     pub async fn get_provider(&self) -> crate::error::Result<IcebergCatalogProvider> {
@@ -132,6 +184,17 @@ impl Datalake {
             Ok(table)
         }
     }
+}
+
+/// Parse a dotted `namespace...table` string into a [`TableIdent`].
+///
+/// The last dot-separated segment is the table name; the preceding segments
+/// form the (possibly nested) namespace. Whitespace-only segments around the
+/// dots are trimmed and empty parts are rejected. Requires at least one
+/// namespace level plus a table name (≥ 2 parts).
+fn parse_table_ident(ident: &str) -> crate::error::Result<TableIdent> {
+    TableIdent::from_strs(ident.split('.').map(str::trim))
+        .map_err(|e| format!("invalid table identifier {ident:?}: {e}").into())
 }
 
 #[cfg(test)]

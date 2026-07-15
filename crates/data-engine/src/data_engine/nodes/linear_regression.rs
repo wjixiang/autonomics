@@ -197,7 +197,6 @@ pub struct LinearRegressionNode {
     x_columns: Vec<String>,
     y_column: String,
     intercept: bool,
-    output_df_name: String,
 }
 
 impl LinearRegressionNode {
@@ -206,7 +205,6 @@ impl LinearRegressionNode {
         x_columns: Vec<String>,
         y_column: String,
         intercept: bool,
-        output_df_name: String,
     ) -> Self {
         let meta = NodeMeta::new(id).add_output_port(None).add_input_port(None);
         Self {
@@ -214,7 +212,6 @@ impl LinearRegressionNode {
             x_columns,
             y_column,
             intercept,
-            output_df_name,
         }
     }
 }
@@ -314,7 +311,6 @@ mod tests {
             vec!["x".to_string()],
             "y".to_string(),
             true,
-            "out".to_string(),
         );
         let input = super::super::meta::NodeInput {
             port: 0,
@@ -380,7 +376,6 @@ mod tests {
             vec!["x".to_string()],
             "y".to_string(),
             false,
-            "out".to_string(),
         );
         let input = super::super::meta::NodeInput {
             port: 0,

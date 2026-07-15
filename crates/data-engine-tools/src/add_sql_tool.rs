@@ -41,8 +41,6 @@ pub struct AddSqlNodeInput {
               `\"PetalLengthCm\"`) as reported by the upstream node's output_schema — unquoted identifiers \
               are lowercased and will not match mixed-case columns."]
     pub query: String,
-    #[desc = "Name for the output DataFrame. Defaults to the node id if omitted."]
-    pub output_df_name: Option<String>,
 }
 
 pub struct AddSqlNodeTool {
@@ -60,9 +58,8 @@ impl ToolFunction for AddSqlNodeTool {
     type Input = AddSqlNodeInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
-        let output_df_name = input.output_df_name.unwrap_or_else(|| input.id.clone());
         self.client
-            .add_sql_node(input.id, input.query, output_df_name)
+            .add_sql_node(input.id, input.query)
             .await
             .map_err(ExecError::from)?;
 

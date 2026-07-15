@@ -5,6 +5,7 @@
 //! [`source`], [`sql_node`], and [`sink`].
 
 pub mod cache_source;
+pub mod ldsc;
 pub mod linear_regression;
 pub mod meta;
 pub mod mock_node;
@@ -12,6 +13,7 @@ pub mod sink;
 pub mod source;
 pub mod sql_node;
 
+pub use ldsc::LdscHsqNode;
 pub use linear_regression::LinearRegressionNode;
 pub use meta::{DEFAULT_PORT, DagNode, NodeId, NodeInput, NodeMeta, Port};
 pub use sink::{Sink, SinkNode, WriteFormat};

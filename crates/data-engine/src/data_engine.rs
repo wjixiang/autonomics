@@ -15,7 +15,8 @@ pub mod error;
 pub mod nodes;
 
 pub use nodes::{
-    FileFormat, LinearRegressionNode, Sink, SinkNode, Source, SourceNode, SqlNode, WriteFormat,
+    FileFormat, LdscHsqNode, LinearRegressionNode, Sink, SinkNode, Source, SourceNode, SqlNode,
+    WriteFormat,
 };
 
 /// Convenience alias for the default engine backed by a REST Iceberg catalog.
@@ -97,22 +98,11 @@ impl<R: Catalog> DataEngine<R> {
     }
 
     /// Convenience: add a [`SourceNode`] (chaining-safe — meta built internally).
-    pub fn source_node(
-        &mut self,
-        id: impl Into<String>,
-        source: Source,
-        output_df_name: impl Into<String>,
-    ) -> Result<&mut Self> {
+    pub fn source_node(&mut self, id: impl Into<String>, source: Source) -> Result<&mut Self> {
         let id = id.into();
-        let output_df_name = output_df_name.into();
         self.dag.add_node(
             id.clone(),
-            Box::new(SourceNode::new(
-                id,
-                source,
-                self.ctx.clone(),
-                output_df_name,
-            )),
+            Box::new(SourceNode::new(id, source, self.ctx.clone())),
         )?;
         Ok(self)
     }
@@ -122,18 +112,11 @@ impl<R: Catalog> DataEngine<R> {
         &mut self,
         id: impl Into<String>,
         query: impl Into<String>,
-        output_df_name: impl Into<String>,
     ) -> Result<&mut Self> {
         let id = id.into();
-        let output_df_name = output_df_name.into();
         self.dag.add_node(
             id.clone(),
-            Box::new(SqlNode::new(
-                id,
-                query.into(),
-                self.ctx.clone(),
-                output_df_name,
-            )),
+            Box::new(SqlNode::new(id, query.into(), self.ctx.clone())),
         )?;
         Ok(self)
     }
@@ -159,7 +142,6 @@ impl<R: Catalog> DataEngine<R> {
         x_columns: Vec<String>,
         y_column: impl Into<String>,
         intercept: bool,
-        output_df_name: impl Into<String>,
     ) -> Result<&mut Self> {
         let id = id.into();
         self.dag.add_node(
@@ -169,7 +151,42 @@ impl<R: Catalog> DataEngine<R> {
                 x_columns,
                 y_column.into(),
                 intercept,
-                output_df_name.into(),
+            )),
+        )?;
+        Ok(self)
+    }
+
+    /// Convenience: add a [`LdscHsqNode`] (chaining-safe).
+    ///
+    /// Runs LD Score Regression for SNP-heritability (h2). Accepts raw GWAS
+    /// summary statistics as input, queries the Iceberg data lake for LD score
+    /// panel data (`genetics.ld_score.{ld_score_table}`), joins on rsid, and
+    /// runs LDSC internally.
+    pub fn ldsc_node(
+        &mut self,
+        id: impl Into<String>,
+        datalake: Arc<Datalake>,
+        z_column: String,
+        n_column: String,
+        rsid_column: String,
+        ld_score_table: String,
+        m: Vec<f64>,
+        n_blocks: usize,
+        intercept: Option<f64>,
+    ) -> Result<&mut Self> {
+        let id = id.into();
+        self.dag.add_node(
+            id.clone(),
+            Box::new(LdscHsqNode::new(
+                id,
+                datalake,
+                z_column,
+                n_column,
+                rsid_column,
+                ld_score_table,
+                m,
+                n_blocks,
+                intercept,
             )),
         )?;
         Ok(self)
@@ -321,7 +338,6 @@ mod tests {
                     path: csv_path.to_str().unwrap().to_string(),
                     format: None,
                 },
-                "load",
             )
             .unwrap()
             .sql_node(
@@ -329,7 +345,6 @@ mod tests {
                 // agg's single input (port 0) is registered as "port_0".
                 "SELECT region, CAST(AVG(charges) AS BIGINT) AS avg_chg \
                  FROM port_0 GROUP BY region",
-                "agg",
             )
             .unwrap()
             .sink_node(
@@ -370,7 +385,6 @@ mod tests {
                     path: iris.to_str().unwrap().to_string(),
                     format: None,
                 },
-                "load",
             )
             .unwrap()
             // Note: DataFusion lowercases unquoted identifiers, so quote the
@@ -378,13 +392,11 @@ mod tests {
             .sql_node(
                 "setosa",
                 r#"SELECT * FROM port_0 WHERE "Species" = 'Iris-setosa'"#,
-                "setosa",
             )
             .unwrap()
             .sql_node(
                 "virginica",
                 r#"SELECT * FROM port_0 WHERE "Species" = 'Iris-virginica'"#,
-                "virginica",
             )
             .unwrap()
             .add_edge("load", "setosa", 0, 0)
@@ -419,19 +431,16 @@ mod tests {
                     path: iris.to_str().unwrap().to_string(),
                     format: None,
                 },
-                "load",
             )
             .unwrap()
             .sql_node(
                 "a",
                 r#"SELECT COUNT(*) AS cnt FROM port_0 WHERE "Species" = 'Iris-setosa'"#,
-                "a",
             )
             .unwrap()
             .sql_node(
                 "b",
                 r#"SELECT COUNT(*) AS cnt FROM port_0 WHERE "Species" = 'Iris-virginica'"#,
-                "b",
             )
             .unwrap()
             .add_edge("load", "a", 0, 0)
@@ -464,7 +473,6 @@ mod tests {
                     path: iris.to_str().unwrap().to_string(),
                     format: None,
                 },
-                "data",
             )
             .unwrap()
             .source_node(
@@ -473,7 +481,6 @@ mod tests {
                     path: iris.to_str().unwrap().to_string(),
                     format: None,
                 },
-                "data",
             )
             .unwrap();
 
@@ -490,7 +497,7 @@ mod tests {
                     join_meta,
                     r#"SELECT COUNT(*) AS cnt FROM port_0"#.to_string(),
                     engine.ctx(),
-                    "result".to_string(),
+                    // "result".to_string(),
                 ),
             )
             .unwrap()
@@ -533,7 +540,6 @@ mod tests {
                     path: vcf.to_str().unwrap().to_string(),
                     format: None,
                 },
-                "vcf",
             )
             .unwrap();
 
@@ -546,9 +552,9 @@ mod tests {
     async fn cycle_is_rejected() {
         let mut engine = DataEngine::builder().build();
         engine
-            .sql_node("a", "SELECT 1", "a")
+            .sql_node("a", "SELECT 1")
             .unwrap()
-            .sql_node("b", "SELECT 1", "b")
+            .sql_node("b", "SELECT 1")
             .unwrap()
             .add_edge("a", "b", 0, 0)
             .unwrap()
@@ -570,7 +576,7 @@ mod tests {
         // placeholder column names never get used.
         let mut engine = DataEngine::builder().build();
         engine
-            .linear_regression_node("lr", vec!["x".into()], "y", true, "out")
+            .linear_regression_node("lr", vec!["x".into()], "y", true)
             .unwrap();
 
         let err = engine.run().await.unwrap_err();
@@ -592,7 +598,6 @@ mod tests {
                     path: iris.to_str().unwrap().to_string(),
                     format: None,
                 },
-                "d",
             )
             .unwrap()
             .source_node(
@@ -601,10 +606,9 @@ mod tests {
                     path: iris.to_str().unwrap().to_string(),
                     format: None,
                 },
-                "d",
             )
             .unwrap()
-            .sql_node("c", "SELECT 1", "o")
+            .sql_node("c", "SELECT 1")
             .unwrap()
             .add_edge("s1", "c", 0, 0)
             .unwrap()
@@ -622,9 +626,9 @@ mod tests {
     async fn unknown_port_rejected() {
         let mut engine = DataEngine::builder().build();
         engine
-            .sql_node("a", "SELECT 1", "o")
+            .sql_node("a", "SELECT 1")
             .unwrap()
-            .sql_node("b", "SELECT 1", "o")
+            .sql_node("b", "SELECT 1")
             .unwrap()
             // "a" has no output port named "nope".
             .add_edge("a", "b", 99, 0)
@@ -666,7 +670,7 @@ mod tests {
         let boom_meta = NodeMeta::source("boom");
         engine.add_node("boom", BoomNode(boom_meta)).unwrap();
         engine
-            .sql_node("child", "SELECT 1", "child")
+            .sql_node("child", "SELECT 1")
             .unwrap()
             .add_edge("boom", "child", 0, 0)
             .unwrap();

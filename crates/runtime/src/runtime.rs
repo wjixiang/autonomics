@@ -6,6 +6,7 @@ use agentik_sdk::model::model_pool::ModelPool;
 use agentik_sdk::types::{AgentEvent, ContentBlock};
 use data_engine::data_engine::DataEngine;
 use data_engine::runtime::spawn_with_engine;
+use datalake::Datalake;
 use fs::OpendalFileStorage;
 use tokio_util::sync::CancellationToken;
 
@@ -33,8 +34,13 @@ impl AgentRuntime {
                 .build();
             let (data_engine_client, engine_handle) = spawn_with_engine(engine);
 
-            let tool_list =
-                crate::tools::default_tool_set(file_storage, Arc::new(data_engine_client))?;
+            let datalake = Arc::new(Datalake::new());
+
+            let tool_list = crate::tools::default_tool_set(
+                file_storage,
+                datalake,
+                Arc::new(data_engine_client),
+            )?;
 
             let system_prompt = "\
 ## Core Competencies

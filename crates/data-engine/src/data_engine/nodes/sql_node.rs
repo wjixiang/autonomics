@@ -38,16 +38,10 @@ pub struct SqlNode {
     meta: NodeMeta,
     sql_query: String,
     ctx: SessionContext,
-    output_df_name: String,
 }
 
 impl SqlNode {
-    pub fn new(
-        id: impl Into<String>,
-        query: String,
-        ctx: SessionContext,
-        output_df_name: String,
-    ) -> Self {
+    pub fn new(id: impl Into<String>, query: String, ctx: SessionContext) -> Self {
         // Output port is named after the output DataFrame. Input ports are
         // whatever the caller declared on the meta (default single "default").
 
@@ -58,7 +52,6 @@ impl SqlNode {
             meta,
             sql_query: query,
             ctx,
-            output_df_name,
         }
     }
 
@@ -68,13 +61,11 @@ impl SqlNode {
         meta: NodeMeta,
         query: String,
         ctx: SessionContext,
-        output_df_name: String,
     ) -> Self {
         Self {
             meta,
             sql_query: query,
             ctx,
-            output_df_name,
         }
     }
 
@@ -151,7 +142,7 @@ mod tests {
             RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();
         let df = ctx.read_batch(batch).unwrap();
         ctx.register_table("src", df.clone().into_view()).unwrap();
-        let node = SqlNode::new("sql", sql.into(), ctx.clone(), "out".into());
+        let node = SqlNode::new("sql", sql.into(), ctx.clone());
         (ctx, node, df)
     }
 

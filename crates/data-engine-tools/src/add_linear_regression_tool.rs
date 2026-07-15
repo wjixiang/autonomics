@@ -25,8 +25,6 @@ pub struct AddLinearRegressionNodeInput {
     pub y_column: String,
     #[desc = "Whether to include an intercept term. Defaults to true."]
     pub intercept: Option<bool>,
-    #[desc = "Name for the output DataFrame. Defaults to the node id if omitted."]
-    pub output_df_name: Option<String>,
 }
 
 pub struct AddLinearRegressionNodeTool {
@@ -49,7 +47,6 @@ impl ToolFunction for AddLinearRegressionNodeTool {
                 "x_columns must contain at least one column name",
             ));
         }
-        let output_df_name = input.output_df_name.unwrap_or_else(|| input.id.clone());
         let intercept = input.intercept.unwrap_or(true);
         self.client
             .add_linear_regression_node(
@@ -57,7 +54,6 @@ impl ToolFunction for AddLinearRegressionNodeTool {
                 input.x_columns,
                 input.y_column,
                 intercept,
-                output_df_name,
             )
             .await
             .map_err(ExecError::from)?;

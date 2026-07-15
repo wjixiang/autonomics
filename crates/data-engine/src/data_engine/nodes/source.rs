@@ -126,7 +126,6 @@ pub struct SourceNode {
     meta: NodeMeta,
     source: Source,
     ctx: SessionContext,
-    output_df_name: String,
 }
 
 impl SourceNode {
@@ -134,17 +133,14 @@ impl SourceNode {
         id: impl Into<String>,
         source: Source,
         ctx: SessionContext,
-        output_df_name: String,
     ) -> Self {
-        // A source has no inputs and a single output port named after the
-        // output DataFrame. The node's `execute` keys its output by this name.
+        // A source has no inputs and a single output port.
         let meta = NodeMeta::new(id.into());
         let meta = meta.add_output_port(None);
         Self {
             meta,
             source,
             ctx,
-            output_df_name,
         }
     }
 }

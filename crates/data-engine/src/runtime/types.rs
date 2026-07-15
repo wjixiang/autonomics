@@ -9,13 +9,11 @@ pub enum DataEngineCmd {
     AddSourceNode {
         id: String,
         source: Source,
-        output_df_name: String,
         reply: oneshot::Sender<EngineResult<()>>,
     },
     AddSqlNode {
         id: String,
         query: String,
-        output_df_name: String,
         reply: oneshot::Sender<EngineResult<()>>,
     },
     AddSinkNode {
@@ -28,7 +26,18 @@ pub enum DataEngineCmd {
         x_columns: Vec<String>,
         y_column: String,
         intercept: bool,
-        output_df_name: String,
+        reply: oneshot::Sender<EngineResult<()>>,
+    },
+    AddLdscNode {
+        id: String,
+        datalake: std::sync::Arc<datalake::Datalake>,
+        z_column: String,
+        n_column: String,
+        rsid_column: String,
+        ld_score_table: String,
+        m: Vec<f64>,
+        n_blocks: usize,
+        intercept: Option<f64>,
         reply: oneshot::Sender<EngineResult<()>>,
     },
     AddEdge {

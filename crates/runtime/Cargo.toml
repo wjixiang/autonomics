@@ -13,6 +13,8 @@ opengwas-rs = { path = "../opengwas-rs" }
 eutils-rs = { path = "../eutils-rs" }
 data-engine = { path = "../data-engine" }
 data-engine-tools = { path = "../data-engine-tools" }
+datalake = { path = "../datalake" }
+datalake-tools = { path = "../datalake-tools" }
 fs = { path = "../fs" }
 tokio = { workspace = true }
 tokio-util = "0.7"

@@ -25,22 +25,16 @@ impl DataEngineServer {
             DataEngineCmd::AddSourceNode {
                 id,
                 source,
-                output_df_name,
                 reply,
             } => {
                 let _ = reply.send(
                     self.engine
-                        .source_node(id, source, output_df_name)
+                        .source_node(id, source)
                         .map(|_| ()),
                 );
             }
-            DataEngineCmd::AddSqlNode {
-                id,
-                query,
-                output_df_name,
-                reply,
-            } => {
-                let _ = reply.send(self.engine.sql_node(id, query, output_df_name).map(|_| ()));
+            DataEngineCmd::AddSqlNode { id, query, reply } => {
+                let _ = reply.send(self.engine.sql_node(id, query).map(|_| ()));
             }
             DataEngineCmd::AddSinkNode { id, sink, reply } => {
                 let _ = reply.send(self.engine.sink_node(id, sink).map(|_| ()));
@@ -50,12 +44,39 @@ impl DataEngineServer {
                 x_columns,
                 y_column,
                 intercept,
-                output_df_name,
                 reply,
             } => {
                 let _ = reply.send(
                     self.engine
-                        .linear_regression_node(id, x_columns, y_column, intercept, output_df_name)
+                        .linear_regression_node(id, x_columns, y_column, intercept)
+                        .map(|_| ()),
+                );
+            }
+            DataEngineCmd::AddLdscNode {
+                id,
+                datalake,
+                z_column,
+                n_column,
+                rsid_column,
+                ld_score_table,
+                m,
+                n_blocks,
+                intercept,
+                reply,
+            } => {
+                let _ = reply.send(
+                    self.engine
+                        .ldsc_node(
+                            id,
+                            datalake,
+                            z_column,
+                            n_column,
+                            rsid_column,
+                            ld_score_table,
+                            m,
+                            n_blocks,
+                            intercept,
+                        )
                         .map(|_| ()),
                 );
             }
@@ -121,14 +142,12 @@ impl DataEngineClient {
         &self,
         id: String,
         source: crate::data_engine::Source,
-        output_df_name: String,
     ) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::AddSourceNode {
                 id,
                 source,
-                output_df_name,
                 reply: reply_tx,
             },
             reply_rx,
@@ -136,18 +155,12 @@ impl DataEngineClient {
         .await
     }
 
-    pub async fn add_sql_node(
-        &self,
-        id: String,
-        query: String,
-        output_df_name: String,
-    ) -> Result<()> {
+    pub async fn add_sql_node(&self, id: String, query: String) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::AddSqlNode {
                 id,
                 query,
-                output_df_name,
                 reply: reply_tx,
             },
             reply_rx,
@@ -174,7 +187,6 @@ impl DataEngineClient {
         x_columns: Vec<String>,
         y_column: String,
         intercept: bool,
-        output_df_name: String,
     ) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
@@ -183,7 +195,37 @@ impl DataEngineClient {
                 x_columns,
                 y_column,
                 intercept,
-                output_df_name,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
+    }
+
+    pub async fn add_ldsc_node(
+        &self,
+        id: String,
+        datalake: std::sync::Arc<datalake::Datalake>,
+        z_column: String,
+        n_column: String,
+        rsid_column: String,
+        ld_score_table: String,
+        m: Vec<f64>,
+        n_blocks: usize,
+        intercept: Option<f64>,
+    ) -> Result<()> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::AddLdscNode {
+                id,
+                datalake,
+                z_column,
+                n_column,
+                rsid_column,
+                ld_score_table,
+                m,
+                n_blocks,
+                intercept,
                 reply: reply_tx,
             },
             reply_rx,

@@ -15,6 +15,7 @@ members = [
   "crates/runtime",
   "crates/fs",
   "crates/datalake",
+  "crates/datalake-tools",
   "crates/biofusion",
   "crates/data-engine-tools",
   "crates/mermaid-text",
