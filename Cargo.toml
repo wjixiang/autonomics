@@ -10,15 +10,15 @@ members = [
   "crates/gwascatalog-sdk",
   "crates/data-engine",
   "apps/tui",
-  "crates/opengwas-rs",
-  "crates/eutils-rs",
+  "crates/opengwas",
+  "crates/eutils",
   "crates/runtime",
   "crates/fs",
   "crates/datalake",
   "crates/datalake-tools",
   "crates/biofusion",
   "crates/data-engine-tools",
-  "crates/mermaid-text",
+
   "crates/biofusion-cache",
   "bio_crates/ldsc",
 ]
@@ -41,9 +41,6 @@ derive_more = { version = "2.1.1", features = ["from"] }
 rayon = "1.12.0"
 futures = "0.3"
 
-# mermaid-text transitive deps; resolved once at workspace level so the
-# vendored crate can use `x.workspace = true` declarations.
-ascii-dag = "0.9.1"
 unicode-width = "0.2"
 
 iceberg = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016" }

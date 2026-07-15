@@ -1,9 +1,5 @@
 use async_trait::async_trait;
-use datafusion::{
-    common::HashMap,
-    execution::SessionStateBuilder,
-    prelude::{SessionConfig, SessionContext},
-};
+use datafusion::{common::HashMap, execution::SessionStateBuilder, prelude::SessionContext};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};

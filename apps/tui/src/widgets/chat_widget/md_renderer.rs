@@ -16,7 +16,6 @@ use unicode_width::UnicodeWidthStr;
 
 use super::md_highlight::highlight_code;
 use super::md_math::latex_to_unicode;
-use super::md_mermaid::render_mermaid_block as render_mermaid_box;
 use super::md_table::{self, TableRenderData};
 use super::md_theme::MdTokens;
 use super::text_layout;
@@ -57,9 +56,6 @@ struct MdRenderer {
     list_counters: Vec<Option<u64>>,
     in_code_block: bool,
     code_block_lang: Option<String>,
-    /// True iff the open code block is a `` ```mermaid `` fenced block;
-    /// triggers the mermaid-text renderer instead of the syntect path.
-    code_block_is_mermaid: bool,
     code_block_content: Vec<String>,
     in_heading: bool,
     heading_level: u8,
@@ -89,7 +85,6 @@ impl MdRenderer {
             list_counters: Vec::new(),
             in_code_block: false,
             code_block_lang: None,
-            code_block_is_mermaid: false,
             code_block_content: Vec::new(),
             in_heading: false,
             heading_level: 0,
@@ -310,7 +305,6 @@ impl MdRenderer {
                     }
                     CodeBlockKind::Indented => None,
                 };
-                self.code_block_is_mermaid = self.code_block_lang.as_deref() == Some("mermaid");
                 self.code_block_content.clear();
                 if !self.current_spans.is_empty() {
                     self.flush_line();
@@ -404,13 +398,8 @@ impl MdRenderer {
                 self.push_blank_line();
             }
             TagEnd::CodeBlock => {
-                if self.code_block_is_mermaid {
-                    self.render_mermaid_block();
-                } else {
-                    self.render_code_block();
-                }
+                self.render_code_block();
                 self.in_code_block = false;
-                self.code_block_is_mermaid = false;
                 self.code_block_lang = None;
             }
             TagEnd::List(_) => {
@@ -463,19 +452,6 @@ impl MdRenderer {
             self.current_spans
                 .push(Span::styled(text.to_string(), self.current_style()));
         }
-    }
-
-    /// Render a `` ```mermaid `` fenced block via `md_mermaid::render_mermaid_box`.
-    ///
-    /// Delegates entirely to the dedicated module so the high-level renderer
-    /// stays focused on layout / event-walking and the mermaid-specific
-    /// chrome (rounded box, theme tokens, fallback path) lives in one place.
-    fn render_mermaid_block(&mut self) {
-        let source = self.code_block_content.join("\n");
-        self.push_blank_line();
-        let box_lines = render_mermaid_box(source.as_str(), self.available_width, &self.tokens);
-        self.lines.extend(box_lines);
-        self.push_blank_line();
     }
 
     fn render_code_block(&mut self) {
@@ -614,74 +590,15 @@ mod tests {
             .join("\n")
     }
 
-    /// A `` ```mermaid `` block must dispatch into `md_mermaid::render_mermaid_block`:
-    /// the body contains mermaid-text's `Build`/`Test`/`Deploy` tokens and the
-    /// surrounding `╭ …` chrome is emitted.
     #[test]
-    fn mermaid_fence_routes_through_renderer() {
-        let md = "Lead paragraph.\n\n```mermaid\ngraph LR\nA[Build] --> B[Test] --> C[Deploy]\n```\n\nTrail.";
-        let lines = render_markdown_to_lines(md, 80);
-        let out = joined(&lines);
-
-        assert!(
-            out.contains("Build"),
-            "mermaid body must contain Build:\n{out}"
-        );
-        assert!(
-            out.contains("Test"),
-            "mermaid body must contain Test:\n{out}"
-        );
-        assert!(
-            out.contains("Deploy"),
-            "mermaid body must contain Deploy:\n{out}"
-        );
-        assert!(
-            out.contains('╭'),
-            "mermaid block must emit a top border:\n{out}"
-        );
-        assert!(
-            out.contains("Lead"),
-            "preceding prose must still render:\n{out}"
-        );
-        assert!(
-            out.contains("Trail"),
-            "trailing prose must still render:\n{out}"
-        );
-    }
-
-    /// A non-mermaid code block must NOT emit the mermaid-specific chrome,
-    /// confirming the dispatcher is the only divergence.
-    #[test]
-    fn non_mermaid_fence_does_not_emit_mermaid_chrome() {
+    fn code_fence_renders_in_box() {
         let md = "```bash\necho hello\nls /tmp\n```";
         let lines = render_markdown_to_lines(md, 80);
         let out = joined(&lines);
 
         assert!(
-            !out.contains("╭ mermaid"),
-            "bash block must not emit mermaid chrome:\n{out}"
-        );
-        assert!(
             out.contains('╭'),
-            "bash block must still render inside a box:\n{out}"
-        );
-    }
-
-    /// An invalid mermaid block falls back to raw source with a `render failed`
-    /// banner rather than panicking.
-    #[test]
-    fn invalid_mermaid_falls_back_to_source() {
-        let md = "```mermaid\nthis is not a diagram\nor is it?\n```";
-        let lines = render_markdown_to_lines(md, 80);
-        let out = joined(&lines);
-
-        assert!(
-            out.contains("render failed"),
-            "invalid mermaid must advertise the failure:\n{out}"
-        );
-        assert!(
-            out.contains("this is not a diagram"),
-            "fallback must expose raw source:\n{out}"
+            "code block must render inside a box:\n{out}"
         );
     }
 }

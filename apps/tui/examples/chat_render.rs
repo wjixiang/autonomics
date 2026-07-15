@@ -117,17 +117,15 @@ multiqc results/ -o results/
         },
         ChatLine::User("给我画一个 RNA-seq 差异分析 pipeline 的流程图".into()),
         ChatLine::Assistant {
-            text: "下面是这个 pipeline 的 mermaid 流程图：\n\n\
-                   ```mermaid\n\
-                   graph LR\n\
-                     A[Raw FASTQ] --> B[FastQC]\n\
-                     B --> C{质量合格?}\n\
-                     C -->|是| D[Trim Galore]\n\
-                     C -->|否| E[Re-sequencing]\n\
-                     D --> F[STAR 映射]\n\
-                     F --> G[featureCounts]\n\
-                     G --> H[DESeq2]\n\
-                     H --> I[差异基因列表]\n\
+            text: "下面是这个 pipeline 的流程概览：\n\n\
+                   ```text\n\
+                   1. Raw FASTQ\n\
+                   2. FastQC (质量检查)\n\
+                   3. Trim Galore (接头去除)\n\
+                   4. STAR (基因组映射)\n\
+                   5. featureCounts (定量)\n\
+                   6. DESeq2 (差异表达分析)\n\
+                   7. 差异基因列表\n\
                    ```\n\n\
                    关键节点是质量控制这一步,如果 FastQC 不过关就需要重新测序。"
                 .into(),
@@ -137,15 +135,6 @@ multiqc results/ -o results/
                 cache_creation_input_tokens: None,
                 cache_read_input_tokens: Some(900),
             }),
-        },
-        ChatLine::Assistant {
-            text: "如果模型给的 mermaid 语法有误,会回退成源码展示:\n\n\
-                   ```mermaid\n\
-                   some random prose that is not a valid diagram\n\
-                   second line of nonsense\n\
-                   ```"
-                .into(),
-            usage: None,
         },
     ]
 }

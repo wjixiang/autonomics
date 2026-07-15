@@ -514,6 +514,7 @@ impl DAG {
     }
 
     /// Port existence, default-edge disambiguation, strict-1:1, and completeness.
+    /// TODO: Add port wiring validation to add_edge checkpoint
     fn validate_port_wiring(&self) -> Result<()> {
         use datafusion::common::HashMap;
         // node id -> (input port index -> incoming edge count)

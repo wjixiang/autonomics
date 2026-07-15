@@ -23,8 +23,8 @@ An agent receives tools from `agentik-core`. The data-engine tools communicate w
 | --- | --- | --- |
 | Agent platform | `agentik-types`, `agentik-sdk`, `agentik-proc`, `agentik-core`, `agentik-tools`, `runtime` | API types and clients, declarative tool schemas, agent lifecycle/memory, tool implementations, and sync-to-async hosting. |
 | Data analysis | `data-engine`, `data-engine-tools`, `stat-primitives`, `fs`, `datalake`, `biofusion`, `biofusion-cache` | DAG execution, Agent-exposed DAG operations, statistics, OpenDAL files, Iceberg, and biological-format ingestion. |
-| Scientific data clients | `eutils-rs`, `opengwas-rs`, `gwascatalog-sdk` | Clients for NCBI E-utilities, OpenGWAS, and the GWAS Catalog. |
-| User interface and rendering | `phloem-tui`, `mermaid-text` | Terminal Agent UI plus text-mode Mermaid rendering. |
+| Scientific data clients | `eutils`, `opengwas`, `gwascatalog-sdk` | Clients for NCBI E-utilities, OpenGWAS, and the GWAS Catalog. |
+| User interface and rendering | `phloem-tui` | Terminal Agent UI. |
 
 `fixtures/` contains representative and malformed genomics files used by reader and integration tests.
 
@@ -288,12 +288,11 @@ autonomics/
 │   ├── biofusion/           # DataFusion readers for genomics file formats
 │   ├── datalake/            # Iceberg REST catalog and DataFusion integration
 │   ├── fs/                  # OpenDAL-backed file storage and file tools
-│   ├── eutils-rs/           # NCBI E-utilities client
-│   ├── opengwas-rs/         # OpenGWAS client
+│   ├── eutils/              # NCBI E-utilities client
+│   ├── opengwas/            # OpenGWAS client
 │   ├── gwascatalog-sdk/     # GWAS Catalog client
 │   ├── stat-primitives/     # Descriptive statistics, distributions, regression
 │   ├── runtime/             # Synchronous host bridge for Agentik
-│   └── mermaid-text/        # Terminal Mermaid renderer
 ├── fixtures/                # Valid and malformed genomics input fixtures
 ├── Cargo.toml               # Workspace manifest
 └── .cargo/config.toml       # Default Cargo target directory

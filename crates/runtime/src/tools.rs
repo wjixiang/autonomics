@@ -8,20 +8,20 @@ use std::sync::Arc;
 use agentik_core::tools::ToolRegistration;
 use data_engine::runtime::DataEngineClient;
 use datalake::Datalake;
-use eutils_rs::EutilsClient;
+use eutils::EutilsClient;
 use fs::OpendalFileStorage;
-use opengwas_rs::OpengwasClient;
+use opengwas::OpengwasClient;
 
 /// OpenGWAS tools (GWAS catalog lookup).
 pub fn opengwas_tools(file_storage: Arc<OpendalFileStorage>) -> Vec<ToolRegistration> {
     let opengwas = Arc::new(OpengwasClient::new(None));
-    opengwas_rs::opengwas_registrations(opengwas, file_storage)
+    opengwas::opengwas_registrations(opengwas, file_storage)
 }
 
 /// NCBI E-utilities tools (PubMed, Entrez).
 pub fn eutils_tools() -> Vec<ToolRegistration> {
     let eutils = Arc::new(EutilsClient::from_env());
-    eutils_rs::eutils_registrations(eutils)
+    eutils::eutils_registrations(eutils)
 }
 
 /// Iceberg data-lake tools (query_iceberg).

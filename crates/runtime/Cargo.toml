@@ -9,8 +9,8 @@ description = "Sync-to-async bridge for running an agentik agent from a sync con
 [dependencies]
 agentik-core = { path = "../agentik-core" }
 agentik-sdk = { path = "../agentik-sdk" }
-opengwas-rs = { path = "../opengwas-rs" }
-eutils-rs = { path = "../eutils-rs" }
+opengwas = { path = "../opengwas" }
+eutils = { path = "../eutils" }
 data-engine = { path = "../data-engine" }
 data-engine-tools = { path = "../data-engine-tools" }
 datalake = { path = "../datalake" }

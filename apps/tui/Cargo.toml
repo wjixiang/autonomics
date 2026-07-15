@@ -27,7 +27,6 @@ time = { version = "0.3", features = ["macros"] }
 uuid = "1.23.3"
 tokio.workspace = true
 unicode-width = "0.2"
-mermaid-text = { path = "../../crates/mermaid-text" }
 unicode-segmentation = "1.12"
 serde_json.workspace = true
 
