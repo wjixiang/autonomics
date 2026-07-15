@@ -1,5 +1,5 @@
-use std::path::Path;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use reqwest::{Client, header, multipart};
 use rusqlite::Connection;
@@ -11,6 +11,30 @@ use crate::error::{OpengwasError, Result};
 use crate::types::*;
 
 const BASE_URL: &str = "https://api.opengwas.io/api";
+
+/// Default file name for the persistent gwasinfo SQLite cache.
+const CACHE_FILE_NAME: &str = "gwasinfo.sqlite";
+
+/// Environment variable overriding the on-disk cache directory.
+const CACHE_DIR_ENV: &str = "OPENGWAS_CACHE_DIR";
+
+/// Resolve the default on-disk cache directory.
+///
+/// Priority:
+/// 1. `OPENGWAS_CACHE_DIR` environment variable (if set and non-empty).
+/// 2. `$HOME/.cache/opengwas` (XDG-style).
+/// 3. `std::env::temp_dir()/opengwas` (last-resort fallback).
+fn default_cache_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var(CACHE_DIR_ENV) {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join(".cache").join("opengwas");
+    }
+    std::env::temp_dir().join("opengwas")
+}
 
 // ---------------------------------------------------------------------------
 // SQLite helper: Row → GwasInfo
@@ -66,9 +90,13 @@ const SELECT_COLUMNS: &str = "
 
 pub struct OpengwasClient {
     client: Client,
-    /// In-memory SQLite cache for gwasinfo metadata.
-    /// Initialised once on first access via [`ensure_db_loaded`](Self::ensure_db_loaded).
-    db: OnceLock<Arc<Mutex<Connection>>>,
+    /// Directory used to persist the gwasinfo SQLite cache.
+    cache_dir: PathBuf,
+    /// On-disk SQLite cache handle for gwasinfo metadata. Initialised lazily
+    /// on first access via [`ensure_db_loaded`](Self::ensure_db_loaded).
+    /// Wrapped in a `Mutex<Option<…>>` so [`clear_disk_cache`](Self::clear_disk_cache)
+    /// can drop the cached handle and force a refetch in this process too.
+    db: Mutex<Option<Arc<Mutex<Connection>>>>,
 }
 
 impl OpengwasClient {
@@ -79,8 +107,34 @@ impl OpengwasClient {
     /// The token should **not** include the `Bearer` prefix — it is
     /// automatically prepended.
     ///
+    /// The on-disk gwasinfo cache is stored under the directory chosen by
+    /// [`default_cache_dir`] (typically `$HOME/.cache/opengwas`).
+    /// Pass an explicit directory via [`with_cache_dir`](Self::with_cache_dir)
+    /// if you want a different location.
+    ///
     /// Panics if no token can be resolved.
     pub fn new(token: Option<&str>) -> Self {
+        Self::with_cache_dir(token, default_cache_dir())
+    }
+
+    /// Create a client without any authentication header.
+    ///
+    /// Only public endpoints (`/status`, `/batches`) will work. Uses the
+    /// default on-disk cache directory — see [`with_cache_dir`](Self::with_cache_dir)
+    /// to override.
+    pub fn new_no_auth() -> Self {
+        Self::with_cache_dir_no_auth(default_cache_dir())
+    }
+
+    /// Create a new client that persists the gwasinfo cache to `cache_dir`.
+    ///
+    /// The cache file lives at `<cache_dir>/gwasinfo.sqlite` and is reused
+    /// across process restarts. The directory is created lazily on first
+    /// access if it does not yet exist.
+    ///
+    /// See [`new`](Self::new) for token-resolution rules. Panics if no
+    /// token can be resolved.
+    pub fn with_cache_dir(token: Option<&str>, cache_dir: impl Into<PathBuf>) -> Self {
         let token = match token {
             Some(t) => Some(t.to_string()),
             None => std::env::var("OPENGWAS_TOKEN").ok(),
@@ -99,30 +153,44 @@ impl OpengwasClient {
             .expect("failed to build HTTP client");
         Self {
             client,
-            db: OnceLock::new(),
+            cache_dir: cache_dir.into(),
+            db: Mutex::new(None),
         }
     }
 
-    /// Create a client without any authentication header.
-    ///
-    /// Only public endpoints (`/status`, `/batches`) will work.
-    pub fn new_no_auth() -> Self {
+    /// Create a client without authentication that persists the gwasinfo
+    /// cache to `cache_dir`. See [`with_cache_dir`](Self::with_cache_dir).
+    pub fn with_cache_dir_no_auth(cache_dir: impl Into<PathBuf>) -> Self {
         let client = Client::builder()
             .build()
             .expect("failed to build HTTP client");
         Self {
             client,
-            db: OnceLock::new(),
+            cache_dir: cache_dir.into(),
+            db: Mutex::new(None),
         }
+    }
+
+    /// Return the directory used for the persistent gwasinfo cache.
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
+    }
+
+    /// Return the full path of the on-disk gwasinfo cache file.
+    pub fn cache_file_path(&self) -> PathBuf {
+        self.cache_dir.join(CACHE_FILE_NAME)
     }
 
     // =======================================================================
     // SQLite helpers (private)
     // =======================================================================
 
-    /// Create the in-memory SQLite database and the `gwasinfo` table.
-    fn init_db() -> Result<Arc<Mutex<Connection>>> {
-        let conn = Connection::open_in_memory()?;
+    /// Open (or create) the on-disk SQLite cache at [`Self::cache_file_path`]
+    /// and ensure the `gwasinfo` table and its indexes exist.
+    fn init_db(&self) -> Result<Arc<Mutex<Connection>>> {
+        std::fs::create_dir_all(&self.cache_dir)?;
+        let path = self.cache_file_path();
+        let conn = Connection::open(&path)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS gwasinfo (
                 id                  TEXT PRIMARY KEY,
@@ -224,13 +292,30 @@ impl OpengwasClient {
         Ok(())
     }
 
-    /// Ensure the in-memory SQLite cache is populated.
+    /// Ensure the on-disk SQLite cache is populated.
     ///
     /// On the first call this fetches all gwasinfo metadata from the remote
-    /// API and inserts it into the cache. Subsequent calls return immediately.
+    /// API and inserts it into the cache file at
+    /// [`Self::cache_file_path`]. Subsequent calls return immediately.
+    /// On future process restarts the cache is reused from disk so no
+    /// network round-trip is needed until [`refresh_disk_cache`](Self::refresh_disk_cache)
+    /// is called.
     async fn ensure_db_loaded(&self) -> Result<()> {
-        // Fast path: already initialised.
-        if self.db.get().is_some() {
+        // Fast path: already initialised in this process.
+        if self.db.lock().unwrap().is_some() {
+            return Ok(());
+        }
+
+        let path = self.cache_file_path();
+        let cache_already_present = path.exists();
+
+        // Open the on-disk DB up front. If the cache file is empty (or
+        // missing), we have to fetch from the remote API.
+        let db = self.init_db()?;
+
+        if cache_already_present && Self::is_populated(&db)? {
+            // Already populated from a previous run — reuse as-is.
+            *self.db.lock().unwrap() = Some(db);
             return Ok(());
         }
 
@@ -250,8 +335,6 @@ impl OpengwasClient {
                 )
             })?;
 
-        let db = Self::init_db()?;
-
         // Bulk insert inside spawn_blocking.
         {
             let db_clone = Arc::clone(&db);
@@ -263,10 +346,18 @@ impl OpengwasClient {
             .expect("spawn_blocking task panicked")?;
         }
 
-        // Store in OnceLock. If another task raced us its value wins; our
-        // data is harmlessly dropped.
-        let _ = self.db.set(db);
+        // Cache the open handle. Another concurrent caller may have raced
+        // us and stored its own copy — that's fine, both point to
+        // equivalent on-disk state.
+        *self.db.lock().unwrap() = Some(db);
         Ok(())
+    }
+
+    /// Returns `true` if the gwasinfo table has at least one row.
+    fn is_populated(db: &Arc<Mutex<Connection>>) -> Result<bool> {
+        let guard = db.lock().unwrap();
+        let n: i64 = guard.query_row("SELECT COUNT(*) FROM gwasinfo", [], |row| row.get(0))?;
+        Ok(n > 0)
     }
 
     // =======================================================================
@@ -334,13 +425,22 @@ impl OpengwasClient {
 
     /// Get metadata for **all** GWAS datasets accessible to you.
     ///
-    /// Results are cached in an in-memory SQLite database after the first
-    /// call. Subsequent calls read from the cache (no network request).
+    /// Results are cached in an on-disk SQLite database. On the first call
+    /// the catalog is fetched from the remote API and persisted to
+    /// [`Self::cache_file_path`]. Subsequent calls — including those from
+    /// future process invocations — read from the local cache without
+    /// hitting the network.
     pub async fn gwasinfo_all(&self) -> Result<Vec<GwasInfo>> {
         self.ensure_db_loaded().await?;
 
-        let db = self.db.get().expect("db initialised by ensure_db_loaded");
-        let db_clone = Arc::clone(db);
+        let db = Arc::clone(
+            self.db
+                .lock()
+                .unwrap()
+                .as_ref()
+                .expect("db initialised by ensure_db_loaded"),
+        );
+        let db_clone = Arc::clone(&db);
         tokio::task::spawn_blocking(move || {
             let guard = db_clone.lock().unwrap();
             let mut stmt = guard.prepare(&format!("SELECT {SELECT_COLUMNS} FROM gwasinfo"))?;
@@ -354,7 +454,7 @@ impl OpengwasClient {
 
     /// Get metadata for specific GWAS datasets by ID.
     ///
-    /// Results are served from the in-memory cache (populated on first use).
+    /// Results are served from the on-disk cache (populated on first use).
     /// If any requested IDs are not in the cache, they are simply absent
     /// from the returned vector.
     pub async fn gwasinfo(&self, req: &GwasInfoRequest) -> Result<Vec<GwasInfo>> {
@@ -364,9 +464,15 @@ impl OpengwasClient {
 
         self.ensure_db_loaded().await?;
 
-        let db = self.db.get().expect("db initialised by ensure_db_loaded");
+        let db = Arc::clone(
+            self.db
+                .lock()
+                .unwrap()
+                .as_ref()
+                .expect("db initialised by ensure_db_loaded"),
+        );
         let ids = req.id.clone();
-        let db_clone = Arc::clone(db);
+        let db_clone = Arc::clone(&db);
         tokio::task::spawn_blocking(move || {
             let guard = db_clone.lock().unwrap();
             let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -384,12 +490,31 @@ impl OpengwasClient {
         .map_err(Into::into)
     }
 
-    /// Force a refresh of the in-memory gwasinfo cache by re-fetching
-    /// all metadata from the remote API.
+    /// Force a refresh of the gwasinfo cache by re-fetching all metadata
+    /// from the remote API. The fresh data replaces the contents of the
+    /// on-disk SQLite cache at [`Self::cache_file_path`] so the new
+    /// snapshot survives process restarts.
+    ///
+    /// Equivalent to [`refresh_disk_cache`](Self::refresh_disk_cache); that
+    /// name documents the disk persistence semantics more explicitly.
     pub async fn gwasinfo_refresh(&self) -> Result<Vec<GwasInfo>> {
+        self.refresh_disk_cache().await
+    }
+
+    /// Force a refresh of the **on-disk** gwasinfo cache by re-fetching
+    /// all metadata from the remote API. The new snapshot replaces the
+    /// contents of the SQLite file at [`Self::cache_file_path`] so future
+    /// process restarts pick it up without re-fetching.
+    pub async fn refresh_disk_cache(&self) -> Result<Vec<GwasInfo>> {
         self.ensure_db_loaded().await?;
 
-        let db = self.db.get().expect("db initialised by ensure_db_loaded");
+        let db = Arc::clone(
+            self.db
+                .lock()
+                .unwrap()
+                .as_ref()
+                .expect("db initialised by ensure_db_loaded"),
+        );
 
         // Fetch fresh data from remote.
         let raw: Value = self.get("/gwasinfo").await?;
@@ -406,8 +531,10 @@ impl OpengwasClient {
                 )
             })?;
 
-        // Replace table contents inside spawn_blocking.
-        let db_clone = Arc::clone(db);
+        // Replace table contents inside spawn_blocking. SQLite commits the
+        // replacement transaction to disk automatically, so the new snapshot
+        // is durable across restarts.
+        let db_clone = Arc::clone(&db);
         tokio::task::spawn_blocking(move || {
             let guard = db_clone.lock().unwrap();
             Self::bulk_insert(&guard, &infos)?;
@@ -417,12 +544,40 @@ impl OpengwasClient {
         .expect("spawn_blocking task panicked")
     }
 
+    /// Delete the on-disk gwasinfo cache file at
+    /// [`Self::cache_file_path`]. The cache directory itself is preserved.
+    ///
+    /// The in-process cached connection handle is also dropped, so the
+    /// next query will trigger a fresh fetch from the remote API even
+    /// within the same process.
+    ///
+    /// Returns `Ok` even if the cache file does not exist — this is
+    /// treated as an idempotent "ensure no stale cache is on disk".
+    pub async fn clear_disk_cache(&self) -> Result<()> {
+        // Drop the cached connection handle first so any subsequent
+        // `ensure_db_loaded` re-opens from a clean slate.
+        *self.db.lock().unwrap() = None;
+
+        let path = self.cache_file_path();
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Return the number of cached GWAS datasets.
     pub async fn gwasinfo_count(&self) -> Result<i64> {
         self.ensure_db_loaded().await?;
 
-        let db = self.db.get().expect("db initialised by ensure_db_loaded");
-        let db_clone = Arc::clone(db);
+        let db = Arc::clone(
+            self.db
+                .lock()
+                .unwrap()
+                .as_ref()
+                .expect("db initialised by ensure_db_loaded"),
+        );
+        let db_clone = Arc::clone(&db);
         tokio::task::spawn_blocking(move || {
             let guard = db_clone.lock().unwrap();
             guard.query_row("SELECT COUNT(*) FROM gwasinfo", [], |row| row.get(0))
@@ -484,12 +639,18 @@ impl OpengwasClient {
 
         self.ensure_db_loaded().await?;
 
-        let db = self.db.get().expect("db initialised by ensure_db_loaded");
+        let db = Arc::clone(
+            self.db
+                .lock()
+                .unwrap()
+                .as_ref()
+                .expect("db initialised by ensure_db_loaded"),
+        );
         let pattern = format!("%{}%", keyword.to_lowercase());
         let field = field.to_string();
         let sort_by = sort_by.map(|s| s.to_string());
         let sort_order = sort_order.map(|s| s.to_string());
-        let db_clone = Arc::clone(db);
+        let db_clone = Arc::clone(&db);
         tokio::task::spawn_blocking(move || {
             let guard = db_clone.lock().unwrap();
             let sql = match (&sort_by, &sort_order) {
@@ -781,10 +942,7 @@ impl OpengwasClient {
         let bytes = resp.bytes().await?;
         let size = bytes.len() as u64;
 
-        storage
-            .op
-            .write(path, bytes.to_vec())
-            .await?;
+        storage.op.write(path, bytes.to_vec()).await?;
 
         Ok(size)
     }
@@ -821,8 +979,164 @@ pub struct EditUploadOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
     fn get_client() -> OpengwasClient {
         OpengwasClient::new(None)
+    }
+
+    /// Build a client pointing at a temporary cache directory so tests
+    /// never touch the real `$HOME/.cache/opengwas` file.
+    fn client_with_temp_cache() -> (TempDir, OpengwasClient) {
+        let tmp = TempDir::new().expect("tempdir");
+        let client = OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf());
+        (tmp, client)
+    }
+
+    fn sample_gwasinfo(id: &str) -> GwasInfo {
+        GwasInfo {
+            id: Some(id.to_string()),
+            trait_: Some(format!("trait-{id}")),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn init_db_creates_file_and_schema_on_disk() {
+        let (tmp, client) = client_with_temp_cache();
+        let path = client.cache_file_path();
+        assert!(!path.exists(), "cache file should not exist before init");
+
+        let _db = client.init_db().expect("init_db");
+
+        assert!(path.exists(), "cache file must be created on disk");
+        // Open with a fresh Connection to verify schema persistence.
+        let verify = Connection::open(&path).expect("reopen cache");
+        let n: i64 = verify
+            .query_row("SELECT COUNT(*) FROM gwasinfo", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "fresh cache must be empty");
+        drop(verify);
+        drop(_db);
+        drop(client);
+        drop(tmp);
+    }
+
+    #[test]
+    fn gwasinfo_persists_across_clients() {
+        let (tmp, client) = client_with_temp_cache();
+
+        // First "session": initialise schema and insert rows.
+        {
+            let db = client.init_db().expect("init_db");
+            let infos = vec![
+                sample_gwasinfo("ieu-a-2"),
+                sample_gwasinfo("ieu-b-3"),
+                sample_gwasinfo("ieu-c-9"),
+            ];
+            let db_clone = Arc::clone(&db);
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(async {
+                    tokio::task::spawn_blocking(move || {
+                        let guard = db_clone.lock().unwrap();
+                        OpengwasClient::bulk_insert(&guard, &infos)
+                    })
+                    .await
+                    .unwrap()
+                })
+                .expect("bulk_insert");
+            // Drop the in-process handle before "restart".
+            *client.db.lock().unwrap() = None;
+        }
+
+        // Second "session": brand-new client instance, same cache dir.
+        let client2 = OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf());
+        let db = client2.init_db().expect("init_db second session");
+        let guard = db.lock().unwrap();
+        let count: i64 = guard
+            .query_row("SELECT COUNT(*) FROM gwasinfo", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 3, "rows must persist across process restarts");
+        let trait_values: Vec<String> = {
+            let mut stmt = guard
+                .prepare("SELECT trait_ FROM gwasinfo ORDER BY id")
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        assert_eq!(
+            trait_values,
+            vec![
+                "trait-ieu-a-2".to_string(),
+                "trait-ieu-b-3".to_string(),
+                "trait-ieu-c-9".to_string(),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_disk_cache_removes_file_and_drops_handle() {
+        let (tmp, client) = client_with_temp_cache();
+        let path = client.cache_file_path();
+
+        // Populate cache. We mirror what `ensure_db_loaded` does: open
+        // the on-disk DB and cache the handle inside the client.
+        let db = client.init_db().expect("init_db");
+        let infos = vec![sample_gwasinfo("ieu-a-2")];
+        let db_clone = Arc::clone(&db);
+        tokio::task::spawn_blocking(move || {
+            let guard = db_clone.lock().unwrap();
+            OpengwasClient::bulk_insert(&guard, &infos)
+        })
+        .await
+        .unwrap()
+        .expect("bulk_insert");
+        *client.db.lock().unwrap() = Some(db);
+        assert!(path.exists(), "cache file must exist after population");
+        assert!(
+            client.db.lock().unwrap().is_some(),
+            "in-process handle must be present"
+        );
+
+        client.clear_disk_cache().await.expect("clear_disk_cache");
+        assert!(!path.exists(), "cache file must be deleted by clear");
+        assert!(
+            client.db.lock().unwrap().is_none(),
+            "in-process handle must be dropped by clear"
+        );
+
+        // Re-opening the client should still work and see an empty cache.
+        let client2 = OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf());
+        let db2 = client2.init_db().expect("init_db after clear");
+        let n: i64 = db2
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM gwasinfo", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0, "post-clear cache must be empty");
+    }
+
+    #[tokio::test]
+    async fn clear_disk_cache_is_idempotent_on_missing_file() {
+        let (tmp, client) = client_with_temp_cache();
+        let path = client.cache_file_path();
+        assert!(!path.exists());
+        // First call removes a non-existent file — must succeed.
+        client.clear_disk_cache().await.expect("first clear");
+        // Second call also must succeed (idempotent).
+        client.clear_disk_cache().await.expect("second clear");
+        drop(tmp);
+    }
+
+    #[test]
+    fn cache_file_path_lives_under_cache_dir() {
+        let (tmp, client) = client_with_temp_cache();
+        let path = client.cache_file_path();
+        assert!(path.starts_with(tmp.path()));
+        assert_eq!(path.file_name().unwrap(), "gwasinfo.sqlite");
     }
 
     #[ignore]

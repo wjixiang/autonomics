@@ -20,5 +20,8 @@ serde_urlencoded = "0.7"
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
 async-trait.workspace = true
 
+[dev-dependencies]
+tempfile = "3.27.0"
+
 [lints]
 workspace = true

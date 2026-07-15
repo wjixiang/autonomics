@@ -274,6 +274,5 @@ mod tests {
         let res = node.execute(&[]).await.unwrap();
         let df = res.get(&0).unwrap().clone();
         df.limit(0, Some(10)).unwrap().show().await.unwrap();
-        panic!()
     }
 }

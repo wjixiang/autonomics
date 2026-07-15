@@ -5229,6 +5229,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -7791,8 +7792,10 @@ version = "0.1.0"
 dependencies = [
  "agentik-core",
  "agentik-sdk",
+ "clap",
  "color-eyre",
  "crossterm",
+ "opengwas",
  "pulldown-cmark",
  "ratatui",
  "ratatui-comfy-tabs",

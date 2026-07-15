@@ -96,6 +96,7 @@ impl DagNode for SqlNode {
         let state = SessionStateBuilder::new()
             .with_runtime_env(self.ctx.runtime_env())
             .with_catalog_list(self.ctx.state().catalog_list().clone())
+            .with_default_features()
             .build();
 
         let ctx = SessionContext::new_with_state(state);
@@ -126,8 +127,8 @@ impl DagNode for SqlNode {
 mod tests {
     use super::*;
 
-    use arrow_array::{Int32Array, RecordBatch};
-    use arrow_schema::{DataType, Field, Schema};
+    use arrow_array::{ArrayRef, Int32Array, RecordBatch, StringArray, StructArray};
+    use arrow_schema::{DataType, Field, Fields, Schema};
     use datafusion::prelude::DataFrame;
     use std::sync::Arc;
 
@@ -169,5 +170,109 @@ mod tests {
         // Verify SQL node input mapping: it should use 'port_0' to reference data.
         let output = node.execute(&[input]).await.unwrap();
         dbg!(output);
+    }
+
+    /// Build a RecordBatch carrying a nested `Struct` column
+    /// (`info { name: utf8, age: int32 }`) next to a scalar `id`, hand it
+    /// to SqlNode, and run a SQL query that filters on one struct
+    /// sub-field and projects another.
+    ///
+    /// Two companion tests cover the two halves of the end-to-end path:
+    ///
+    /// * `test_struct_df_construction` — locks down the data plumbing:
+    ///   a RecordBatch with a Struct column becomes a DataFrame with
+    ///   `info: Struct { name, age }`.
+    /// * `test_struct_subfield_query` — runs a `WHERE info['age'] > 28`
+    ///   / `SELECT info['name']` query through SqlNode and pins the
+    ///   correct output. This is the regression test for the original
+    ///   gap where SqlNode's per-execution SessionState didn't carry
+    ///   DataFusion's default features, so the bracket-syntax lowering
+    ///   (`RawFieldAccessExpr` → `get_field()`) and the `get_field` UDF
+    ///   itself were unreachable. The fix is `with_default_features()`
+    ///   on the builder in `SqlNode::execute`.
+    fn build_struct_dataframe(ctx: &SessionContext) -> DataFrame {
+        let info_fields = Fields::from(vec![
+            Field::new("name", DataType::Utf8, false),
+            Field::new("age", DataType::Int32, false),
+        ]);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("info", DataType::Struct(info_fields.clone()), false),
+        ]));
+
+        let name_array: ArrayRef = Arc::new(StringArray::from(vec!["Alice", "Bob", "Charlie"]));
+        let age_array: ArrayRef = Arc::new(Int32Array::from(vec![30, 25, 35]));
+        let info_array =
+            StructArray::try_new(info_fields, vec![name_array, age_array], None).unwrap();
+
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int32Array::from(vec![1, 2, 3])),
+                Arc::new(info_array),
+            ],
+        )
+        .unwrap();
+
+        ctx.read_batch(batch).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_struct_df_construction() {
+        let ctx = SessionContext::new();
+        let df = build_struct_dataframe(&ctx);
+        let schema = df.schema();
+
+        assert_eq!(schema.fields().len(), 2);
+        let info_field = schema
+            .field_with_name(None, "info")
+            .expect("info column must exist");
+        assert!(
+            matches!(info_field.data_type(), DataType::Struct(_)),
+            "info must be a Struct column, got {:?}",
+            info_field.data_type(),
+        );
+        let DataType::Struct(info_fields) = info_field.data_type() else {
+            unreachable!("asserted above");
+        };
+        assert_eq!(
+            info_fields
+                .iter()
+                .map(|f| f.name().as_str())
+                .collect::<Vec<_>>(),
+            vec!["name", "age"],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_struct_subfield_query() {
+        let ctx = SessionContext::new();
+        let df = build_struct_dataframe(&ctx);
+
+        // Filter on `info['age']` and project `info['name']`. Bracket
+        // syntax parses to `RawFieldAccessExpr`, which `FieldAccessPlanner`
+        // lowers to `get_field(...)`; both live behind DataFusion's
+        // `with_default_features()`, which `SqlNode::execute` must
+        // install into its per-execution SessionState — see the
+        // `.with_default_features()` call on the builder there.
+        let sql = "SELECT id, info.name AS name \
+                   FROM port_0 \
+                   WHERE info['age'] > 28 \
+                   ORDER BY id";
+        let mut node = SqlNode::new("sql", sql.into(), ctx.clone());
+        let input = NodeInput { port: 0, data: df };
+        let outputs = node.execute(&[input]).await.unwrap();
+        let batches = outputs.get(&0).unwrap().clone().collect().await.unwrap();
+
+        assert_eq!(batches.len(), 1, "expected a single RecordBatch");
+        let rb = &batches[0];
+        assert_eq!(rb.num_rows(), 2, "expected 2 rows where info.age > 28");
+
+        let ids = rb.column(0).as_any().downcast_ref::<Int32Array>().unwrap();
+        assert_eq!(ids.values(), &[1, 3]);
+
+        let names = rb.column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(names.value(0), "Alice");
+        assert_eq!(names.value(1), "Charlie");
     }
 }
