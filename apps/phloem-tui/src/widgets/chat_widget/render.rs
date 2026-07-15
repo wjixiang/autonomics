@@ -7,6 +7,20 @@ use ratatui::{
 use crate::state::{ChatLine, TurnUsage};
 use crate::widgets::status_bar::format_tokens;
 
+/// Try to parse `text` as JSON and return a pretty-printed version.
+/// Falls back to the original text if parsing fails.
+fn try_pretty_json(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        match serde_json::from_str::<serde_json::Value>(trimmed) {
+            Ok(v) => serde_json::to_string_pretty(&v).unwrap_or_else(|_| text.to_string()),
+            Err(_) => text.to_string(),
+        }
+    } else {
+        text.to_string()
+    }
+}
+
 /// Format a turn's token usage as a compact dim line, e.g. "↑1.2k ↓340 cache:800".
 fn format_turn_usage(u: TurnUsage) -> String {
     let mut parts = Vec::new();
@@ -79,7 +93,8 @@ pub(crate) fn render_line_owned(msg: &ChatLine, area: Rect) -> Vec<Line<'static>
                 Style::default().fg(Color::Yellow),
             ))];
             if !input.is_empty() {
-                for line in input.lines() {
+                let display = try_pretty_json(input);
+                for line in display.lines() {
                     lines.push(Line::from(Span::styled(
                         format!("   {}", line),
                         Style::default().fg(Color::DarkGray),
@@ -99,9 +114,10 @@ pub(crate) fn render_line_owned(msg: &ChatLine, area: Rect) -> Vec<Line<'static>
         ChatLine::ToolResult { ok, content } => {
             let icon = if *ok { "✓" } else { "✗" };
             let color = if *ok { Color::Green } else { Color::Red };
+            let display = try_pretty_json(content);
             let mut lines = Vec::new();
             let mut first = true;
-            for line in content.lines() {
+            for line in display.lines() {
                 let prefix = if first {
                     format!("{icon} ")
                 } else {

@@ -5603,6 +5603,7 @@ dependencies = [
  "ratatui-textarea",
  "runtime",
  "rusqlite",
+ "serde_json",
  "syntect",
  "time",
  "tokio",
