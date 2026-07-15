@@ -15,7 +15,13 @@ async fn espell_correct_spelling() -> Result<()> {
     let resp = client.espell("pubmed", "CRISPR").await?;
 
     assert!(resp.get("OriginalQuery").is_some());
-    assert_eq!(resp["OriginalQuery"]["term"].as_str().unwrap_or("").to_lowercase(), "crispr");
+    assert_eq!(
+        resp["OriginalQuery"]["term"]
+            .as_str()
+            .unwrap_or("")
+            .to_lowercase(),
+        "crispr"
+    );
     assert!(resp.get("CorrectedQuery").is_none());
 
     Ok(())
@@ -34,7 +40,12 @@ async fn espell_misspelled_term() -> Result<()> {
 
     assert!(resp.get("OriginalQuery").is_some());
     assert!(resp.get("CorrectedQuery").is_some());
-    assert!(!resp["CorrectedQuery"]["term"].as_str().unwrap_or("").is_empty());
+    assert!(
+        !resp["CorrectedQuery"]["term"]
+            .as_str()
+            .unwrap_or("")
+            .is_empty()
+    );
 
     Ok(())
 }

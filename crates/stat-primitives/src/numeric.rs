@@ -4,4 +4,6 @@ pub mod delta;
 pub mod special;
 
 pub use delta::delta_method;
-pub use special::{beta, beta as beta_func, betai, erfc, erf, erfinv, gamma, ln_beta, ln_gamma, std_normal_ppf};
+pub use special::{
+    beta, beta as beta_func, betai, erf, erfc, erfinv, gamma, ln_beta, ln_gamma, std_normal_ppf,
+};

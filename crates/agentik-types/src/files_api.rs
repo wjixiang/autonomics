@@ -1,7 +1,7 @@
 use crate::errors::AnthropicError;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileObject {
@@ -39,23 +39,20 @@ impl FilePurpose {
             FilePurpose::Upload,
         ]
     }
-    
+
     pub fn supports_mime_type(&self, mime_type: &str) -> bool {
         match self {
-            FilePurpose::BatchInput => {
-                mime_type == "application/json" || mime_type == "text/plain"
-            }
+            FilePurpose::BatchInput => mime_type == "application/json" || mime_type == "text/plain",
             FilePurpose::BatchOutput => {
                 mime_type == "application/json" || mime_type == "text/plain"
             }
-            FilePurpose::Vision => {
-                mime_type.starts_with("image/")
-            }
+            FilePurpose::Vision => mime_type.starts_with("image/"),
             FilePurpose::Document => {
-                mime_type == "application/pdf" 
-                || mime_type == "text/plain" 
-                || mime_type == "application/msword"
-                || mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                mime_type == "application/pdf"
+                    || mime_type == "text/plain"
+                    || mime_type == "application/msword"
+                    || mime_type
+                        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             }
             FilePurpose::Upload => true,
         }
@@ -75,11 +72,11 @@ impl FileStatus {
     pub fn is_ready(&self) -> bool {
         *self == FileStatus::Processed
     }
-    
+
     pub fn has_error(&self) -> bool {
         *self == FileStatus::Error
     }
-    
+
     pub fn is_deleted(&self) -> bool {
         *self == FileStatus::Deleted
     }
@@ -109,17 +106,17 @@ impl FileUploadParams {
             metadata: HashMap::new(),
         }
     }
-    
+
     pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
         self.metadata = metadata;
         self
     }
-    
+
     pub fn with_meta(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.insert(key.into(), value.into());
         self
     }
-    
+
     pub fn validate(&self) -> Result<(), AnthropicError> {
         const MAX_SIZE: u64 = 100 * 1024 * 1024;
         if self.content.len() as u64 > MAX_SIZE {
@@ -129,20 +126,20 @@ impl FileUploadParams {
                 MAX_SIZE
             )));
         }
-        
+
         if self.filename.is_empty() {
             return Err(AnthropicError::Other(
-                "Filename cannot be empty".to_string()
+                "Filename cannot be empty".to_string(),
             ));
         }
-        
+
         if !self.purpose.supports_mime_type(&self.content_type) {
             return Err(AnthropicError::Other(format!(
                 "MIME type '{}' not supported for purpose '{:?}'",
                 self.content_type, self.purpose
             )));
         }
-        
+
         Ok(())
     }
 }
@@ -163,22 +160,22 @@ impl FileListParams {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn purpose(mut self, purpose: FilePurpose) -> Self {
         self.purpose = Some(purpose);
         self
     }
-    
+
     pub fn after(mut self, after: impl Into<String>) -> Self {
         self.after = Some(after.into());
         self
     }
-    
+
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit.clamp(1, 100));
         self
     }
-    
+
     pub fn order(mut self, order: FileOrder) -> Self {
         self.order = Some(order);
         self
@@ -216,7 +213,7 @@ impl UploadProgress {
         } else {
             0.0
         };
-        
+
         Self {
             bytes_uploaded,
             total_bytes,
@@ -225,37 +222,39 @@ impl UploadProgress {
             eta_seconds: None,
         }
     }
-    
+
     pub fn with_speed(mut self, speed_bps: f64) -> Self {
         self.speed_bps = Some(speed_bps);
-        
+
         if speed_bps > 0.0 {
             let remaining_bytes = self.total_bytes - self.bytes_uploaded;
             self.eta_seconds = Some(remaining_bytes as f64 / speed_bps);
         }
-        
+
         self
     }
-    
+
     pub fn is_complete(&self) -> bool {
         self.bytes_uploaded >= self.total_bytes
     }
-    
+
     pub fn percentage_string(&self) -> String {
         format!("{:.1}%", self.percentage)
     }
-    
+
     pub fn size_string(&self) -> String {
-        format!("{} / {}", 
+        format!(
+            "{} / {}",
             format_bytes(self.bytes_uploaded),
             format_bytes(self.total_bytes)
         )
     }
-    
+
     pub fn speed_string(&self) -> Option<String> {
-        self.speed_bps.map(|speed| format!("{}/s", format_bytes(speed as u64)))
+        self.speed_bps
+            .map(|speed| format!("{}/s", format_bytes(speed as u64)))
     }
-    
+
     pub fn eta_string(&self) -> Option<String> {
         self.eta_seconds.map(|eta| {
             if eta < 60.0 {
@@ -286,21 +285,22 @@ impl StorageInfo {
             0.0
         }
     }
-    
+
     pub fn is_nearly_full(&self) -> bool {
         self.usage_percentage() > 90.0
     }
-    
+
     pub fn is_full(&self) -> bool {
         self.used_bytes >= self.quota_bytes
     }
-    
+
     pub fn quota_string(&self) -> String {
         format_bytes(self.quota_bytes)
     }
-    
+
     pub fn usage_string(&self) -> String {
-        format!("{} / {} ({:.1}%)",
+        format!(
+            "{} / {} ({:.1}%)",
             format_bytes(self.used_bytes),
             format_bytes(self.quota_bytes),
             self.usage_percentage()
@@ -310,19 +310,19 @@ impl StorageInfo {
 
 fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-    
+
     if bytes == 0 {
         return "0 B".to_string();
     }
-    
+
     let mut size = bytes as f64;
     let mut unit_index = 0;
-    
+
     while size >= 1024.0 && unit_index < UNITS.len() - 1 {
         size /= 1024.0;
         unit_index += 1;
     }
-    
+
     if unit_index == 0 {
         format!("{} {}", size as u64, UNITS[unit_index])
     } else {
@@ -342,8 +342,8 @@ impl FileDownload {
     pub fn as_string(&self) -> Result<String, std::string::FromUtf8Error> {
         String::from_utf8(self.content.clone())
     }
-    
-    pub fn as_json<T>(&self) -> Result<T, serde_json::Error> 
+
+    pub fn as_json<T>(&self) -> Result<T, serde_json::Error>
     where
         T: for<'de> Deserialize<'de>,
     {
@@ -360,11 +360,11 @@ mod tests {
         assert!(FilePurpose::Vision.supports_mime_type("image/jpeg"));
         assert!(FilePurpose::Vision.supports_mime_type("image/png"));
         assert!(!FilePurpose::Vision.supports_mime_type("application/pdf"));
-        
+
         assert!(FilePurpose::Document.supports_mime_type("application/pdf"));
         assert!(FilePurpose::Document.supports_mime_type("text/plain"));
         assert!(!FilePurpose::Document.supports_mime_type("image/jpeg"));
-        
+
         assert!(FilePurpose::BatchInput.supports_mime_type("application/json"));
         assert!(FilePurpose::BatchInput.supports_mime_type("text/plain"));
         assert!(!FilePurpose::BatchInput.supports_mime_type("image/jpeg"));
@@ -379,7 +379,7 @@ mod tests {
             FilePurpose::Document,
         );
         assert!(params.validate().is_ok());
-        
+
         let params = FileUploadParams::new(
             b"test content".to_vec(),
             "test.txt",
@@ -387,7 +387,7 @@ mod tests {
             FilePurpose::BatchInput,
         );
         assert!(params.validate().is_err());
-        
+
         let params = FileUploadParams::new(
             b"test content".to_vec(),
             "",
@@ -402,11 +402,11 @@ mod tests {
         let progress = UploadProgress::new(512, 1024);
         assert_eq!(progress.percentage, 50.0);
         assert!(!progress.is_complete());
-        
+
         let progress = UploadProgress::new(1024, 1024);
         assert_eq!(progress.percentage, 100.0);
         assert!(progress.is_complete());
-        
+
         let progress = UploadProgress::new(512, 1024).with_speed(1024.0);
         assert!(progress.speed_bps.is_some());
         assert!(progress.eta_seconds.is_some());
@@ -421,11 +421,11 @@ mod tests {
             file_count: 10,
             usage_by_purpose: HashMap::new(),
         };
-        
+
         assert_eq!(storage.usage_percentage(), 91.0);
         assert!(storage.is_nearly_full());
         assert!(!storage.is_full());
-        
+
         let storage = StorageInfo {
             quota_bytes: 1000,
             used_bytes: 1000,
@@ -433,7 +433,7 @@ mod tests {
             file_count: 10,
             usage_by_purpose: HashMap::new(),
         };
-        
+
         assert!(storage.is_full());
     }
 

@@ -306,12 +306,8 @@ mod tests {
         let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 1.0).collect();
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
-        let mut node = LinearRegressionNode::new(
-            "lr",
-            vec!["x".to_string()],
-            "y".to_string(),
-            true,
-        );
+        let mut node =
+            LinearRegressionNode::new("lr", vec!["x".to_string()], "y".to_string(), true);
         let input = super::super::meta::NodeInput {
             port: 0,
             // df_name: "src".to_string(),
@@ -371,12 +367,8 @@ mod tests {
         let y: Vec<f64> = x.iter().map(|v| 3.0 * v).collect();
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
-        let mut node = LinearRegressionNode::new(
-            "lr",
-            vec!["x".to_string()],
-            "y".to_string(),
-            false,
-        );
+        let mut node =
+            LinearRegressionNode::new("lr", vec!["x".to_string()], "y".to_string(), false);
         let input = super::super::meta::NodeInput {
             port: 0,
             // df_name: "src".to_string(),

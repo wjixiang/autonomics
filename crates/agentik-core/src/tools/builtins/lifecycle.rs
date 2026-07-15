@@ -1,6 +1,6 @@
+use agentik_proc::tool;
 use async_trait::async_trait;
 use tokio::sync::mpsc::UnboundedSender;
-use agentik_proc::tool;
 
 use crate::agent::InternalEvent;
 use agentik_sdk::types::tools::{ToolResult, ToolResultContent};
@@ -47,8 +47,6 @@ impl ToolFunction for AbortTaskTool {
     }
 }
 
-pub fn lifecycle_registrations(
-    event_tx: UnboundedSender<InternalEvent>,
-) -> Vec<ToolRegistration> {
+pub fn lifecycle_registrations(event_tx: UnboundedSender<InternalEvent>) -> Vec<ToolRegistration> {
     vec![ToolRegistration::from(AbortTaskTool::new(event_tx))]
 }

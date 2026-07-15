@@ -117,7 +117,9 @@ impl SkillRuntime {
     /// Is the entire skill finished (last step's todos all completed)?
     pub fn is_complete(&self) -> bool {
         match self.todos.last() {
-            Some(todos) => !todos.is_empty() && todos.iter().all(|t| t.status == TodoStatus::Completed),
+            Some(todos) => {
+                !todos.is_empty() && todos.iter().all(|t| t.status == TodoStatus::Completed)
+            }
             None => true,
         }
     }
@@ -235,8 +237,8 @@ impl SkillRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::definition::{Skill, SkillStep};
+    use super::*;
 
     fn two_step_skill() -> Skill {
         Skill {
@@ -264,7 +266,11 @@ mod tests {
         let rt = SkillRuntime::new(two_step_skill());
         assert_eq!(rt.current_step_index(), 0);
         assert_eq!(rt.current_todos().len(), 2);
-        assert!(rt.current_todos().iter().all(|t| t.status == TodoStatus::Pending));
+        assert!(
+            rt.current_todos()
+                .iter()
+                .all(|t| t.status == TodoStatus::Pending)
+        );
         assert!(!rt.is_complete());
     }
 
@@ -287,7 +293,13 @@ mod tests {
         assert_eq!(rt.current_step_index(), 0);
 
         let t = rt.set_todo(1, TodoStatus::InProgress).unwrap();
-        assert!(matches!(t, StepTransition::Updated { status: TodoStatus::InProgress, .. }));
+        assert!(matches!(
+            t,
+            StepTransition::Updated {
+                status: TodoStatus::InProgress,
+                ..
+            }
+        ));
         assert_eq!(rt.current_step_index(), 0);
     }
 
@@ -299,7 +311,10 @@ mod tests {
         assert!(matches!(t, StepTransition::Advanced { to_step: 1, .. }));
         assert_eq!(rt.current_step_index(), 1);
         // New step's allowed tool now visible
-        assert!(rt.allowed_tools_for_current_step().contains(&"write".to_string()));
+        assert!(
+            rt.allowed_tools_for_current_step()
+                .contains(&"write".to_string())
+        );
     }
 
     #[test]

@@ -24,8 +24,7 @@ impl Context {
     }
 
     pub fn build(self) -> Vec<Message> {
-        let mut messages =
-            Vec::with_capacity(1 + self.conversations.len());
+        let mut messages = Vec::with_capacity(1 + self.conversations.len());
 
         if let Some(system_prompt) = self.system_prompt {
             messages.push(Message::system(system_prompt));

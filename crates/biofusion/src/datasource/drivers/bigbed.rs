@@ -9,10 +9,10 @@ use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
 use datafusion::error::Result;
-use oxbow::bbi::{BigBedScanner, BedSchema};
+use oxbow::bbi::{BedSchema, BigBedScanner};
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{map_ext, BioBatchIter, BioDriver, BioInput};
+use super::super::core::{BioBatchIter, BioDriver, BioInput, map_ext};
 
 fn bed_schema() -> Result<BedSchema> {
     "bed3".parse::<BedSchema>().map_err(map_ext)
@@ -24,8 +24,8 @@ impl BioDriver for BigBedDriver {
     const FILE_TYPE: &'static str = "bigbed";
 
     fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
-        let reader = bigtools::BigBedRead::open(Cursor::new(input.bytes.clone()))
-            .map_err(map_ext)?;
+        let reader =
+            bigtools::BigBedRead::open(Cursor::new(input.bytes.clone())).map_err(map_ext)?;
         let scanner = BigBedScanner::new(
             bed_schema()?,
             reader.info().clone(),

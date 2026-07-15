@@ -3,15 +3,15 @@
 //! This module handles the HTTP layer for streaming responses from the Anthropic API,
 //! parsing SSE events and converting them into MessageStreamEvent objects.
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use futures::{Stream, TryStreamExt};
 use pin_project::pin_project;
 use reqwest::Response;
 use serde_json;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio_stream::StreamExt;
 
-use crate::types::{MessageStreamEvent, AnthropicError, Result};
+use crate::types::{AnthropicError, MessageStreamEvent, Result};
 
 /// Configuration for SSE streaming requests.
 #[derive(Debug, Clone)]
@@ -96,7 +96,7 @@ impl HttpStreamClient {
 
         // Use eventsource-stream to parse SSE events
         use eventsource_stream::Eventsource;
-        
+
         // Wrap each byte chunk's error in a `Debug`-friendly log. reqwest
         // wraps every body error as `Kind::Decode` with the message
         // "error decoding response body", which is useless on its own —
@@ -115,7 +115,9 @@ impl HttpStreamClient {
                 let _ = write!(&mut chain, " :: caused_by[{depth}]: {s}");
                 src = s.source();
                 depth += 1;
-                if depth > 8 { break; }
+                if depth > 8 {
+                    break;
+                }
             }
             tracing::warn!(
                 is_decode = e.is_decode(),
@@ -320,7 +322,9 @@ impl Stream for HttpStreamClient {
                 Poll::Ready(Some(Err(e)))
             }
             Poll::Ready(None) => {
-                tracing::info!("HttpStreamClient: underlying SSE stream returned None (connection closed)");
+                tracing::info!(
+                    "HttpStreamClient: underlying SSE stream returned None (connection closed)"
+                );
                 *this.ended = true;
                 Poll::Ready(None)
             }
@@ -396,7 +400,11 @@ impl StreamRequestBuilder {
         endpoint: &str,
         body: &T,
     ) -> Result<HttpStreamClient> {
-        let url = format!("{}/{}", self.base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'));
+        let url = format!(
+            "{}/{}",
+            self.base_url.trim_end_matches('/'),
+            endpoint.trim_start_matches('/')
+        );
 
         let mut headers = self.headers;
         headers.insert(
@@ -432,11 +440,7 @@ impl StreamRequestBuilder {
         // operation timed out". Disable the per-request timeout for
         // streams; [`StreamConfig::event_timeout`] still guards against
         // per-chunk stalls.
-        let mut request = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(body);
+        let mut request = self.client.post(&url).headers(headers).json(body);
         if self.disable_request_timeout {
             request = request.timeout(std::time::Duration::from_secs(u64::MAX));
         }
@@ -444,7 +448,9 @@ impl StreamRequestBuilder {
         let response = request
             .send()
             .await
-            .map_err(|e| AnthropicError::Connection { message: e.to_string() })?;
+            .map_err(|e| AnthropicError::Connection {
+                message: e.to_string(),
+            })?;
 
         // Inspect the actual response headers BEFORE handing to the SSE
         // parser. If the server ignored our Accept-Encoding: identity and
@@ -521,10 +527,10 @@ mod tests {
     async fn test_sse_event_parsing() {
         // Test that we can parse a sample SSE event
         let event_data = r#"{"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[],"model":"claude-3-5-sonnet-latest","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0,"cache_creation_input_tokens":null,"cache_read_input_tokens":null,"server_tool_use":null,"service_tier":null}}}"#;
-        
+
         let parsed: std::result::Result<MessageStreamEvent, _> = serde_json::from_str(event_data);
         assert!(parsed.is_ok());
-        
+
         if let Ok(MessageStreamEvent::MessageStart { message }) = parsed {
             assert_eq!(message.id, "msg_123");
             assert_eq!(message.usage.unwrap().input_tokens, 10);
@@ -532,4 +538,4 @@ mod tests {
             panic!("Expected MessageStart event");
         }
     }
-} 
+}

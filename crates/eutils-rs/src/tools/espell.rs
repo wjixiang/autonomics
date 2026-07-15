@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use crate::{EutilsClient, format::format_espell};
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
+use agentik_proc::tool;
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use crate::{EutilsClient, format::format_espell};
-use agentik_proc::tool;
 
 #[tool(
     name = "pubmed_spell",

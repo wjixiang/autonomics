@@ -25,5 +25,8 @@ async fn test_download_ieu_a_2() {
 
     let file_list = storage.op.list("/").await.unwrap();
     dbg!(&file_list);
-    assert!(!file_list.is_empty(), "expected at least one file in storage");
+    assert!(
+        !file_list.is_empty(),
+        "expected at least one file in storage"
+    );
 }

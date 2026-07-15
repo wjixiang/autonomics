@@ -1,6 +1,6 @@
-use serde_json::Value;
 use agentik_sdk::types::messages::{ContentBlock, Message, Role, StopReason};
 use agentik_sdk::types::shared::Usage;
+use serde_json::Value;
 use uuid::Uuid;
 
 /// Convenience extension trait for constructing `Message` values.

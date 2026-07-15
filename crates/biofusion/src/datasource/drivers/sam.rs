@@ -10,7 +10,7 @@ use datafusion::error::Result;
 use oxbow::alignment::SamScanner;
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{buf_reader, map_ext, BioBatchIter, BioDriver, BioInput};
+use super::super::core::{BioBatchIter, BioDriver, BioInput, buf_reader, map_ext};
 
 fn scanner(header: noodles::sam::Header) -> Result<SamScanner> {
     SamScanner::new(header, Select::All, None, CoordSystem::OneClosed).map_err(map_ext)

@@ -4,7 +4,7 @@ use pulldown_cmark::Alignment;
 use ratatui::style::{Modifier, Style};
 
 use super::md_theme::MdTokens;
-use super::text_layout::{wrap_spans, WrappedLine};
+use super::text_layout::{WrappedLine, wrap_spans};
 
 // ── Local table data ──────────────────────────────────────────────────────────
 

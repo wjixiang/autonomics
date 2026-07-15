@@ -560,8 +560,10 @@ impl InputArea {
         // pre-flight by checking the cap (cheap; we already track
         // grapheme_len on demand).
         if let Some(cap) = self.max_length {
-            if matches!(key.code, KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete)
-                && self.grapheme_len() >= cap
+            if matches!(
+                key.code,
+                KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete
+            ) && self.grapheme_len() >= cap
             {
                 // Already at the cap for character-affecting keys.
                 // Backspace/Delete are still allowed so the user can
@@ -650,7 +652,9 @@ impl<'a> StatefulWidget for InputWidget<'a> {
         let prompt_style = if self.disabled {
             Style::default().fg(Color::DarkGray)
         } else {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         };
         buf.set_string(area.x, area.y, "›", prompt_style);
 
@@ -723,10 +727,12 @@ impl<'a> StatefulWidget for SingleLineInput<'a> {
             // Empty + focused: show placeholder with a visible cursor at the
             // start of the editable area. Empty + unfocused: hint glyph.
             if self.focused {
-                let placeholder_style =
-                    Style::default().fg(Color::DarkGray).add_modifier(ratatui::style::Modifier::ITALIC);
-                let cursor_style =
-                    Style::default().fg(Color::Yellow).add_modifier(ratatui::style::Modifier::SLOW_BLINK);
+                let placeholder_style = Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(ratatui::style::Modifier::ITALIC);
+                let cursor_style = Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(ratatui::style::Modifier::SLOW_BLINK);
                 let placeholder = truncate_to_width(self.placeholder, inner.width as usize);
                 let placeholder_w = unicode_width::UnicodeWidthStr::width(placeholder.as_str());
                 let cursor_col = inner.x;
@@ -753,8 +759,9 @@ impl<'a> StatefulWidget for SingleLineInput<'a> {
         let after = &value[cursor.min(value.len())..];
 
         let inner_w = inner.width as usize;
-        let cursor_style =
-            Style::default().fg(Color::Yellow).add_modifier(ratatui::style::Modifier::SLOW_BLINK);
+        let cursor_style = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(ratatui::style::Modifier::SLOW_BLINK);
         let value_style = Style::default().fg(Color::White);
         let value_dim_style = Style::default().fg(Color::DarkGray);
 
@@ -930,10 +937,7 @@ pub(crate) fn history_down(
 /// Drop any active recall state. Called when the user submits a
 /// message or starts editing the buffer (any non-`Up`/`Down` key
 /// after recall implies they're done browsing history).
-pub(crate) fn history_clear_recall(
-    draft: &mut Option<String>,
-    recall: &mut Option<usize>,
-) {
+pub(crate) fn history_clear_recall(draft: &mut Option<String>, recall: &mut Option<usize>) {
     draft.take();
     *recall = None;
 }
@@ -965,12 +969,20 @@ mod tests {
         assert_eq!(s.grapheme_len(), 1);
         // Forward / backward cursor movement must walk a single cluster.
         s.cursor_left();
-        assert_eq!(s.cursor(), 0, "one backspace of code-point over the cluster");
+        assert_eq!(
+            s.cursor(),
+            0,
+            "one backspace of code-point over the cluster"
+        );
 
         // Pressing Backspace must delete the whole cluster at once.
         s.cursor_end();
         s.backspace();
-        assert_eq!(s.value(), "", "combining cluster should be deleted as a unit");
+        assert_eq!(
+            s.value(),
+            "",
+            "combining cluster should be deleted as a unit"
+        );
         assert_eq!(s.cursor(), 0);
     }
 
@@ -985,7 +997,11 @@ mod tests {
         assert_eq!(s.grapheme_len(), 2);
 
         s.cursor_left();
-        assert_eq!(s.cursor(), 3, "should be after first grapheme, not middle of byte 2");
+        assert_eq!(
+            s.cursor(),
+            3,
+            "should be after first grapheme, not middle of byte 2"
+        );
         s.cursor_left();
         assert_eq!(s.cursor(), 0);
     }
@@ -1017,21 +1033,12 @@ mod tests {
         assert!(s.handle_key(ctrl_kc('a')));
         assert_eq!(s.cursor(), 0, "Ctrl+A → home");
 
-        assert!(s.handle_key(KeyEvent::new(
-            KeyCode::Right,
-            KeyModifiers::CONTROL,
-        )));
+        assert!(s.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL,)));
         // After Ctrl+Right from position 0, cursor lands at end of "foo".
         assert_eq!(s.cursor(), 3, "after 'foo'");
-        assert!(s.handle_key(KeyEvent::new(
-            KeyCode::Right,
-            KeyModifiers::CONTROL,
-        )));
+        assert!(s.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL,)));
         assert_eq!(s.cursor(), 7, "after 'foo bar'");
-        assert!(s.handle_key(KeyEvent::new(
-            KeyCode::Left,
-            KeyModifiers::CONTROL,
-        )));
+        assert!(s.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL,)));
         assert_eq!(s.cursor(), 4, "back to start of 'bar'");
     }
 
@@ -1106,7 +1113,12 @@ mod tests {
         let mut input3 = InputArea::new();
         let mut draft3 = None;
         let mut recall3 = None;
-        assert!(!history_up(&mut input3, &empty_h, &mut draft3, &mut recall3));
+        assert!(!history_up(
+            &mut input3,
+            &empty_h,
+            &mut draft3,
+            &mut recall3
+        ));
         assert_eq!(recall3, None);
     }
 

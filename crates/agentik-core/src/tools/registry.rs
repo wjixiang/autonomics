@@ -277,9 +277,7 @@ mod tests {
         type Input = EchoInput;
 
         async fn run(&self, input: EchoInput) -> Result<ToolResult, ToolError> {
-            Ok(ToolResult::success(
-                format!("Echo: {}", input.message),
-            ))
+            Ok(ToolResult::success(format!("Echo: {}", input.message)))
         }
     }
 

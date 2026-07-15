@@ -4,10 +4,8 @@ use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
 
-
 use crate::storage::OpendalFileStorage;
 use agentik_proc::tool;
-
 
 #[tool(
     name = "file_edit",
@@ -52,11 +50,9 @@ impl ToolFunction for FileEditTool {
                 None => return Err("old_string not found in file".into()),
                 Some(idx) => {
                     if text[idx + input.old_string.len()..].contains(&input.old_string) {
-                        return Err(
-                            "old_string is not unique in file; \
+                        return Err("old_string is not unique in file; \
                              use replace_all or provide more context"
-                                .into(),
-                        );
+                            .into());
                     }
                     let mut new_text = String::with_capacity(text.len());
                     new_text.push_str(&text[..idx]);

@@ -1,10 +1,10 @@
-use agentik_types::messages::{ContentBlock, Message, Role};
-use agentik_types::tools::ToolDefinition;
-use agentik_types::errors::AnthropicError;
-use agentik_types::messages::{MessageContent, ContentBlockParam, MessageCreateBuilder};
-use crate::streaming::MessageStream;
 use crate::Anthropic;
 use crate::model::ModelInfo;
+use crate::streaming::MessageStream;
+use agentik_types::errors::AnthropicError;
+use agentik_types::messages::{ContentBlock, Message, Role};
+use agentik_types::messages::{ContentBlockParam, MessageContent, MessageCreateBuilder};
+use agentik_types::tools::ToolDefinition;
 use async_trait::async_trait;
 use mockall::automock;
 
@@ -41,9 +41,13 @@ impl AnthropicApiClient {
 fn content_block_to_param(block: ContentBlock) -> ContentBlockParam {
     match block {
         ContentBlock::Text { text } => ContentBlockParam::Text { text },
-        ContentBlock::Thinking { thinking, signature } => {
-            ContentBlockParam::Thinking { thinking, signature }
-        }
+        ContentBlock::Thinking {
+            thinking,
+            signature,
+        } => ContentBlockParam::Thinking {
+            thinking,
+            signature,
+        },
         ContentBlock::Image { source } => ContentBlockParam::Image { source },
         ContentBlock::ToolUse { id, name, input } => ContentBlockParam::ToolUse { id, name, input },
         ContentBlock::ToolResult {
@@ -59,7 +63,12 @@ fn content_block_to_param(block: ContentBlock) -> ContentBlockParam {
 }
 
 fn message_to_content(msg: Message) -> MessageContent {
-    MessageContent::Blocks(msg.content.into_iter().map(content_block_to_param).collect())
+    MessageContent::Blocks(
+        msg.content
+            .into_iter()
+            .map(content_block_to_param)
+            .collect(),
+    )
 }
 
 #[async_trait]

@@ -14,7 +14,6 @@ use crate::{ContentBlockDelta, Message, MessageStreamEvent, StopReason};
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AgentEvent {
     // ── Real-time streaming deltas (translated from MessageStreamEvent) ──
-
     /// A text token arrived from the LLM.
     TextDelta(String),
 
@@ -33,7 +32,10 @@ pub enum AgentEvent {
     StreamStart { message: Message },
 
     /// A content block began (text, thinking, tool_use, …).
-    ContentBlockStart { index: usize, content_block_kind: ContentBlockKind },
+    ContentBlockStart {
+        index: usize,
+        content_block_kind: ContentBlockKind,
+    },
 
     /// A content block ended.
     ContentBlockStop { index: usize },
@@ -42,7 +44,6 @@ pub enum AgentEvent {
     StreamDelta { stop_reason: Option<StopReason> },
 
     // ── Aggregated LLM responses (emitted after stream completes) ──
-
     /// LLM produced a complete text response (all text blocks concatenated).
     LlmResponse(String),
 
@@ -50,7 +51,6 @@ pub enum AgentEvent {
     Thinking(String),
 
     // ── Agent lifecycle ──
-
     /// Agent is about to call the LLM API (waiting for response).
     Requesting,
 
@@ -65,7 +65,11 @@ pub enum AgentEvent {
     ToolCallBackground { id: String, name: String },
 
     /// A background tool task completed with its real result.
-    ToolBackgroundComplete { id: String, ok: bool, content: String },
+    ToolBackgroundComplete {
+        id: String,
+        ok: bool,
+        content: String,
+    },
 
     /// Agent finished its workflow.
     Done,
@@ -80,7 +84,9 @@ pub enum AgentEvent {
 pub enum ContentBlockKind {
     Text,
     Thinking,
-    ToolUse { name: String },
+    ToolUse {
+        name: String,
+    },
     /// Catch-all for image or other rare block types.
     Other,
 }
@@ -110,9 +116,9 @@ impl AgentEvent {
     /// itself based on lifecycle state, not on the stream protocol).
     pub fn from_stream_event(event: &MessageStreamEvent) -> Option<Self> {
         match event {
-            MessageStreamEvent::MessageStart { message } => {
-                Some(AgentEvent::StreamStart { message: message.clone() })
-            }
+            MessageStreamEvent::MessageStart { message } => Some(AgentEvent::StreamStart {
+                message: message.clone(),
+            }),
 
             MessageStreamEvent::ContentBlockStart {
                 content_block,
@@ -123,9 +129,7 @@ impl AgentEvent {
             }),
 
             MessageStreamEvent::ContentBlockDelta { delta, .. } => match delta {
-                ContentBlockDelta::TextDelta { text } => {
-                    Some(AgentEvent::TextDelta(text.clone()))
-                }
+                ContentBlockDelta::TextDelta { text } => Some(AgentEvent::TextDelta(text.clone())),
                 ContentBlockDelta::ThinkingDelta { thinking } => {
                     Some(AgentEvent::ThinkingDelta(thinking.clone()))
                 }
@@ -134,14 +138,12 @@ impl AgentEvent {
                 _ => None,
             },
 
-            MessageStreamEvent::MessageDelta { usage, .. } => {
-                Some(AgentEvent::UsageUpdate {
-                    input_tokens: usage.input_tokens,
-                    output_tokens: usage.output_tokens,
-                    cache_creation_input_tokens: usage.cache_creation_input_tokens,
-                    cache_read_input_tokens: usage.cache_read_input_tokens,
-                })
-            }
+            MessageStreamEvent::MessageDelta { usage, .. } => Some(AgentEvent::UsageUpdate {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_creation_input_tokens: usage.cache_creation_input_tokens,
+                cache_read_input_tokens: usage.cache_read_input_tokens,
+            }),
 
             MessageStreamEvent::ContentBlockStop { index } => {
                 Some(AgentEvent::ContentBlockStop { index: *index })

@@ -8,8 +8,8 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use agentik_proc::tool;
+use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use agentik_sdk::types::tools::{ToolResult, ToolResultContent};
@@ -166,7 +166,9 @@ mod tests {
     async fn end_to_end_via_toolset_advances_step() {
         let (runtime, todo_reg) = crate::skill::instantiate(demo_skill());
 
-        let mut toolset = Toolset::new(Some(tokio::sync::mpsc::unbounded_channel::<agentik_sdk::types::AgentEvent>().0));
+        let mut toolset = Toolset::new(Some(
+            tokio::sync::mpsc::unbounded_channel::<agentik_sdk::types::AgentEvent>().0,
+        ));
         let tx = tokio::sync::mpsc::unbounded_channel().0;
         for reg in lifecycle_registrations(tx) {
             toolset.register(reg).unwrap();

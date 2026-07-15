@@ -32,9 +32,10 @@ impl ToolFunction for ReadTool {
         let content = match fs::read_to_string(path).await {
             Ok(c) => c,
             Err(e) => {
-                return Ok(ToolResult::error(
-                    format!("Failed to read {}: {e}", input.file_path),
-                ));
+                return Ok(ToolResult::error(format!(
+                    "Failed to read {}: {e}",
+                    input.file_path
+                )));
             }
         };
 

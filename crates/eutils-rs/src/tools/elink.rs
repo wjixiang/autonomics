@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use crate::{EutilsClient, format::format_elink};
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
+use agentik_proc::tool;
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use crate::{EutilsClient, format::format_elink};
-use agentik_proc::tool;
 
 #[tool(
     name = "pubmed_related",
@@ -47,11 +47,7 @@ impl ToolFunction for PubmedRelatedTool {
             linkname: input.linkname,
         };
 
-        let result = self
-            .client
-            .elink(&req)
-            .await
-            .map_err(super::json_err)?;
+        let result = self.client.elink(&req).await.map_err(super::json_err)?;
 
         Ok(AgentToolResult::success(format_elink(&result)))
     }

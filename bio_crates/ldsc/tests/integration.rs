@@ -13,10 +13,10 @@ use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
 
+use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use arrow_csv::ReaderBuilder;
 use arrow_schema::{DataType, Field, Schema};
-use arrow::compute::concat_batches;
 use datafusion::prelude::SessionContext;
 use ldsc::hsq::{HsqColumns, estimate_h2};
 
@@ -34,7 +34,9 @@ fn read_tsv(path: &str, schema: Vec<(&str, DataType)>) -> RecordBatch {
     let reader = ReaderBuilder::new(schema)
         .with_delimiter(b'\t')
         .with_header(true)
-        .build(BufReader::new(File::open(path).unwrap_or_else(|e| panic!("open {path}: {e}"))))
+        .build(BufReader::new(
+            File::open(path).unwrap_or_else(|e| panic!("open {path}: {e}")),
+        ))
         .unwrap_or_else(|e| panic!("build reader for {path}: {e}"));
     let batches: Vec<RecordBatch> = reader
         .collect::<Result<_, _>>()
@@ -110,13 +112,21 @@ async fn estimate_h2_on_gwas_simulate_fixture() {
     println!("{res:#?}");
 
     assert_eq!(res.n_snp, 1000, "expected 1000 SNPs");
-    assert!(res.mean_chisq.is_finite() && res.mean_chisq > 1.0, "mean_chisq={}", res.mean_chisq);
+    assert!(
+        res.mean_chisq.is_finite() && res.mean_chisq > 1.0,
+        "mean_chisq={}",
+        res.mean_chisq
+    );
     assert!(
         res.h2.is_finite() && res.h2 > 0.0 && res.h2 < 1.5,
         "h2 out of range: {}",
         res.h2
     );
-    assert!(res.h2_se.is_finite() && res.h2_se > 0.0, "h2_se={}", res.h2_se);
+    assert!(
+        res.h2_se.is_finite() && res.h2_se > 0.0,
+        "h2_se={}",
+        res.h2_se
+    );
     let intercept = res.intercept.expect("free intercept");
     assert!(
         intercept.is_finite() && (intercept - 1.0).abs() < 1.0,

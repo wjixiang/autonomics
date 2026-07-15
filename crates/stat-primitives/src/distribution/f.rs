@@ -27,8 +27,7 @@ impl Distribution for FDistribution {
         // f(x) = (d1/d2)^{d1/2} x^{d1/2−1} (1 + d1 x/d2)^{−(d1+d2)/2} / B(d1/2, d2/2)
         let a = self.d1 / 2.0;
         let b = self.d2 / 2.0;
-        let log_pdf = a * (self.d1 / self.d2).ln()
-            + (a - 1.0) * x.ln()
+        let log_pdf = a * (self.d1 / self.d2).ln() + (a - 1.0) * x.ln()
             - (a + b) * (1.0 + self.d1 * x / self.d2).ln()
             - ln_beta(a, b);
         log_pdf.exp()

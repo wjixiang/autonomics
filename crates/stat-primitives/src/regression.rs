@@ -60,7 +60,12 @@ pub struct Regression {
 /// heterogeneity, which is exactly the behaviour IVW needs for its random-effects
 /// variant. For frequency weights the point estimates are unchanged but the
 /// variance estimate differs — call [`ols`] if weights are all equal.
-pub fn wls(predictors: &[&[f64]], y: &[f64], weights: &[f64], intercept: bool) -> Result<Regression> {
+pub fn wls(
+    predictors: &[&[f64]],
+    y: &[f64],
+    weights: &[f64],
+    intercept: bool,
+) -> Result<Regression> {
     fit(predictors, y, weights, intercept)
 }
 
@@ -100,21 +105,20 @@ fn fit(predictors: &[&[f64]], y: &[f64], weights: &[f64], intercept: bool) -> Re
         cols.push(p.to_vec());
     }
     let p = cols.len();
-    let df_residual = n.checked_sub(p).filter(|&d| d > 0).ok_or_else(|| {
-        StatError::InsufficientData {
-            min: p + 1,
-            actual: n,
-        }
-    })?;
+    let df_residual =
+        n.checked_sub(p)
+            .filter(|&d| d > 0)
+            .ok_or_else(|| StatError::InsufficientData {
+                min: p + 1,
+                actual: n,
+            })?;
 
     // Normal equations: XtWX (p×p) and XtWy (p).
     let mut xtx = vec![vec![0.0; p]; p];
     let mut xty = vec![0.0; p];
     for i in 0..p {
         for j in i..p {
-            let s = compensated_sum(
-                (0..n).map(|k| weights[k] * cols[i][k] * cols[j][k]),
-            );
+            let s = compensated_sum((0..n).map(|k| weights[k] * cols[i][k] * cols[j][k]));
             xtx[i][j] = s;
             xtx[j][i] = s;
         }
@@ -150,13 +154,8 @@ fn fit(predictors: &[&[f64]], y: &[f64], weights: &[f64], intercept: bool) -> Re
     };
     let _ = mean;
 
-    let r_squared = if tss > 0.0 {
-        1.0 - rss / tss
-    } else {
-        f64::NAN
-    };
-    let adj_r_squared =
-        1.0 - (1.0 - r_squared) * (n as f64 - 1.0) / df_residual as f64;
+    let r_squared = if tss > 0.0 { 1.0 - rss / tss } else { f64::NAN };
+    let adj_r_squared = 1.0 - (1.0 - r_squared) * (n as f64 - 1.0) / df_residual as f64;
 
     // Variance estimate and coefficient standard errors.
     let sigma2 = rss / df_residual as f64;

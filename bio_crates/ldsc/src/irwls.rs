@@ -92,7 +92,9 @@ pub fn irwls(
         || n_samples.len() != n
         || x.ncols() < n_annot
     {
-        return Err(LdscError::DimensionMismatch("irwls: dimension mismatch".into()));
+        return Err(LdscError::DimensionMismatch(
+            "irwls: dimension mismatch".into(),
+        ));
     }
     let p = x.ncols();
 
@@ -181,8 +183,8 @@ mod tests {
         assert_eq!(out.x.ncols(), 2);
         assert_eq!(out.y.len(), n);
         assert!(out.y.iter().all(|v| v.is_finite()));
-        let all_finite = (0..out.x.nrows())
-            .all(|i| (0..out.x.ncols()).all(|j| out.x[(i, j)].is_finite()));
+        let all_finite =
+            (0..out.x.nrows()).all(|i| (0..out.x.ncols()).all(|j| out.x[(i, j)].is_finite()));
         assert!(all_finite);
     }
 }

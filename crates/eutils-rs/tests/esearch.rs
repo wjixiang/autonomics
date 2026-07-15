@@ -1,6 +1,6 @@
 use anyhow::Result;
-use eutils_rs::types::ESearchRequest;
 use eutils_rs::EutilsClient;
+use eutils_rs::types::ESearchRequest;
 
 mod common;
 
@@ -15,7 +15,10 @@ async fn esearch_basic_pubmed_search() -> Result<()> {
 
     let n: u64 = resp.result.count.parse().unwrap_or(0);
     assert!(n > 10_000, "expected > 10k CRISPR results, got {}", n);
-    assert!(!resp.result.id_list.is_empty(), "id_list should not be empty");
+    assert!(
+        !resp.result.id_list.is_empty(),
+        "id_list should not be empty"
+    );
     assert!(resp.result.id_list.len() <= 20);
 
     Ok(())

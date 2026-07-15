@@ -50,9 +50,15 @@ impl ToolFunction for AddEdgeTool {
 
         let res = match (input.from_port, input.to_port) {
             (Some(fp), Some(tp)) => {
-                let fp: u8 = fp.parse().map_err(|_| ExecError::Format(format!("invalid from_port: {fp}")))?;
-                let tp: u8 = tp.parse().map_err(|_| ExecError::Format(format!("invalid to_port: {tp}")))?;
-                self.client.add_edge_port(input.from, fp, input.to, tp).await
+                let fp: u8 = fp
+                    .parse()
+                    .map_err(|_| ExecError::Format(format!("invalid from_port: {fp}")))?;
+                let tp: u8 = tp
+                    .parse()
+                    .map_err(|_| ExecError::Format(format!("invalid to_port: {tp}")))?;
+                self.client
+                    .add_edge_port(input.from, fp, input.to, tp)
+                    .await
             }
             _ => self.client.add_edge(input.from, input.to).await,
         };

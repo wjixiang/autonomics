@@ -12,7 +12,7 @@ use datafusion::error::Result;
 use oxbow::alignment::CramScanner;
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{byte_reader, map_ext, BioBatchIter, BioDriver, BioInput};
+use super::super::core::{BioBatchIter, BioDriver, BioInput, byte_reader, map_ext};
 
 /// An empty reference repository (every lookup returns `None`).
 fn empty_repo() -> noodles::fasta::Repository {
@@ -20,8 +20,14 @@ fn empty_repo() -> noodles::fasta::Repository {
 }
 
 fn scanner(header: noodles::sam::Header) -> Result<CramScanner> {
-    CramScanner::new(header, Select::All, None, empty_repo(), CoordSystem::OneClosed)
-        .map_err(map_ext)
+    CramScanner::new(
+        header,
+        Select::All,
+        None,
+        empty_repo(),
+        CoordSystem::OneClosed,
+    )
+    .map_err(map_ext)
 }
 
 pub struct CramDriver;

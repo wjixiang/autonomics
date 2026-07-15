@@ -34,6 +34,8 @@ impl ToolFunction for GwasinfoByIdTool {
             .gwasinfo(&GwasInfoRequest { id: input.id })
             .await
             .map_err(json_err)?;
-        Ok(AgentToolResult::success(format_gwasinfo_table(&result, None, None)))
+        Ok(AgentToolResult::success(format_gwasinfo_table(
+            &result, None, None,
+        )))
     }
 }

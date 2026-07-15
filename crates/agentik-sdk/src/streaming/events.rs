@@ -112,4 +112,3 @@ mod tests {
         assert!(debug_str.contains("<callback>"));
     }
 }
-

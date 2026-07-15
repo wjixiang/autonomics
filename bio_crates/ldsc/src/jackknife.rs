@@ -44,7 +44,9 @@ pub fn jackknife_fast(x: &Mat<f64>, y: &[f64], n_blocks: usize) -> Result<Jackkn
     let n = y.len();
     let p = x.ncols();
     if x.nrows() != n {
-        return Err(LdscError::DimensionMismatch("jackknife: x.nrows() != y.len()".into()));
+        return Err(LdscError::DimensionMismatch(
+            "jackknife: x.nrows() != y.len()".into(),
+        ));
     }
     if n_blocks == 0 || n_blocks > n {
         return Err(LdscError::InvalidInput(format!(
@@ -61,7 +63,9 @@ pub fn jackknife_fast(x: &Mat<f64>, y: &[f64], n_blocks: usize) -> Result<Jackkn
         .collect();
     let nb = blocks.len();
     if nb == 0 {
-        return Err(LdscError::InvalidInput("jackknife: no non-empty blocks".into()));
+        return Err(LdscError::InvalidInput(
+            "jackknife: no non-empty blocks".into(),
+        ));
     }
 
     // Per-block XᵀX (p×p, row-major flat) and Xᵀy (p).
@@ -178,9 +182,7 @@ mod tests {
         // y = 2 + 3·x, no noise → delete-values all equal the exact coef,
         // pseudovalues equal coef, SE = 0.
         let n = 20;
-        let rows: Vec<Vec<f64>> = (0..n)
-            .map(|i| vec![1.0, i as f64])
-            .collect();
+        let rows: Vec<Vec<f64>> = (0..n).map(|i| vec![1.0, i as f64]).collect();
         let x = build_mat_row_major(&rows);
         let y: Vec<f64> = (0..n).map(|i| 2.0 + 3.0 * (i as f64)).collect();
         let res = jackknife_fast(&x, &y, 5).unwrap();

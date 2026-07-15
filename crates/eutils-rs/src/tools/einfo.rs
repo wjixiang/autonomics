@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use crate::{EutilsClient, format::format_einfo};
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use crate::{EutilsClient, format::format_einfo};
 
 use agentik_proc::tool;
 
@@ -39,6 +39,8 @@ impl ToolFunction for EInfoTool {
             .await
             .map_err(super::json_err)?;
 
-        Ok(AgentToolResult::success(format_einfo(&serde_json::to_value(result)?)))
+        Ok(AgentToolResult::success(format_einfo(
+            &serde_json::to_value(result)?,
+        )))
     }
 }

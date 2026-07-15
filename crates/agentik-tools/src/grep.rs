@@ -4,7 +4,6 @@ use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
 use regex::Regex;
 
-
 use agentik_core::tools::{ToolError, ToolFunction};
 use agentik_proc::tool;
 
@@ -35,18 +34,14 @@ impl ToolFunction for GrepTool {
         let re = match Regex::new(&input.pattern) {
             Ok(r) => r,
             Err(e) => {
-                return Ok(ToolResult::error(
-                    format!("Invalid regex: {e}"),
-                ));
+                return Ok(ToolResult::error(format!("Invalid regex: {e}")));
             }
         };
         let glob_filter = match input.glob.as_deref() {
             Some(g) => match glob::Pattern::new(g) {
                 Ok(p) => Some(p),
                 Err(e) => {
-                    return Ok(ToolResult::error(
-                        format!("Invalid glob: {e}"),
-                    ));
+                    return Ok(ToolResult::error(format!("Invalid glob: {e}")));
                 }
             },
             None => None,

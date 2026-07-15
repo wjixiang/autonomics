@@ -110,11 +110,7 @@ impl EutilsClient {
     }
 
     /// POST form-encoded params and fetch JSON.
-    async fn post_json(
-        &self,
-        endpoint: &str,
-        params: HashMap<&str, String>,
-    ) -> Result<Value> {
+    async fn post_json(&self, endpoint: &str, params: HashMap<&str, String>) -> Result<Value> {
         let mut p = params;
         p.insert("tool", self.tool.clone());
         p.insert("email", self.email.clone());
@@ -134,11 +130,7 @@ impl EutilsClient {
     }
 
     /// POST form-encoded params and fetch raw text (used for large ID lists).
-    async fn post_text(
-        &self,
-        endpoint: &str,
-        params: HashMap<&str, String>,
-    ) -> Result<String> {
+    async fn post_text(&self, endpoint: &str, params: HashMap<&str, String>) -> Result<String> {
         let mut p = params;
         p.insert("tool", self.tool.clone());
         p.insert("email", self.email.clone());
@@ -327,10 +319,7 @@ impl EutilsClient {
     /// - Find related PubMed articles (`dbfrom: "pubmed", db: Some("pubmed")`)
     /// - Link genes to PubMed articles (`dbfrom: "gene", db: Some("pubmed")`)
     pub async fn elink(&self, req: &ELinkRequest) -> Result<Value> {
-        let mut params = vec![
-            ("dbfrom", req.dbfrom.clone()),
-            ("retmode", "json".into()),
-        ];
+        let mut params = vec![("dbfrom", req.dbfrom.clone()), ("retmode", "json".into())];
         // ELink uses one repeated `id` parameter per UID. Comma-separated values
         // would be merged into a single linkset server-side, so we split here to
         // preserve per-UID grouping (one linkset per input UID).

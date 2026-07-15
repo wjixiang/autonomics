@@ -4,7 +4,6 @@ use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
 
-
 use super::json_err;
 use crate::format::format_associations;
 use crate::{OpengwasClient, types::*};
@@ -37,7 +36,9 @@ pub struct AssociationsTool {
 impl ToolFunction for AssociationsTool {
     type Input = AssociationsInput;
 
-    fn timeout_seconds(&self) -> u64 { 120 }
+    fn timeout_seconds(&self) -> u64 {
+        120
+    }
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
         let result = self

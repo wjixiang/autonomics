@@ -13,7 +13,7 @@ use crate::datasource::drivers::{
     BamDriver, BcfDriver, BedDriver, BigBedDriver, BigWigDriver, CramDriver, FastaDriver,
     FastqDriver, GffDriver, GtfDriver, SamDriver, VcfDriver,
 };
-use crate::datasource::{read_bio, BioReadOptions};
+use crate::datasource::{BioReadOptions, read_bio};
 use datafusion::common::Result;
 
 /// Extension trait that adds typed readers (`read_vcf`, `read_bam`, …) to a

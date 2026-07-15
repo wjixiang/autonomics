@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
+use agentik_proc::tool;
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use agentik_proc::tool;
 
 use crate::{EutilsClient, format::format_esummary};
 
@@ -41,11 +41,7 @@ impl ToolFunction for PubmedSummaryTool {
             version: Some("2.0".into()),
         };
 
-        let result = self
-            .client
-            .esummary(&req)
-            .await
-            .map_err(super::json_err)?;
+        let result = self.client.esummary(&req).await.map_err(super::json_err)?;
 
         Ok(AgentToolResult::success(format_esummary(&result)))
     }

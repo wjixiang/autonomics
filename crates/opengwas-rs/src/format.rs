@@ -84,8 +84,7 @@ pub fn value_to_table(rows: &[Value]) -> String {
 
     // Collect the union of all keys across rows.
     let mut columns: Vec<String> = Vec::new();
-    let mut col_set: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut col_set: std::collections::HashSet<String> = std::collections::HashSet::new();
     for row in rows {
         if let Some(obj) = row.as_object() {
             for key in obj.keys() {
@@ -98,9 +97,29 @@ pub fn value_to_table(rows: &[Value]) -> String {
 
     // Heuristic column ordering: put common GWAS fields first.
     let priority = [
-        "rsid", "variant", "chr", "chromosome", "position", "pos", "ea", "nea",
-        "eaf", "beta", "se", "pval", "p", "nsnp", "trait", "study_id", "id",
-        "samplesize", "sample_size", "ncase", "ncontrol", "unit", "population",
+        "rsid",
+        "variant",
+        "chr",
+        "chromosome",
+        "position",
+        "pos",
+        "ea",
+        "nea",
+        "eaf",
+        "beta",
+        "se",
+        "pval",
+        "p",
+        "nsnp",
+        "trait",
+        "study_id",
+        "id",
+        "samplesize",
+        "sample_size",
+        "ncase",
+        "ncontrol",
+        "unit",
+        "population",
     ];
     columns.sort_by(|a, b| {
         let ai = priority.iter().position(|&p| p == a).unwrap_or(999);
@@ -227,9 +246,7 @@ pub fn format_gwasinfo_table(
 
     if let Some(kw) = keyword {
         let f = field.unwrap_or("trait");
-        out.push_str(&format!(
-            "Searched **{f}** for \"{kw}\"\n\n"
-        ));
+        out.push_str(&format!("Searched **{f}** for \"{kw}\"\n\n"));
     }
 
     for ds in datasets {
@@ -457,12 +474,8 @@ pub fn format_ld_clump(value: &Value) -> String {
 pub fn format_ld_matrix(value: &Value) -> String {
     // -- Canonical {snplist, matrix} response --------------------------------
     if let Some(obj) = value.as_object() {
-        if let (Some(snplist), Some(matrix)) =
-            (obj.get("snplist"), obj.get("matrix"))
-        {
-            if let (Some(snps), Some(values)) =
-                (snplist.as_array(), matrix.as_array())
-            {
+        if let (Some(snplist), Some(matrix)) = (obj.get("snplist"), obj.get("matrix")) {
+            if let (Some(snps), Some(values)) = (snplist.as_array(), matrix.as_array()) {
                 return format_ld_matrix_canonical(snps, values);
             }
         }
@@ -539,10 +552,7 @@ fn format_ld_matrix_canonical(snps: &[Value], values: &[Value]) -> String {
         }
     }
 
-    let mut out = format!(
-        "LD matrix ({} SNPs, R values)\n\n",
-        n
-    );
+    let mut out = format!("LD matrix ({} SNPs, R values)\n\n", n);
     if have != expected {
         out.push_str(&format!(
             "_Warning: snplist has {n} entries but matrix has {have} values \
@@ -630,9 +640,7 @@ fn strip_allele_suffix(label: &str) -> String {
         let (rsid, tail) = label.split_at(idx);
         let tail = &tail[1..]; // drop the leading '_'
         let parts: Vec<&str> = tail.split('_').collect();
-        if parts.len() == 2
-            && parts.iter().all(|p| p.len() == 1 && is_allele_char(p))
-        {
+        if parts.len() == 2 && parts.iter().all(|p| p.len() == 1 && is_allele_char(p)) {
             return rsid.to_string();
         }
     }
@@ -688,10 +696,7 @@ fn format_keyed_groups(value: &Value, label: &str) -> String {
     let mut out = String::with_capacity(2048);
 
     for (key, val) in map {
-        let rows: Vec<Value> = val
-            .as_array()
-            .map(|a| a.to_vec())
-            .unwrap_or_default();
+        let rows: Vec<Value> = val.as_array().map(|a| a.to_vec()).unwrap_or_default();
         total += rows.len();
 
         out.push_str(&format!("### {key} ({} records)\n\n", rows.len()));
@@ -700,7 +705,11 @@ fn format_keyed_groups(value: &Value, label: &str) -> String {
     }
 
     // Prepend summary.
-    let summary = format!("Found **{}** {label} across **{}** studies\n\n", total, map.len());
+    let summary = format!(
+        "Found **{}** {label} across **{}** studies\n\n",
+        total,
+        map.len()
+    );
     format!("{}{}", summary, out)
 }
 
@@ -801,9 +810,7 @@ mod tests {
 
     #[test]
     fn test_value_to_table_column_order() {
-        let rows = vec![
-            json!({"z": 1, "a": 2, "pval": 3e-8, "rsid": "rs123"}),
-        ];
+        let rows = vec![json!({"z": 1, "a": 2, "pval": 3e-8, "rsid": "rs123"})];
         let table = value_to_table(&rows);
         // "rsid" should come before "z" due to priority ordering.
         let rsid_pos = table.find("rsid").unwrap();
@@ -871,7 +878,10 @@ mod tests {
 
     #[test]
     fn test_format_gwasinfo_count() {
-        assert_eq!(format_gwasinfo_count(184305), "Total cached datasets: **184,305**");
+        assert_eq!(
+            format_gwasinfo_count(184305),
+            "Total cached datasets: **184,305**"
+        );
     }
 
     // -- format_associations --
@@ -941,8 +951,7 @@ mod tests {
         });
         let result = format_ld_matrix(&v);
         assert!(
-            result.contains("shape mismatch")
-                || result.contains("Warning"),
+            result.contains("shape mismatch") || result.contains("Warning"),
             "expected mismatch warning, got: {result}"
         );
     }

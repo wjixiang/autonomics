@@ -1,10 +1,12 @@
-pub mod client;
 pub mod auth;
-pub mod streaming;
+pub mod client;
 pub mod retry;
+pub mod streaming;
 
 // Re-exports for convenience
-pub use client::HttpClient;
 pub use auth::AuthHandler;
-pub use streaming::{HttpStreamClient, StreamRequestBuilder, StreamConfig};
-pub use retry::{RetryPolicy, RetryCondition, RetryExecutor, RetryResult, default_retry, api_retry}; 
+pub use client::HttpClient;
+pub use retry::{
+    RetryCondition, RetryExecutor, RetryPolicy, RetryResult, api_retry, default_retry,
+};
+pub use streaming::{HttpStreamClient, StreamConfig, StreamRequestBuilder};

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::Anthropic;
 use crate::config::ClientConfig;
-use crate::model::model_info::ModelInfo;
 use crate::model::ProviderConfig;
+use crate::model::model_info::ModelInfo;
 use crate::provider::client::AnthropicApiClient;
 use crate::provider::client::ApiClient;
 use crate::streaming::MessageStream;

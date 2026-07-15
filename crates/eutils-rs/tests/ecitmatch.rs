@@ -1,6 +1,6 @@
 use anyhow::Result;
-use eutils_rs::types::ECitMatchRequest;
 use eutils_rs::EutilsClient;
+use eutils_rs::types::ECitMatchRequest;
 
 mod common;
 
@@ -12,7 +12,9 @@ async fn ecitmatch_known_article() -> Result<()> {
     common::rate_limit();
 
     let citation = "Nature communications|9|2069|2018|Ma H|Correction of a pathogenic gene mutation in human embryos".to_string();
-    let req = ECitMatchRequest { bdata: vec![citation] };
+    let req = ECitMatchRequest {
+        bdata: vec![citation],
+    };
     let resp = client.ecitmatch(&req).await?;
 
     assert!(resp.contains("PMID"), "response should contain PMID");

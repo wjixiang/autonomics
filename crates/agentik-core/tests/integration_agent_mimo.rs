@@ -8,7 +8,9 @@ async fn test_sdk_mimo_stream_smoke() {
     use agentik_sdk::http::auth::AuthMethod;
     use agentik_sdk::model::Model;
     use agentik_sdk::model::ProviderConfig;
-    use agentik_sdk::provider::mimo::{MODEL_MIMO_V2_5_PRO, MimoEndpoint, MimoProvider, TokenPlanRegion};
+    use agentik_sdk::provider::mimo::{
+        MODEL_MIMO_V2_5_PRO, MimoEndpoint, MimoProvider, TokenPlanRegion,
+    };
     use futures::StreamExt;
 
     let api_key = std::env::var("MIMO_API_KEY").expect("MIMO_API_KEY not set");

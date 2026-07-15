@@ -48,10 +48,17 @@ async fn egquery_niche_term() -> Result<()> {
 
     assert!(!resp.result.is_empty());
 
-    let pubmed = resp.result.iter().find(|db| db["dbname"].as_str() == Some("pubmed"));
+    let pubmed = resp
+        .result
+        .iter()
+        .find(|db| db["dbname"].as_str() == Some("pubmed"));
     assert!(pubmed.is_some());
 
-    let count: u64 = pubmed.unwrap()["count"].as_str().unwrap_or("0").parse().unwrap_or(0);
+    let count: u64 = pubmed.unwrap()["count"]
+        .as_str()
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or(0);
     assert!(count > 1_000, "expected > 1k MR results, got {}", count);
 
     Ok(())

@@ -63,13 +63,13 @@ impl ToolFunction for QueryIcebergTool {
 
 impl QueryIcebergTool {
     async fn list_tables(&self) -> Result<ToolResult, ToolError> {
-        let tables = self
-            .datalake
-            .list_all_tables()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
-                source: format!("{e}").into(),
-            })?;
+        let tables =
+            self.datalake
+                .list_all_tables()
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    source: format!("{e}").into(),
+                })?;
 
         let json: Vec<serde_json::Value> = tables
             .iter()
@@ -108,10 +108,8 @@ impl QueryIcebergTool {
                 source: format!("{e}").into(),
             })?;
 
-        let batches: Vec<RecordBatch> = df
-            .collect()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
+        let batches: Vec<RecordBatch> =
+            df.collect().await.map_err(|e| ToolError::ExecutionFailed {
                 source: format!("{e}").into(),
             })?;
 
@@ -194,51 +192,87 @@ pub(crate) fn scalar_to_json(col: &dyn arrow_array::Array, row: usize) -> serde_
     }
     match col.data_type() {
         DataType::Boolean => {
-            let arr = col.as_any().downcast_ref::<arrow_array::BooleanArray>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::BooleanArray>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::Int8 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::Int8Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::Int8Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::Int16 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::Int16Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::Int16Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::Int32 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::Int32Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::Int32Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::Int64 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::Int64Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::Int64Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::UInt8 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::UInt8Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::UInt8Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::UInt16 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::UInt16Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::UInt16Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::UInt32 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::UInt32Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::UInt32Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::UInt64 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::UInt64Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::UInt64Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::Float16 | DataType::Float32 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::Float32Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::Float32Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::Float64 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::Float64Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::Float64Array>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::Utf8 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::StringArray>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::StringArray>()
+                .unwrap();
             serde_json::json!(arr.value(row))
         }
         DataType::LargeUtf8 => {
@@ -249,11 +283,17 @@ pub(crate) fn scalar_to_json(col: &dyn arrow_array::Array, row: usize) -> serde_
             serde_json::json!(arr.value(row))
         }
         DataType::Date32 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::Date32Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::Date32Array>()
+                .unwrap();
             serde_json::json!(arr.value(row).to_string())
         }
         DataType::Date64 => {
-            let arr = col.as_any().downcast_ref::<arrow_array::Date64Array>().unwrap();
+            let arr = col
+                .as_any()
+                .downcast_ref::<arrow_array::Date64Array>()
+                .unwrap();
             serde_json::json!(arr.value(row).to_string())
         }
         _ => serde_json::json!(format!("<{}>", col.data_type())),

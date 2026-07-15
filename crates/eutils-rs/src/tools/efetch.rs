@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use crate::{EutilsClient, format::format_efetch};
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
+use agentik_proc::tool;
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use crate::{EutilsClient, format::format_efetch};
-use agentik_proc::tool;
 
 #[tool(
     name = "pubmed_fetch",
@@ -36,14 +36,8 @@ impl ToolFunction for PubmedFetchTool {
     }
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
-        let rettype = input
-            .rettype
-            .as_deref()
-            .unwrap_or("abstract");
-        let retmode = input
-            .retmode
-            .as_deref()
-            .unwrap_or("text");
+        let rettype = input.rettype.as_deref().unwrap_or("abstract");
+        let retmode = input.retmode.as_deref().unwrap_or("text");
 
         let req = crate::types::EFetchRequest {
             db: "pubmed".into(),
@@ -56,11 +50,7 @@ impl ToolFunction for PubmedFetchTool {
             query_key: None,
         };
 
-        let text = self
-            .client
-            .efetch(&req)
-            .await
-            .map_err(super::json_err)?;
+        let text = self.client.efetch(&req).await.map_err(super::json_err)?;
 
         let mut map = serde_json::Map::new();
         map.insert(
@@ -68,6 +58,8 @@ impl ToolFunction for PubmedFetchTool {
             serde_json::Value::String(rettype.to_owned()),
         );
         map.insert("content".into(), serde_json::Value::String(text));
-        Ok(AgentToolResult::success(format_efetch(&serde_json::Value::Object(map))))
+        Ok(AgentToolResult::success(format_efetch(
+            &serde_json::Value::Object(map),
+        )))
     }
 }

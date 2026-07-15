@@ -14,6 +14,6 @@ pub mod core;
 pub mod drivers;
 
 pub use core::{
-    read_bio, BioBatchIter, BioDriver, BioFormat, BioFormatFactory, BioInput, BioOptions,
-    BioReadOptions, BioSource,
+    BioBatchIter, BioDriver, BioFormat, BioFormatFactory, BioInput, BioOptions, BioReadOptions,
+    BioSource, read_bio,
 };

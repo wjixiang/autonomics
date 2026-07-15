@@ -39,9 +39,10 @@ impl ToolFunction for EditTool {
         let content = match fs::read_to_string(path).await {
             Ok(c) => c,
             Err(e) => {
-                return Ok(ToolResult::error(
-                    format!("Failed to read {}: {e}", input.file_path),
-                ));
+                return Ok(ToolResult::error(format!(
+                    "Failed to read {}: {e}",
+                    input.file_path
+                )));
             }
         };
 
@@ -54,11 +55,9 @@ impl ToolFunction for EditTool {
             ));
         }
         if count > 1 && !replace_all {
-            return Ok(ToolResult::error(
-                format!(
-                    "old_string matches {count} locations; set replace_all=true or make old_string unique"
-                ),
-            ));
+            return Ok(ToolResult::error(format!(
+                "old_string matches {count} locations; set replace_all=true or make old_string unique"
+            )));
         }
 
         let new_content = if replace_all {
@@ -68,16 +67,18 @@ impl ToolFunction for EditTool {
         };
 
         if let Err(e) = fs::write(path, &new_content).await {
-            return Ok(ToolResult::error(
-                format!("Failed to write {}: {e}", input.file_path),
-            ));
+            return Ok(ToolResult::error(format!(
+                "Failed to write {}: {e}",
+                input.file_path
+            )));
         }
 
         let n = if replace_all { count } else { 1 };
         let plural = if n == 1 { "" } else { "s" };
-        Ok(ToolResult::success(
-            format!("Edited {} ({} replacement{})", input.file_path, n, plural),
-        ))
+        Ok(ToolResult::success(format!(
+            "Edited {} ({} replacement{})",
+            input.file_path, n, plural
+        )))
     }
 }
 

@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
 use crate::shared::{RequestId, Usage};
-use crate::tools::{ToolDefinition, ToolChoice};
+use crate::tools::{ToolChoice, ToolDefinition};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Message {
@@ -39,10 +39,7 @@ pub enum ContentBlock {
     Text { text: String },
 
     #[serde(rename = "thinking")]
-    Thinking {
-        thinking: String,
-        signature: String,
-    },
+    Thinking { thinking: String, signature: String },
 
     #[serde(rename = "image")]
     Image { source: ImageSource },
@@ -67,15 +64,10 @@ pub enum ContentBlock {
 #[serde(tag = "type")]
 pub enum ImageSource {
     #[serde(rename = "base64")]
-    Base64 {
-        media_type: String,
-        data: String,
-    },
-    
+    Base64 { media_type: String, data: String },
+
     #[serde(rename = "url")]
-    Url {
-        url: String,
-    },
+    Url { url: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -132,10 +124,7 @@ pub enum ContentBlockParam {
     Text { text: String },
 
     #[serde(rename = "thinking")]
-    Thinking {
-        thinking: String,
-        signature: String,
-    },
+    Thinking { thinking: String, signature: String },
 
     #[serde(rename = "image")]
     Image { source: ImageSource },
@@ -179,7 +168,7 @@ impl MessageCreateBuilder {
             },
         }
     }
-    
+
     pub fn message(mut self, role: Role, content: impl Into<MessageContent>) -> Self {
         self.params.messages.push(MessageParam {
             role,
@@ -187,60 +176,60 @@ impl MessageCreateBuilder {
         });
         self
     }
-    
+
     pub fn user(self, content: impl Into<MessageContent>) -> Self {
         self.message(Role::User, content)
     }
-    
+
     pub fn assistant(self, content: impl Into<MessageContent>) -> Self {
         self.message(Role::Assistant, content)
     }
-    
+
     pub fn system(mut self, system: impl Into<String>) -> Self {
         self.params.system = Some(system.into());
         self
     }
-    
+
     pub fn temperature(mut self, temperature: f32) -> Self {
         self.params.temperature = Some(temperature);
         self
     }
-    
+
     pub fn top_p(mut self, top_p: f32) -> Self {
         self.params.top_p = Some(top_p);
         self
     }
-    
+
     pub fn top_k(mut self, top_k: u32) -> Self {
         self.params.top_k = Some(top_k);
         self
     }
-    
+
     pub fn stop_sequences(mut self, stop_sequences: Vec<String>) -> Self {
         self.params.stop_sequences = Some(stop_sequences);
         self
     }
-    
+
     pub fn stream(mut self, stream: bool) -> Self {
         self.params.stream = Some(stream);
         self
     }
-    
+
     pub fn tools(mut self, tools: Vec<ToolDefinition>) -> Self {
         self.params.tools = Some(tools);
         self
     }
-    
+
     pub fn tool_choice(mut self, tool_choice: ToolChoice) -> Self {
         self.params.tool_choice = Some(tool_choice);
         self
     }
-    
+
     pub fn metadata(mut self, metadata: std::collections::HashMap<String, String>) -> Self {
         self.params.metadata = Some(metadata);
         self
     }
-    
+
     pub fn build(self) -> MessageCreateParams {
         self.params
     }
@@ -268,7 +257,7 @@ impl ContentBlockParam {
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
-    
+
     pub fn image_base64(media_type: impl Into<String>, data: impl Into<String>) -> Self {
         Self::Image {
             source: ImageSource::Base64 {
@@ -277,12 +266,10 @@ impl ContentBlockParam {
             },
         }
     }
-    
+
     pub fn image_url(url: impl Into<String>) -> Self {
         Self::Image {
-            source: ImageSource::Url {
-                url: url.into(),
-            },
+            source: ImageSource::Url { url: url.into() },
         }
     }
 }
@@ -303,7 +290,10 @@ mod tests {
         assert_eq!(params.max_tokens, 1024);
         assert_eq!(params.messages.len(), 1);
         assert_eq!(params.messages[0].role, Role::User);
-        assert_eq!(params.system, Some("You are a helpful assistant.".to_string()));
+        assert_eq!(
+            params.system,
+            Some("You are a helpful assistant.".to_string())
+        );
         assert_eq!(params.temperature, Some(0.7));
     }
 
@@ -321,7 +311,7 @@ mod tests {
                 ImageSource::Base64 { media_type, data } => {
                     assert_eq!(media_type, "image/jpeg");
                     assert_eq!(data, "base64data");
-                },
+                }
                 _ => panic!("Expected base64 image source"),
             },
             _ => panic!("Expected image block"),

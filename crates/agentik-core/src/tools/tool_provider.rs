@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 
-
 use super::{ToolRegistration, Toolset};
 
 /// A registry that maps tool names to their `ToolRegistration`.
@@ -63,7 +62,9 @@ impl ToolProviderRegistry {
         include_lifecycle: bool,
         event_tx: tokio::sync::mpsc::UnboundedSender<crate::agent::InternalEvent>,
     ) -> Toolset {
-        let mut toolset = Toolset::new(Some(tokio::sync::mpsc::unbounded_channel::<agentik_sdk::types::AgentEvent>().0));
+        let mut toolset = Toolset::new(Some(
+            tokio::sync::mpsc::unbounded_channel::<agentik_sdk::types::AgentEvent>().0,
+        ));
 
         if include_lifecycle {
             for reg in super::lifecycle_registrations(event_tx.clone()) {

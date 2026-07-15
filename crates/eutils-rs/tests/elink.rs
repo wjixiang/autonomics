@@ -1,6 +1,6 @@
 use anyhow::Result;
-use eutils_rs::types::ELinkRequest;
 use eutils_rs::EutilsClient;
+use eutils_rs::types::ELinkRequest;
 
 mod common;
 
@@ -19,10 +19,16 @@ async fn elink_related_articles() -> Result<()> {
     };
     let resp = client.elink(&req).await?;
 
-    let linksets = resp.get("linksets").and_then(|v| v.as_array()).expect("missing linksets");
+    let linksets = resp
+        .get("linksets")
+        .and_then(|v| v.as_array())
+        .expect("missing linksets");
     assert!(!linksets.is_empty());
 
-    let linkdbs = linksets[0].get("linksetdbs").and_then(|v| v.as_array()).expect("missing linksetdbs");
+    let linkdbs = linksets[0]
+        .get("linksetdbs")
+        .and_then(|v| v.as_array())
+        .expect("missing linksetdbs");
     assert!(!linkdbs.is_empty());
     assert!(linkdbs[0].get("links").is_some());
 

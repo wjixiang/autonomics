@@ -39,10 +39,7 @@ impl ToolFunction for AddSinkNodeTool {
     type Input = AddSinkNodeInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
-        let format = input
-            .format
-            .map(|f| parse_write_format(&f))
-            .transpose()?;
+        let format = input.format.map(|f| parse_write_format(&f)).transpose()?;
 
         // Auto-detect from extension when not explicitly specified
         let format = format.or_else(|| detect_write_format(&input.path));
@@ -65,7 +62,9 @@ fn parse_write_format(s: &str) -> std::result::Result<WriteFormat, String> {
     match s.to_lowercase().as_str() {
         "csv" => Ok(WriteFormat::Csv),
         "parquet" => Ok(WriteFormat::Parquet),
-        other => Err(format!("unknown write format: {other} (supported: csv, parquet)")),
+        other => Err(format!(
+            "unknown write format: {other} (supported: csv, parquet)"
+        )),
     }
 }
 
@@ -94,7 +93,10 @@ mod tests {
     #[test]
     fn test_detect_write_format() {
         assert_eq!(detect_write_format("out.csv"), Some(WriteFormat::Csv));
-        assert_eq!(detect_write_format("out.parquet"), Some(WriteFormat::Parquet));
+        assert_eq!(
+            detect_write_format("out.parquet"),
+            Some(WriteFormat::Parquet)
+        );
         assert_eq!(detect_write_format("out.pq"), Some(WriteFormat::Parquet));
         assert_eq!(detect_write_format("out.txt"), None);
         assert_eq!(detect_write_format("noext"), None);

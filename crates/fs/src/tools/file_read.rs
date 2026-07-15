@@ -64,10 +64,7 @@ impl ToolFunction for FileReadTool {
             })));
         }
 
-        let reader = op
-            .reader(&path)
-            .await
-            .map_err(|e| e.to_string())?;
+        let reader = op.reader(&path).await.map_err(|e| e.to_string())?;
         let buf = reader
             .read(offset..offset + effective_limit)
             .await

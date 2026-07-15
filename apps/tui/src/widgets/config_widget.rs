@@ -210,13 +210,7 @@ fn render_provider_form(form: &ProviderForm, message: &str, area: Rect, buf: &mu
         .split(inner);
 
     for (i, label) in ProviderForm::FIELDS.iter().enumerate() {
-        render_field_line(
-            rows[i],
-            label,
-            &form.fields()[i],
-            i == form.focus,
-            buf,
-        );
+        render_field_line(rows[i], label, &form.fields()[i], i == form.focus, buf);
     }
 }
 
@@ -336,7 +330,10 @@ fn render_field_line(row: Rect, label: &str, input: &InputState, focused: bool, 
         let value_after = value[cursor.min(value.len())..].to_string();
         if focused {
             if !value_before.is_empty() {
-                spans.push(Span::styled(value_before, Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(
+                    value_before,
+                    Style::default().fg(Color::DarkGray),
+                ));
             }
             spans.push(Span::styled(
                 "▏".to_string(),
@@ -348,7 +345,10 @@ fn render_field_line(row: Rect, label: &str, input: &InputState, focused: bool, 
                 spans.push(Span::styled(value_after, Style::default().fg(Color::White)));
             }
         } else {
-            spans.push(Span::styled(value.to_string(), Style::default().fg(Color::White)));
+            spans.push(Span::styled(
+                value.to_string(),
+                Style::default().fg(Color::White),
+            ));
         }
     }
     Paragraph::new(Line::from(spans)).render(row, buf);

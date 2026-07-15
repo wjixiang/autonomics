@@ -10,7 +10,7 @@ use datafusion::error::Result;
 use oxbow::sequence::FastaScanner;
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{buf_reader, map_ext, BioBatchIter, BioDriver, BioInput};
+use super::super::core::{BioBatchIter, BioDriver, BioInput, buf_reader, map_ext};
 
 fn scanner() -> Result<FastaScanner> {
     FastaScanner::new(Select::All, CoordSystem::ZeroHalfOpen).map_err(map_ext)

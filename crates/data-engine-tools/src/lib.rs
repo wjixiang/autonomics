@@ -4,11 +4,11 @@ mod add_linear_regression_tool;
 mod add_sink_tool;
 mod add_source_tool;
 mod add_sql_tool;
+mod clear_dag_tool;
 mod get_output_tool;
 mod remove_node_tool;
 mod run_dag_tool;
 mod view_dag_tool;
-mod clear_dag_tool;
 
 use std::sync::Arc;
 

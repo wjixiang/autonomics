@@ -4,7 +4,6 @@ use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
 
-
 use super::json_err;
 use crate::format::format_variants;
 use crate::{OpengwasClient, types::*};

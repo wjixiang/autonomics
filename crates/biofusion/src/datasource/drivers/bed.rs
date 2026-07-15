@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
 use datafusion::error::Result;
-use oxbow::bed::{BedSchema, BedScanner};
+use oxbow::bed::{BedScanner, BedSchema};
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{buf_reader, map_ext, BioBatchIter, BioDriver, BioInput};
+use super::super::core::{BioBatchIter, BioDriver, BioInput, buf_reader, map_ext};
 
 fn bed_schema() -> Result<BedSchema> {
     "bed3".parse::<BedSchema>().map_err(map_ext)
@@ -31,8 +31,7 @@ impl BioDriver for BedDriver {
     }
 
     fn scan(input: BioInput, batch_size: usize) -> Result<BioBatchIter> {
-        let reader =
-            noodles::bed::io::Reader::<3, _>::new(buf_reader(input.bytes, input.gz));
+        let reader = noodles::bed::io::Reader::<3, _>::new(buf_reader(input.bytes, input.gz));
         let scanner = scanner()?;
         let batches = scanner
             .scan(reader, None, Some(batch_size), None)

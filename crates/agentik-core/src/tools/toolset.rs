@@ -250,24 +250,21 @@ impl Toolset {
     /// real content is read from `tool_result`.
     ///
     /// Returns `None` when the task is unknown or still running.
-    pub async fn finished_task_notification(
-        &self,
-        id: &str,
-    ) -> Option<(String, bool, String)> {
+    pub async fn finished_task_notification(&self, id: &str) -> Option<(String, bool, String)> {
         let tasks = self.tasks.read().await;
         let entry = tasks.iter().find(|t| t.id() == id)?;
         match entry.status() {
             TaskStatus::Done(_) => {
                 let result = entry.tool_result();
-                let ok = result.as_ref().map_or(true, |r| !r.is_error.unwrap_or(false));
+                let ok = result
+                    .as_ref()
+                    .map_or(true, |r| !r.is_error.unwrap_or(false));
                 let content = result
                     .map(|r| r.text_content())
                     .unwrap_or_else(|| "task finished".to_string());
                 Some((entry.name().to_string(), ok, content))
             }
-            TaskStatus::Failed(ref err) => {
-                Some((entry.name().to_string(), false, err.to_string()))
-            }
+            TaskStatus::Failed(ref err) => Some((entry.name().to_string(), false, err.to_string())),
             TaskStatus::Running => None,
         }
     }

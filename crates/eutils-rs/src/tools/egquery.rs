@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
+use agentik_proc::tool;
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use agentik_proc::tool;
 
 use crate::{EutilsClient, format::format_egquery};
 
@@ -37,6 +37,8 @@ impl ToolFunction for EGQueryTool {
             .await
             .map_err(super::json_err)?;
 
-        Ok(AgentToolResult::success(format_egquery(&serde_json::to_value(result)?)))
+        Ok(AgentToolResult::success(format_egquery(
+            &serde_json::to_value(result)?,
+        )))
     }
 }

@@ -1,7 +1,9 @@
-use crate::{Message, MessageCreateParams, MessageParam, Role, MessageContent, ToolDefinition, ToolChoice};
+use crate::{
+    Message, MessageContent, MessageCreateParams, MessageParam, Role, ToolChoice, ToolDefinition,
+};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageBatch {
@@ -37,19 +39,17 @@ impl BatchStatus {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            BatchStatus::Completed 
-            | BatchStatus::Expired 
-            | BatchStatus::Cancelled 
-            | BatchStatus::Failed
+            BatchStatus::Completed
+                | BatchStatus::Expired
+                | BatchStatus::Cancelled
+                | BatchStatus::Failed
         )
     }
-    
+
     pub fn is_processing(&self) -> bool {
         matches!(
             self,
-            BatchStatus::Validating 
-            | BatchStatus::InProgress 
-            | BatchStatus::Finalizing
+            BatchStatus::Validating | BatchStatus::InProgress | BatchStatus::Finalizing
         )
     }
 }
@@ -65,7 +65,7 @@ impl BatchRequestCounts {
     pub fn pending(&self) -> u32 {
         self.total.saturating_sub(self.completed + self.failed)
     }
-    
+
     pub fn completion_percentage(&self) -> f64 {
         if self.total == 0 {
             0.0
@@ -84,7 +84,11 @@ pub struct BatchRequest {
 }
 
 impl BatchRequest {
-    pub fn new(custom_id: impl Into<String>, model: impl Into<String>, max_tokens: u32) -> BatchRequestBuilder {
+    pub fn new(
+        custom_id: impl Into<String>,
+        model: impl Into<String>,
+        max_tokens: u32,
+    ) -> BatchRequestBuilder {
         BatchRequestBuilder {
             custom_id: custom_id.into(),
             method: "POST".to_string(),
@@ -123,7 +127,7 @@ impl BatchRequestBuilder {
         });
         self
     }
-    
+
     pub fn assistant(mut self, content: impl Into<String>) -> Self {
         self.body.messages.push(MessageParam {
             role: Role::Assistant,
@@ -131,47 +135,47 @@ impl BatchRequestBuilder {
         });
         self
     }
-    
+
     pub fn system(mut self, system: impl Into<String>) -> Self {
         self.body.system = Some(system.into());
         self
     }
-    
+
     pub fn temperature(mut self, temperature: f32) -> Self {
         self.body.temperature = Some(temperature);
         self
     }
-    
+
     pub fn top_p(mut self, top_p: f32) -> Self {
         self.body.top_p = Some(top_p);
         self
     }
-    
+
     pub fn top_k(mut self, top_k: u32) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
-    
+
     pub fn stop_sequences(mut self, stop_sequences: Vec<String>) -> Self {
         self.body.stop_sequences = Some(stop_sequences);
         self
     }
-    
+
     pub fn tools(mut self, tools: Vec<ToolDefinition>) -> Self {
         self.body.tools = Some(tools);
         self
     }
-    
+
     pub fn tool_choice(mut self, tool_choice: ToolChoice) -> Self {
         self.body.tool_choice = Some(tool_choice);
         self
     }
-    
+
     pub fn metadata(mut self, metadata: HashMap<String, String>) -> Self {
         self.body.metadata = Some(metadata);
         self
     }
-    
+
     pub fn build(self) -> BatchRequest {
         BatchRequest {
             custom_id: self.custom_id,
@@ -229,12 +233,12 @@ impl BatchCreateParams {
             completion_window: None,
         }
     }
-    
+
     pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
         self.metadata = metadata;
         self
     }
-    
+
     pub fn with_completion_window(mut self, hours: u32) -> Self {
         self.completion_window = Some(hours);
         self
@@ -253,12 +257,12 @@ impl BatchListParams {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn after(mut self, after: impl Into<String>) -> Self {
         self.after = Some(after.into());
         self
     }
-    
+
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit.clamp(1, 100));
         self
@@ -277,22 +281,22 @@ impl MessageBatch {
     pub fn is_complete(&self) -> bool {
         self.processing_status == BatchStatus::Completed
     }
-    
+
     pub fn has_failed(&self) -> bool {
         matches!(
             self.processing_status,
             BatchStatus::Failed | BatchStatus::Expired
         )
     }
-    
+
     pub fn can_cancel(&self) -> bool {
         self.processing_status.is_processing()
     }
-    
+
     pub fn completion_percentage(&self) -> f64 {
         self.request_counts.completion_percentage()
     }
-    
+
     pub fn pending_requests(&self) -> u32 {
         self.request_counts.pending()
     }
@@ -325,7 +329,10 @@ mod tests {
         assert_eq!(request.body.model, "claude-3-5-sonnet-latest");
         assert_eq!(request.body.max_tokens, 1024);
         assert_eq!(request.body.messages.len(), 1);
-        assert_eq!(request.body.system, Some("You are a helpful assistant".to_string()));
+        assert_eq!(
+            request.body.system,
+            Some("You are a helpful assistant".to_string())
+        );
         assert_eq!(request.body.temperature, Some(0.7));
     }
 
@@ -349,8 +356,7 @@ mod tests {
                 .build(),
         ];
 
-        let params = BatchCreateParams::new(requests)
-            .with_completion_window(12);
+        let params = BatchCreateParams::new(requests).with_completion_window(12);
 
         assert_eq!(params.requests.len(), 1);
         assert_eq!(params.completion_window, Some(12));

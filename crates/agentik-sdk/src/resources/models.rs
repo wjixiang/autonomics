@@ -1,5 +1,5 @@
 use crate::client::Anthropic;
-use crate::types::{AnthropicError, Result, ModelList, ModelListParams, ModelObject};
+use crate::types::{AnthropicError, ModelList, ModelListParams, ModelObject, Result};
 
 /// Resource for managing models
 pub struct ModelsResource<'a> {
@@ -51,11 +51,15 @@ impl<'a> ModelsResource<'a> {
         }
 
         let url = format!("{}/v1/models", self.client.config().base_url);
-        let request = self.client.http_client()
+        let request = self
+            .client
+            .http_client()
             .get(&url)
             .query(&query_params)
             .build()
-            .map_err(|e| AnthropicError::Connection { message: e.to_string() })?;
+            .map_err(|e| AnthropicError::Connection {
+                message: e.to_string(),
+            })?;
         let response = self.client.http_client().send(request).await?;
 
         if response.status().is_success() {
@@ -90,10 +94,11 @@ impl<'a> ModelsResource<'a> {
     /// ```
     pub async fn get(&self, model_id: &str) -> Result<ModelObject> {
         let url = format!("{}/v1/models/{}", self.client.config().base_url, model_id);
-        let request = self.client.http_client()
-            .get(&url)
-            .build()
-            .map_err(|e| AnthropicError::Connection { message: e.to_string() })?;
+        let request = self.client.http_client().get(&url).build().map_err(|e| {
+            AnthropicError::Connection {
+                message: e.to_string(),
+            }
+        })?;
         let response = self.client.http_client().send(request).await?;
 
         if response.status().is_success() {
@@ -127,7 +132,8 @@ impl<'a> ModelsResource<'a> {
     /// ```
     pub async fn list_by_family(&self, family: &str) -> Result<Vec<ModelObject>> {
         let all_models = self.list(None).await?;
-        let filtered_models = all_models.data
+        let filtered_models = all_models
+            .data
             .into_iter()
             .filter(|model| model.is_family(family))
             .collect();

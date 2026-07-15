@@ -1,4 +1,6 @@
-use gwascatalog_sdk::{AssociationQuery, ChromosomeAssociationQuery, GwasCatalogApi, PaginationQuery, RevealMode};
+use gwascatalog_sdk::{
+    AssociationQuery, ChromosomeAssociationQuery, GwasCatalogApi, PaginationQuery, RevealMode,
+};
 
 fn api() -> GwasCatalogApi {
     GwasCatalogApi::new()
@@ -154,9 +156,7 @@ async fn list_chromosome_associations_bp_filter() {
     let resp = api().list_chromosome_associations("1", &q).await.unwrap();
     let assoc = &resp._embedded.as_ref().unwrap().associations;
     for a in assoc.values() {
-        assert!(
-            a.base_pair_location >= 1000000 && a.base_pair_location <= 2000000
-        );
+        assert!(a.base_pair_location >= 1000000 && a.base_pair_location <= 2000000);
     }
 }
 
@@ -232,10 +232,7 @@ async fn list_trait_studies() {
         size: Some(3),
         ..Default::default()
     };
-    let resp = api()
-        .list_trait_studies("EFO_0001360", &q)
-        .await
-        .unwrap();
+    let resp = api().list_trait_studies("EFO_0001360", &q).await.unwrap();
     assert!(resp._embedded.is_some());
 }
 
@@ -292,10 +289,7 @@ async fn list_study_associations() {
 #[tokio::test]
 #[ignore]
 async fn get_nonexistent_trait_returns_api_error() {
-    let err = api()
-        .get_trait("EFO_NONEXISTENT")
-        .await
-        .unwrap_err();
+    let err = api().get_trait("EFO_NONEXISTENT").await.unwrap_err();
     assert!(matches!(
         err,
         gwascatalog_sdk::gwas_catalog::GwasCatalogError::Api { .. }
@@ -305,10 +299,7 @@ async fn get_nonexistent_trait_returns_api_error() {
 #[tokio::test]
 #[ignore]
 async fn get_nonexistent_study_returns_error() {
-    let err = api()
-        .get_study("GCST999999")
-        .await
-        .unwrap_err();
+    let err = api().get_study("GCST999999").await.unwrap_err();
     assert!(matches!(
         err,
         gwascatalog_sdk::gwas_catalog::GwasCatalogError::Api { .. }
@@ -318,10 +309,7 @@ async fn get_nonexistent_study_returns_error() {
 #[tokio::test]
 #[ignore]
 async fn get_nonexistent_trait_returns_error() {
-    let err = api()
-        .get_trait("EFO_NONEXISTENT")
-        .await
-        .unwrap_err();
+    let err = api().get_trait("EFO_NONEXISTENT").await.unwrap_err();
     assert!(matches!(
         err,
         gwascatalog_sdk::gwas_catalog::GwasCatalogError::Api { .. }

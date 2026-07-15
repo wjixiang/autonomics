@@ -44,13 +44,13 @@ impl ToolFunction for DescribeIcebergTableTool {
             return Ok(ToolResult::error("table identifier must not be empty"));
         }
 
-        let fields = self
-            .datalake
-            .table_schema(table)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
-                source: format!("failed to describe {table}: {e}").into(),
-            })?;
+        let fields =
+            self.datalake
+                .table_schema(table)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    source: format!("failed to describe {table}: {e}").into(),
+                })?;
 
         let columns: Vec<serde_json::Value> = fields
             .iter()

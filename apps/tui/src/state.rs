@@ -71,10 +71,19 @@ pub enum ChatLine {
         usage: Option<TurnUsage>,
     },
     Thinking(String),
-    ToolCall { name: String, input: String },
-    ToolResult { ok: bool, content: String },
+    ToolCall {
+        name: String,
+        input: String,
+    },
+    ToolResult {
+        ok: bool,
+        content: String,
+    },
     /// Tool is running in the background (sync phase expired).
-    ToolBackground { id: String, name: String },
+    ToolBackground {
+        id: String,
+        name: String,
+    },
     Error(String),
     Separator,
 }
@@ -267,7 +276,9 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
                     s.push_str(&text);
                 }
             } else {
-                state.messages.push(ChatLine::Assistant { text, usage: None });
+                state
+                    .messages
+                    .push(ChatLine::Assistant { text, usage: None });
                 state.streaming_assistant = Some(state.messages.len() - 1);
             }
             state.messages_version += 1;
@@ -340,7 +351,10 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
             state.scroll_to_bottom();
         }
         AgentEvent::ToolCallBackground { id, name } => {
-            state.messages.push(ChatLine::ToolBackground { id: id.clone(), name: name.clone() });
+            state.messages.push(ChatLine::ToolBackground {
+                id: id.clone(),
+                name: name.clone(),
+            });
             state.tool_tasks.push(ToolTaskInfo {
                 id,
                 name,

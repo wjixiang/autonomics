@@ -41,8 +41,7 @@ pub fn order_statistic(xs: &[f64], k: usize) -> Result<f64> {
     // select_nth_unstable_by partitions so that index `k-1` holds the k-th
     // order statistic (in sorted order) — exactly what we want, without a full
     // sort. We use `_by` because `f64` is not `Ord` (NaN has no total order).
-    let (before, elt, _after) =
-        sorted.select_nth_unstable_by(k - 1, |a, b| a.total_cmp(b));
+    let (before, elt, _after) = sorted.select_nth_unstable_by(k - 1, |a, b| a.total_cmp(b));
     let _ = before;
     Ok(*elt)
 }
@@ -101,9 +100,18 @@ mod tests {
     #[test]
     fn order_statistic_validation() {
         let xs = [1.0, 2.0];
-        assert!(matches!(order_statistic(&xs, 0), Err(StatError::InvalidInput(_))));
-        assert!(matches!(order_statistic(&xs, 3), Err(StatError::InvalidInput(_))));
-        assert!(matches!(order_statistic(&[], 1), Err(StatError::EmptyInput)));
+        assert!(matches!(
+            order_statistic(&xs, 0),
+            Err(StatError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            order_statistic(&xs, 3),
+            Err(StatError::InvalidInput(_))
+        ));
+        assert!(matches!(
+            order_statistic(&[], 1),
+            Err(StatError::EmptyInput)
+        ));
     }
 
     #[test]

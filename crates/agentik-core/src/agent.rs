@@ -330,10 +330,7 @@ impl Agent {
     /// goes idle, hits an error, or is cancelled.
     ///
     /// Returns when the agent is idle (lifecycle = IDLE) or aborted.
-    async fn run_session(
-        &mut self,
-        rx: &mut tokio::sync::mpsc::UnboundedReceiver<InternalEvent>,
-    ) {
+    async fn run_session(&mut self, rx: &mut tokio::sync::mpsc::UnboundedReceiver<InternalEvent>) {
         self.lifecycle.set_running();
         self.send_event(agentik_sdk::types::AgentEvent::LlmResponse(
             "🤖 Agent started".into(),

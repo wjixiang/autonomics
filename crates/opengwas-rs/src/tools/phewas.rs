@@ -4,12 +4,10 @@ use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
 
-
 use super::json_err;
 use crate::format::format_phewas;
 use crate::{OpengwasClient, types::*};
 use agentik_proc::tool;
-
 
 #[tool(
     name = "opengwas_phewas",
@@ -33,7 +31,9 @@ pub struct PhewasTool {
 impl ToolFunction for PhewasTool {
     type Input = PhewasInput;
 
-    fn timeout_seconds(&self) -> u64 { 120 }
+    fn timeout_seconds(&self) -> u64 {
+        120
+    }
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
         let result = self

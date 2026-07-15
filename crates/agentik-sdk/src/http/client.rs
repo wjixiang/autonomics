@@ -134,4 +134,3 @@ impl HttpClient {
         &self.client
     }
 }
-

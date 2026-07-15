@@ -59,15 +59,19 @@ impl<'a> MessagesResource<'a> {
         let request_id = self.client.http_client().extract_request_id(&response);
 
         let status = response.status().as_u16();
-        let body = response.text().await.map_err(|e| AnthropicError::from_status(status, format!(
-            "failed to read response body: {e}"
-        )))?;
+        let body = response.text().await.map_err(|e| {
+            AnthropicError::from_status(status, format!("failed to read response body: {e}"))
+        })?;
 
-        let mut message: Message = serde_json::from_str(&body)
-            .map_err(|e| AnthropicError::from_status(status, format!(
-                "failed to parse response as JSON: {e}, body: {}",
-                body.chars().take(500).collect::<String>()
-            )))?;
+        let mut message: Message = serde_json::from_str(&body).map_err(|e| {
+            AnthropicError::from_status(
+                status,
+                format!(
+                    "failed to parse response as JSON: {e}, body: {}",
+                    body.chars().take(500).collect::<String>()
+                ),
+            )
+        })?;
 
         message.request_id = request_id;
 
@@ -106,7 +110,8 @@ impl<'a> MessagesResource<'a> {
     /// }
     /// ```
     pub async fn create_stream(&self, params: MessageCreateParams) -> Result<MessageStream> {
-        self.create_stream_with_config(params, StreamConfig::default()).await
+        self.create_stream_with_config(params, StreamConfig::default())
+            .await
     }
 
     /// Create a streaming message with explicit `StreamConfig`.
@@ -398,4 +403,3 @@ mod tests {
         assert_eq!(params.messages[2].role, Role::User);
     }
 }
-

@@ -42,6 +42,9 @@ pub fn default_tool_set(
     tools.extend(opengwas_tools(file_storage));
     tools.extend(eutils_tools());
     tools.extend(datalake_tools(datalake.clone()));
-    tools.extend(data_engine_tools::registrations(data_engine_client, datalake));
+    tools.extend(data_engine_tools::registrations(
+        data_engine_client,
+        datalake,
+    ));
     Ok(tools)
 }

@@ -7,10 +7,7 @@ use async_trait::async_trait;
 use crate::storage::OpendalFileStorage;
 use agentik_proc::tool;
 
-#[tool(
-    name = "file_delete",
-    description = "Delete a file or directory."
-)]
+#[tool(name = "file_delete", description = "Delete a file or directory.")]
 pub struct FileDeleteInput {
     #[desc = "Path to the file or directory to delete."]
     pub path: String,
@@ -28,9 +25,7 @@ impl ToolFunction for FileDeleteTool {
         let op = &self.storage.op;
         let path = OpendalFileStorage::normalize_path(&input.path);
 
-        op.delete(&path)
-            .await
-            .map_err(|e| e.to_string())?;
+        op.delete(&path).await.map_err(|e| e.to_string())?;
 
         Ok(AgentToolResult::success_json(serde_json::json!({
             "path": input.path,

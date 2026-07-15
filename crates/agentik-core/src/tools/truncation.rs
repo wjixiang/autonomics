@@ -78,7 +78,8 @@ pub fn truncate_tool_output(content: &str, config: &TruncationConfig) -> Truncat
                 result,
                 "{head}\n\n... [output truncated: omitted {omitted} bytes] ...\n\
                  Use 'read' tool with offset/limit to view the full content.\n\n{tail}"
-            ).unwrap();
+            )
+            .unwrap();
         } else {
             result.push_str(content);
         }
@@ -155,12 +156,19 @@ mod tests {
             max_lines: 10,
             max_bytes: 1_000_000, // high byte limit
         };
-        let content = (0..20).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let content = (0..20)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let output = truncate_tool_output(&content, &config);
         assert!(output.truncated);
         assert!(output.content.contains("line 0"));
         assert!(output.content.contains("line 19"));
-        assert!(output.content.contains("[output truncated: omitted 10 lines]"));
+        assert!(
+            output
+                .content
+                .contains("[output truncated: omitted 10 lines]")
+        );
     }
 
     #[test]
@@ -190,7 +198,10 @@ mod tests {
             max_lines: 10,
             max_bytes: 1_000_000,
         };
-        let content = (0..10).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let content = (0..10)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let output = truncate_tool_output(&content, &config);
         // Exactly at limit — should not truncate
         assert!(!output.truncated);
@@ -202,7 +213,10 @@ mod tests {
             max_lines: 6, // head=3, tail=3
             max_bytes: 1_000_000,
         };
-        let content = (0..10).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let content = (0..10)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let output = truncate_tool_output(&content, &config);
         assert!(output.truncated);
         // Head should have lines 0-2

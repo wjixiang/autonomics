@@ -1,11 +1,10 @@
+use agentik_proc::tool;
 use agentik_sdk::types::ToolResult;
 use async_trait::async_trait;
-use agentik_proc::tool;
 
 use agentik_core::tools::{ToolError, ToolFunction};
 
 const MAX_RESULTS: usize = 100;
-
 
 #[tool(
     name = "glob",
@@ -43,9 +42,7 @@ impl ToolFunction for GlobTool {
                 }
             }
             Err(e) => {
-                return Ok(ToolResult::error(
-                    format!("Invalid glob pattern: {e}"),
-                ));
+                return Ok(ToolResult::error(format!("Invalid glob pattern: {e}")));
             }
         }
 

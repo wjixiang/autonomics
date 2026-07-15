@@ -38,7 +38,9 @@ async fn test_batches() {
 
 #[tokio::test]
 async fn test_user() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
     let resp = client.user().await.unwrap();
     assert!(resp.is_object());
 }
@@ -49,11 +51,16 @@ async fn test_user() {
 
 #[tokio::test]
 async fn test_gwasinfo_all_caches() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     // First call — fetches from remote.
     let all = client.gwasinfo_all().await.unwrap();
-    assert!(!all.is_empty(), "gwasinfo_all should return at least one dataset");
+    assert!(
+        !all.is_empty(),
+        "gwasinfo_all should return at least one dataset"
+    );
     println!("Total datasets cached: {}", all.len());
 
     // Verify the first entry has an id.
@@ -64,7 +71,9 @@ async fn test_gwasinfo_all_caches() {
 
 #[tokio::test]
 async fn test_gwasinfo_count() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let count = client.gwasinfo_count().await.unwrap();
     assert!(count > 0, "should have at least one dataset");
@@ -73,7 +82,9 @@ async fn test_gwasinfo_count() {
 
 #[tokio::test]
 async fn test_gwasinfo_count_matches_all() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     // Both should agree since they read from the same cache.
     let all = client.gwasinfo_all().await.unwrap();
@@ -83,14 +94,18 @@ async fn test_gwasinfo_count_matches_all() {
 
 #[tokio::test]
 async fn test_gwasinfo_by_id() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     // Grab a known ID from the full list.
     let all = client.gwasinfo_all().await.unwrap();
     let known_id = all[0].id.clone().unwrap();
 
     let result = client
-        .gwasinfo(&GwasInfoRequest { id: vec![known_id.clone()] })
+        .gwasinfo(&GwasInfoRequest {
+            id: vec![known_id.clone()],
+        })
         .await
         .unwrap();
     assert_eq!(result.len(), 1, "should find exactly one match");
@@ -99,20 +114,21 @@ async fn test_gwasinfo_by_id() {
 
 #[tokio::test]
 async fn test_gwasinfo_multiple_ids() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let all = client.gwasinfo_all().await.unwrap();
     if all.len() < 3 {
         println!("Not enough datasets to test multi-ID query, skipping");
         return;
     }
-    let ids: Vec<String> = all
-        .iter()
-        .take(3)
-        .filter_map(|g| g.id.clone())
-        .collect();
+    let ids: Vec<String> = all.iter().take(3).filter_map(|g| g.id.clone()).collect();
 
-    let result = client.gwasinfo(&GwasInfoRequest { id: ids.clone() }).await.unwrap();
+    let result = client
+        .gwasinfo(&GwasInfoRequest { id: ids.clone() })
+        .await
+        .unwrap();
     assert_eq!(result.len(), ids.len());
     for gwas in &result {
         assert!(ids.contains(&gwas.id.clone().unwrap()));
@@ -121,7 +137,9 @@ async fn test_gwasinfo_multiple_ids() {
 
 #[tokio::test]
 async fn test_gwasinfo_empty_ids() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let result = client
         .gwasinfo(&GwasInfoRequest { id: vec![] })
@@ -132,7 +150,9 @@ async fn test_gwasinfo_empty_ids() {
 
 #[tokio::test]
 async fn test_gwasinfo_nonexistent_id() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let result = client
         .gwasinfo(&GwasInfoRequest {
@@ -145,16 +165,15 @@ async fn test_gwasinfo_nonexistent_id() {
 
 #[tokio::test]
 async fn test_gwasinfo_refresh() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let all = client.gwasinfo_all().await.unwrap();
     let count_before = all.len();
 
     let refreshed = client.gwasinfo_refresh().await.unwrap();
-    assert!(
-        !refreshed.is_empty(),
-        "refreshed data should not be empty"
-    );
+    assert!(!refreshed.is_empty(), "refreshed data should not be empty");
     // After refresh, count should be the same (or updated if catalog changed).
     let count_after = client.gwasinfo_count().await.unwrap();
     println!("Before: {count_before}, After: {count_after}");
@@ -166,7 +185,9 @@ async fn test_gwasinfo_refresh() {
 
 #[tokio::test]
 async fn test_gwasinfo_files() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let all = client.gwasinfo_all().await.unwrap();
     let known_id = all[0].id.clone().unwrap();
@@ -187,7 +208,9 @@ async fn test_gwasinfo_files() {
 
 #[tokio::test]
 async fn test_associations() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     // Use a well-known variant and dataset.
     let resp = client
@@ -205,7 +228,10 @@ async fn test_associations() {
         .await
         .unwrap();
     assert!(resp.is_array() || resp.is_object());
-    println!("associations response: {}", serde_json::to_string_pretty(&resp).unwrap());
+    println!(
+        "associations response: {}",
+        serde_json::to_string_pretty(&resp).unwrap()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +240,9 @@ async fn test_associations() {
 
 #[tokio::test]
 async fn test_tophits() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client
         .tophits(&TophitsRequest {
@@ -238,7 +266,9 @@ async fn test_tophits() {
 
 #[tokio::test]
 async fn test_phewas() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client
         .phewas(&PhewasRequest {
@@ -258,7 +288,9 @@ async fn test_phewas() {
 
 #[tokio::test]
 async fn test_variants_rsid() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client
         .variants_rsid(&VariantsRsidRequest {
@@ -271,7 +303,9 @@ async fn test_variants_rsid() {
 
 #[tokio::test]
 async fn test_variants_chrpos() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client
         .variants_chrpos(&VariantsChrposRequest {
@@ -285,7 +319,9 @@ async fn test_variants_chrpos() {
 
 #[tokio::test]
 async fn test_variants_gene() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client.variants_gene("ENSG00000123374", None).await.unwrap();
     assert!(resp.is_object() || resp.is_array());
@@ -293,7 +329,9 @@ async fn test_variants_gene() {
 
 #[tokio::test]
 async fn test_variants_afl2() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client
         .variants_afl2(&VariantsAfl2Request {
@@ -308,7 +346,9 @@ async fn test_variants_afl2() {
 
 #[tokio::test]
 async fn test_variants_afl2_snplist() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client.variants_afl2_snplist().await.unwrap();
     assert!(resp.is_object() || resp.is_array());
@@ -320,7 +360,9 @@ async fn test_variants_afl2_snplist() {
 
 #[tokio::test]
 async fn test_ld_clump() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client
         .ld_clump(&LdClumpRequest {
@@ -338,7 +380,9 @@ async fn test_ld_clump() {
 
 #[tokio::test]
 async fn test_ld_matrix() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client
         .ld_matrix(&LdMatrixRequest {
@@ -352,7 +396,9 @@ async fn test_ld_matrix() {
 
 #[tokio::test]
 async fn test_ld_reflookup() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client
         .ld_reflookup(&LdReflookupRequest {
@@ -370,7 +416,9 @@ async fn test_ld_reflookup() {
 
 #[tokio::test]
 async fn test_edit_list() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client
         .edit_list(&EditListQuery {
@@ -401,7 +449,9 @@ async fn test_edit_list() {
 
 #[tokio::test]
 async fn test_qc_list() {
-    let Some(client) = require_client() else { return };
+    let Some(client) = require_client() else {
+        return;
+    };
 
     let resp = client.qc_list().await;
     match resp {

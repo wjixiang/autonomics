@@ -1,10 +1,10 @@
 use std::io::Cursor;
 use std::time::Duration;
 
-use agentik_sdk::types::ToolResult;
-use async_trait::async_trait;
 use agentik_core::tools::{ToolError, ToolFunction};
 use agentik_proc::tool;
+use agentik_sdk::types::ToolResult;
+use async_trait::async_trait;
 
 /// Per-request fetch timeout. The framework ceiling (`timeout_seconds`) is set
 /// above this so a legitimate slow fetch is never pre-empted by the wrapper.
@@ -16,8 +16,7 @@ const MAX_BYTES: usize = 5 * 1024 * 1024;
 /// Maximum characters of converted text returned to the model.
 const MAX_OUTPUT_CHARS: usize = 30_000;
 /// Browser-like User-Agent so trivial bot-detection doesn't block the fetch.
-const BROWSER_UA: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
+const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) \
      Chrome/143.0.0.0 Safari/537.36";
 
 #[tool(
@@ -44,9 +43,10 @@ impl ToolFunction for WebFetchTool {
         let parsed = match reqwest::Url::parse(&input.url) {
             Ok(u) if u.scheme() == "http" || u.scheme() == "https" => u,
             _ => {
-                return Ok(ToolResult::error(
-                    format!("URL must be http(s)://... : got {:?}", input.url),
-                ));
+                return Ok(ToolResult::error(format!(
+                    "URL must be http(s)://... : got {:?}",
+                    input.url
+                )));
             }
         };
 
@@ -59,9 +59,9 @@ impl ToolFunction for WebFetchTool {
         {
             Ok(c) => c,
             Err(e) => {
-                return Ok(ToolResult::error(
-                    format!("Failed to build HTTP client: {e}"),
-                ));
+                return Ok(ToolResult::error(format!(
+                    "Failed to build HTTP client: {e}"
+                )));
             }
         };
 
@@ -69,18 +69,16 @@ impl ToolFunction for WebFetchTool {
         let resp = match client.get(parsed).send().await {
             Ok(r) => r,
             Err(e) => {
-                return Ok(ToolResult::error(
-                    format!("Failed to fetch: {e}"),
-                ));
+                return Ok(ToolResult::error(format!("Failed to fetch: {e}")));
             }
         };
 
         // 4. Size guard (declared Content-Length first, then actual bytes).
         if let Some(len) = resp.content_length() {
             if len as usize > MAX_BYTES {
-                return Ok(ToolResult::error(
-                    format!("Response too large ({len} bytes, max {MAX_BYTES})"),
-                ));
+                return Ok(ToolResult::error(format!(
+                    "Response too large ({len} bytes, max {MAX_BYTES})"
+                )));
             }
         }
         // 5. Content-type dispatch (capture before bytes() consumes resp).
@@ -94,15 +92,16 @@ impl ToolFunction for WebFetchTool {
         let bytes = match resp.bytes().await {
             Ok(b) => b,
             Err(e) => {
-                return Ok(ToolResult::error(
-                    format!("Failed to read response body: {e}"),
-                ));
+                return Ok(ToolResult::error(format!(
+                    "Failed to read response body: {e}"
+                )));
             }
         };
         if bytes.len() > MAX_BYTES {
-            return Ok(ToolResult::error(
-                format!("Response too large ({} bytes, max {MAX_BYTES})", bytes.len()),
-            ));
+            return Ok(ToolResult::error(format!(
+                "Response too large ({} bytes, max {MAX_BYTES})",
+                bytes.len()
+            )));
         }
 
         let text = match convert(&content_type, &bytes) {
@@ -121,7 +120,12 @@ impl ToolFunction for WebFetchTool {
 /// - other textual types (text/*, json, xml, javascript, svg) → UTF-8 pass-through.
 /// - anything else (images, pdf, octet-stream) → error.
 fn convert(content_type: &str, bytes: &[u8]) -> Result<String, String> {
-    let mime = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let mime = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     if mime == "text/html" || mime == "application/xhtml+xml" {
         let html = String::from_utf8_lossy(bytes);
         html2text::from_read(&mut Cursor::new(html.into_owned().into_bytes()), usize::MAX)
@@ -229,7 +233,11 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(result.is_error.is_none(), "fetch failed: {:?}", result.content);
+        assert!(
+            result.is_error.is_none(),
+            "fetch failed: {:?}",
+            result.content
+        );
         match &result.content {
             agentik_sdk::types::ToolResultContent::Text(t) => {
                 assert!(t.contains("Example Domain"), "got: {t}");

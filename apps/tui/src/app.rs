@@ -3,16 +3,19 @@ use std::time::{Duration, Instant};
 use agentik_sdk::AuthMethod;
 use agentik_sdk::model::model_pool::ModelPoolConfig;
 use agentik_sdk::model::{ModelInfo, ProviderConfig};
-use crossterm::event::{self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
+};
 use ratatui::{
     Frame,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     prelude::{Terminal, Widget},
 };
-use std::io::{stdout, Stdout, Write};
 use ratatui_comfy_tabs::{TabBarAlign, TabDirection, TabNav, TabNavState};
 use rusqlite::Connection;
+use std::io::{Stdout, Write, stdout};
 use uuid::Uuid;
 
 use crate::state::{self, AgentStatus, AppState, InputMode, MainTabState};
@@ -685,7 +688,10 @@ impl App {
             // Enter: Shift/Alt+Enter inserts a newline (multiline compose);
             // a plain Enter sends the message and returns to browse mode.
             KeyCode::Enter => {
-                if key.modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) {
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT)
+                {
                     // Alt is a fallback for terminals that don't report Shift on Enter.
                     if idle {
                         ts.input.insert_newline();
@@ -764,8 +770,8 @@ impl App {
             // Up: move to the next-older match.
             KeyCode::Up => {
                 if !ts.history_search_matches.is_empty() {
-                    ts.history_search_selected = (ts.history_search_selected + 1)
-                        .min(ts.history_search_matches.len() - 1);
+                    ts.history_search_selected =
+                        (ts.history_search_selected + 1).min(ts.history_search_matches.len() - 1);
                     load_selected_history_match(ts);
                 }
             }
@@ -845,13 +851,11 @@ impl App {
         // Enter inside a form validates and saves.
         if code == KeyCode::Enter {
             if matches!(cs.mode, state::ConfigMode::EditProvider(_)) {
-                cs.message = crate::config_db::save_provider(cs, &self.conn)
-                    .unwrap_or_else(|e| e);
+                cs.message = crate::config_db::save_provider(cs, &self.conn).unwrap_or_else(|e| e);
                 return;
             }
             if matches!(cs.mode, state::ConfigMode::EditModel(_)) {
-                cs.message = crate::config_db::save_model(cs, &self.conn)
-                    .unwrap_or_else(|e| e);
+                cs.message = crate::config_db::save_model(cs, &self.conn).unwrap_or_else(|e| e);
                 return;
             }
         }
@@ -938,7 +942,11 @@ fn enter_insert(ts: &mut crate::state::AgentTabState) {
 }
 
 /// Run a small vim edit/motion closure `n` times against the agent state.
-fn repeat<F: FnMut(&mut crate::state::AgentTabState)>(n: usize, mut f: F, ts: &mut crate::state::AgentTabState) {
+fn repeat<F: FnMut(&mut crate::state::AgentTabState)>(
+    n: usize,
+    mut f: F,
+    ts: &mut crate::state::AgentTabState,
+) {
     for _ in 0..n {
         f(ts);
     }

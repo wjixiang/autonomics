@@ -30,7 +30,10 @@ macro_rules! format_smoke {
 
             // plain read returns rows
             let ctx = SessionContext::new();
-            let df = ctx.$read(path.to_str().unwrap(), BioReadOptions::default()).await.unwrap();
+            let df = ctx
+                .$read(path.to_str().unwrap(), BioReadOptions::default())
+                .await
+                .unwrap();
             let first_col = df.schema().field(0).name().clone();
             let batches = df.collect().await.unwrap();
             let count: usize = batches.iter().map(|b| b.num_rows()).sum();
@@ -38,7 +41,10 @@ macro_rules! format_smoke {
 
             // projection pushdown returns only the requested column
             let ctx = SessionContext::new();
-            let df = ctx.$read(path.to_str().unwrap(), BioReadOptions::default()).await.unwrap();
+            let df = ctx
+                .$read(path.to_str().unwrap(), BioReadOptions::default())
+                .await
+                .unwrap();
             let projected = df.select_columns(&[first_col.as_str()]).unwrap();
             assert_eq!(
                 projected.schema().fields().len(),
@@ -53,7 +59,9 @@ macro_rules! format_smoke {
 
             // missing file errors
             let ctx = SessionContext::new();
-            let res = ctx.$read("/nonexistent/file", BioReadOptions::default()).await;
+            let res = ctx
+                .$read("/nonexistent/file", BioReadOptions::default())
+                .await;
             assert!(res.is_err(), "{}: expected error for missing file", $file);
         }
     };
@@ -86,13 +94,18 @@ async fn read_cram_smoke() {
 
     // missing file errors
     let ctx = SessionContext::new();
-    let res = ctx.read_cram("/nonexistent/file", BioReadOptions::default()).await;
+    let res = ctx
+        .read_cram("/nonexistent/file", BioReadOptions::default())
+        .await;
     assert!(res.is_err(), "cram: expected error for missing file");
 
     // schema inference should work (header-only); decode may or may not succeed
     // depending on embedded references — accept either.
     let ctx = SessionContext::new();
-    match ctx.read_cram(path.to_str().unwrap(), BioReadOptions::default()).await {
+    match ctx
+        .read_cram(path.to_str().unwrap(), BioReadOptions::default())
+        .await
+    {
         Ok(df) => {
             let _ = df.collect().await; // best effort
         }

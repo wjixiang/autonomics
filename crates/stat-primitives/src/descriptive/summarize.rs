@@ -224,8 +224,7 @@ pub fn kurtosis(xs: &[f64]) -> Result<f64> {
     // G₂ = [(n+1)(n−1) / ((n−2)(n−3))] · (m4/m2²) − [3(n−1)² / ((n−2)(n−3))]
     // (Westfall 2014 unbiased excess kurtosis; 0 for a normal sample.)
     let denom = (nf - 2.0) * (nf - 3.0);
-    let g2 = (nf + 1.0) * (nf - 1.0) / denom * (m4 / (m2 * m2))
-        - 3.0 * (nf - 1.0).powi(2) / denom;
+    let g2 = (nf + 1.0) * (nf - 1.0) / denom * (m4 / (m2 * m2)) - 3.0 * (nf - 1.0).powi(2) / denom;
     Ok(g2)
 }
 

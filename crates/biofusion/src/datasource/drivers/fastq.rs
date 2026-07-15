@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
 use datafusion::error::Result;
-use oxbow::sequence::FastqScanner;
 use oxbow::Select;
+use oxbow::sequence::FastqScanner;
 
-use super::super::core::{buf_reader, map_ext, BioBatchIter, BioDriver, BioInput};
+use super::super::core::{BioBatchIter, BioDriver, BioInput, buf_reader, map_ext};
 
 fn scanner() -> Result<FastqScanner> {
     FastqScanner::new(Select::All).map_err(map_ext)

@@ -54,7 +54,13 @@ impl ProviderRow {
         conn.execute(
             "INSERT INTO providers (name, provider_type, base_url, api_key, auth_method)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&p.name, &p.provider_type, &p.base_url, &p.api_key, &p.auth_method),
+            (
+                &p.name,
+                &p.provider_type,
+                &p.base_url,
+                &p.api_key,
+                &p.auth_method,
+            ),
         )?;
         Ok(conn.last_insert_rowid())
     }
@@ -64,7 +70,14 @@ impl ProviderRow {
             "UPDATE providers
                 SET name = ?1, provider_type = ?2, base_url = ?3, api_key = ?4, auth_method = ?5
               WHERE id = ?6",
-            (&p.name, &p.provider_type, &p.base_url, &p.api_key, &p.auth_method, id),
+            (
+                &p.name,
+                &p.provider_type,
+                &p.base_url,
+                &p.api_key,
+                &p.auth_method,
+                id,
+            ),
         )?;
         Ok(())
     }
@@ -130,10 +143,16 @@ impl ModelRow {
                 supports_thinking, input_token_price, output_token_price
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             (
-                &m.model_name, m.provider_id, m.context_length, m.max_output_tokens,
-                m.vision_ability as i32, m.supports_function_calling as i32,
-                m.supports_streaming as i32, m.supports_thinking as i32,
-                m.input_token_price, m.output_token_price,
+                &m.model_name,
+                m.provider_id,
+                m.context_length,
+                m.max_output_tokens,
+                m.vision_ability as i32,
+                m.supports_function_calling as i32,
+                m.supports_streaming as i32,
+                m.supports_thinking as i32,
+                m.input_token_price,
+                m.output_token_price,
             ),
         )?;
         Ok(conn.last_insert_rowid())
@@ -149,10 +168,17 @@ impl ModelRow {
                     output_token_price = ?10
               WHERE id = ?11",
             (
-                &m.model_name, m.provider_id, m.context_length, m.max_output_tokens,
-                m.vision_ability as i32, m.supports_function_calling as i32,
-                m.supports_streaming as i32, m.supports_thinking as i32,
-                m.input_token_price, m.output_token_price, id,
+                &m.model_name,
+                m.provider_id,
+                m.context_length,
+                m.max_output_tokens,
+                m.vision_ability as i32,
+                m.supports_function_calling as i32,
+                m.supports_streaming as i32,
+                m.supports_thinking as i32,
+                m.input_token_price,
+                m.output_token_price,
+                id,
             ),
         )?;
         Ok(())
@@ -201,7 +227,7 @@ impl ModelInput {
 // using the database. Extracted from `app.rs` to keep persistence
 // logic next to the data model.
 
-use crate::state::{ConfigMode, ConfigPane, ConfigTabState, ProviderForm, ModelForm};
+use crate::state::{ConfigMode, ConfigPane, ConfigTabState, ModelForm, ProviderForm};
 
 /// Re-read providers and models from the database, clamping selections.
 pub fn reload_config(cs: &mut ConfigTabState, conn: &Connection) {

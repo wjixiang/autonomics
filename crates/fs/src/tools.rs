@@ -22,11 +22,21 @@ use crate::storage::OpendalFileStorage;
 pub fn file_base_registrations(storage: Arc<OpendalFileStorage>) -> Vec<ToolRegistration> {
     use agentik_core::tools::ToolRegistration as R;
     vec![
-        R::from(file_read::FileReadTool { storage: storage.clone() }),
-        R::from(file_write::FileWriteTool { storage: storage.clone() }),
-        R::from(file_edit::FileEditTool { storage: storage.clone() }),
-        R::from(file_list::FileListTool { storage: storage.clone() }),
-        R::from(file_delete::FileDeleteTool { storage: storage.clone() }),
+        R::from(file_read::FileReadTool {
+            storage: storage.clone(),
+        }),
+        R::from(file_write::FileWriteTool {
+            storage: storage.clone(),
+        }),
+        R::from(file_edit::FileEditTool {
+            storage: storage.clone(),
+        }),
+        R::from(file_list::FileListTool {
+            storage: storage.clone(),
+        }),
+        R::from(file_delete::FileDeleteTool {
+            storage: storage.clone(),
+        }),
         R::from(file_info::FileInfoTool { storage }),
     ]
 }

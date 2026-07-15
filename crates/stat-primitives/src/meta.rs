@@ -96,10 +96,7 @@ pub fn ivw(
 
     if random_effects && tau_sq > 0.0 {
         // Refit with DerSimonian–Laird adjusted weights.
-        let re_weights: Vec<f64> = se_outcome
-            .iter()
-            .map(|s| 1.0 / (s * s + tau_sq))
-            .collect();
+        let re_weights: Vec<f64> = se_outcome.iter().map(|s| 1.0 / (s * s + tau_sq)).collect();
         let re_fit = wls(&[beta_exposure], beta_outcome, &re_weights, false)?;
         Ok(IvwResult {
             estimate: re_fit.coefficients[0],
@@ -175,20 +172,12 @@ fn dsl_tau_squared(weights: &[f64], q: f64, df: f64) -> f64 {
     let w_sum = compensated_sum(weights.iter().copied());
     let w_sq_sum = compensated_sum(weights.iter().map(|w| w * w));
     let c = w_sum - w_sq_sum / w_sum;
-    if c > 0.0 && q > df {
-        (q - df) / c
-    } else {
-        0.0
-    }
+    if c > 0.0 && q > df { (q - df) / c } else { 0.0 }
 }
 
 /// I² as a percentage: `max(0, (Q − df) / Q) × 100`.
 fn i_squared(q: f64, df: f64) -> f64 {
-    if q > df {
-        (q - df) / q * 100.0
-    } else {
-        0.0
-    }
+    if q > df { (q - df) / q * 100.0 } else { 0.0 }
 }
 
 /// χ² survival function: `1 − F(Q; df)`. Returns 1.0 when Q ≤ 0.
@@ -404,8 +393,14 @@ mod tests {
         let se = [0.05_f64, 0.05, 0.05];
 
         // Empty input.
-        assert!(matches!(ivw(&[], &[], &[], false), Err(StatError::EmptyInput)));
-        assert!(matches!(mr_egger(&[], &[], &[]), Err(StatError::EmptyInput)));
+        assert!(matches!(
+            ivw(&[], &[], &[], false),
+            Err(StatError::EmptyInput)
+        ));
+        assert!(matches!(
+            mr_egger(&[], &[], &[]),
+            Err(StatError::EmptyInput)
+        ));
 
         // Length mismatch.
         assert!(matches!(

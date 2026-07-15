@@ -7,7 +7,7 @@
 //! The caller is responsible for keeping the tokio runtime alive for
 //! the lifetime of this struct.
 
-pub mod tools;
 pub mod runtime;
+pub mod tools;
 
 pub use runtime::AgentRuntime;

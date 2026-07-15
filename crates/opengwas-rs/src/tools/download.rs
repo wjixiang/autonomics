@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
-use agentik_sdk::types::ToolResult as AgentToolResult;
-use async_trait::async_trait;
 use super::json_err;
 use crate::format::format_download;
 use crate::{OpengwasClient, types::GwasInfoFilesRequest};
+use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
 use agentik_proc::tool;
+use agentik_sdk::types::ToolResult as AgentToolResult;
+use async_trait::async_trait;
 use fs::OpendalFileStorage;
 
 #[tool(
@@ -29,11 +29,15 @@ fn parse_file_entries(resp: &serde_json::Value) -> Vec<(String, String, String)>
         .into_iter()
         .flatten()
         .flat_map(|(study_id, files)| {
-            files.as_array().into_iter().flatten().filter_map(move |url_val| {
-                let url = url_val.as_str()?;
-                let filename = url.rsplit('/').next()?;
-                Some((study_id.clone(), filename.to_string(), url.to_string()))
-            })
+            files
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(move |url_val| {
+                    let url = url_val.as_str()?;
+                    let filename = url.rsplit('/').next()?;
+                    Some((study_id.clone(), filename.to_string(), url.to_string()))
+                })
         })
         .collect()
 }
@@ -90,9 +94,11 @@ impl ToolFunction for DownloadFilesTool {
             }));
         }
 
-        Ok(AgentToolResult::success(format_download(&serde_json::json!({
-            "count": downloaded.len(),
-            "files": downloaded,
-        }))))
+        Ok(AgentToolResult::success(format_download(
+            &serde_json::json!({
+                "count": downloaded.len(),
+                "files": downloaded,
+            }),
+        )))
     }
 }

@@ -11,4 +11,3 @@ pub mod error;
 
 pub use config::IcebergConfig;
 pub use datalake::Datalake;
-

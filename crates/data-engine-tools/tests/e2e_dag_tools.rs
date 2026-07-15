@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use agentik_core::tools::Toolset;
-use agentik_sdk::types::tools::{ToolUse, ToolResult};
+use agentik_sdk::types::tools::{ToolResult, ToolUse};
 use data_engine::data_engine::DataEngine;
 use data_engine::runtime::spawn_with_engine;
 use fs::OpendalFileStorage;
@@ -16,7 +16,11 @@ fn build_tooluse(id: &str, name: &str, input: serde_json::Value) -> ToolUse {
 }
 
 fn check_ok(result: &ToolResult, label: &str) {
-    assert!(!result.is_error.unwrap_or(false), "{label} failed: {:?}", result.content);
+    assert!(
+        !result.is_error.unwrap_or(false),
+        "{label} failed: {:?}",
+        result.content
+    );
 }
 
 #[tokio::test]
@@ -24,8 +28,8 @@ async fn test_add_source_sql_run_dag() {
     // 1. Set up file storage and write test data
     let file_storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let csv_path = std::path::Path::new(&manifest_dir)
-        .join("../data-engine/test_datasets/insurance.csv");
+    let csv_path =
+        std::path::Path::new(&manifest_dir).join("../data-engine/test_datasets/insurance.csv");
     let csv_data = std::fs::read(csv_path).unwrap();
     file_storage
         .op
@@ -51,7 +55,11 @@ async fn test_add_source_sql_run_dag() {
     // 4. Add source node
     let results = toolset
         .execute(
-            &[build_tooluse("tc1", "add_source_node", json!({"id": "src", "path": "/insurance.csv"}))],
+            &[build_tooluse(
+                "tc1",
+                "add_source_node",
+                json!({"id": "src", "path": "/insurance.csv"}),
+            )],
             None,
             None,
         )
@@ -63,10 +71,14 @@ async fn test_add_source_sql_run_dag() {
     // 5. Add SQL node
     let results = toolset
         .execute(
-            &[build_tooluse("tc2", "add_sql_node", json!({
-                "id": "sql",
-                "query": "SELECT age, charges FROM sql__default WHERE age > 30 LIMIT 5"
-            }))],
+            &[build_tooluse(
+                "tc2",
+                "add_sql_node",
+                json!({
+                    "id": "sql",
+                    "query": "SELECT age, charges FROM sql__default WHERE age > 30 LIMIT 5"
+                }),
+            )],
             None,
             None,
         )
@@ -78,7 +90,11 @@ async fn test_add_source_sql_run_dag() {
     // 6. Add edge (src -> sql) via tool
     let results = toolset
         .execute(
-            &[build_tooluse("tc3", "add_edge", json!({"from": "src", "to": "sql"}))],
+            &[build_tooluse(
+                "tc3",
+                "add_edge",
+                json!({"from": "src", "to": "sql"}),
+            )],
             None,
             None,
         )
@@ -90,11 +106,15 @@ async fn test_add_source_sql_run_dag() {
     // 7. Add sink node
     let results = toolset
         .execute(
-            &[build_tooluse("tc4", "add_sink_node", json!({
-                "id": "sink",
-                "path": "/output.csv",
-                "format": "csv"
-            }))],
+            &[build_tooluse(
+                "tc4",
+                "add_sink_node",
+                json!({
+                    "id": "sink",
+                    "path": "/output.csv",
+                    "format": "csv"
+                }),
+            )],
             None,
             None,
         )
@@ -106,7 +126,11 @@ async fn test_add_source_sql_run_dag() {
     // 8. Edge (sql -> sink) via tool
     let results = toolset
         .execute(
-            &[build_tooluse("tc5", "add_edge", json!({"from": "sql", "to": "sink"}))],
+            &[build_tooluse(
+                "tc5",
+                "add_edge",
+                json!({"from": "sql", "to": "sink"}),
+            )],
             None,
             None,
         )

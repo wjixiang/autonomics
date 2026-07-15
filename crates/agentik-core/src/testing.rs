@@ -1,7 +1,7 @@
+use agentik_sdk::http::auth::AuthMethod;
 use agentik_sdk::model::model_pool::ModelPool;
 use agentik_sdk::model::{Model, ModelInfo, ProviderConfig};
 use agentik_sdk::provider::client::MockApiClient;
-use agentik_sdk::http::auth::AuthMethod;
 
 pub fn dummy_model_info(name: &str) -> ModelInfo {
     ModelInfo {

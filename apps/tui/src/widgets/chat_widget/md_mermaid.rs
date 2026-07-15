@@ -139,10 +139,7 @@ fn render_fallback(
     // Error banner.
     lines.push(Line::from(vec![
         Span::styled("│ ".to_string(), side),
-        Span::styled(
-            format!("render failed: {err}"),
-            error_style,
-        ),
+        Span::styled(format!("render failed: {err}"), error_style),
         Span::styled("│".to_string(), side),
     ]));
 
@@ -169,10 +166,7 @@ fn render_fallback(
     if truncated {
         lines.push(Line::from(vec![
             Span::styled("│ ".to_string(), side),
-            Span::styled(
-                format!("… ({more} more lines)"),
-                body_style,
-            ),
+            Span::styled(format!("… ({more} more lines)"), body_style),
             Span::styled("│".to_string(), side),
         ]));
     }
@@ -195,9 +189,7 @@ fn push_top_border(
         Span::styled("╭".to_string(), border),
         Span::styled(
             label.to_string(),
-            Style::default()
-                .fg(tokens.syntax.inline_code)
-                .bold(),
+            Style::default().fg(tokens.syntax.inline_code).bold(),
         ),
         Span::styled(
             format!(
@@ -284,10 +276,7 @@ mod tests {
             .join("\n");
         assert!(joined.contains("Build"), "missing Build label:\n{joined}");
         assert!(joined.contains("Test"), "missing Test label:\n{joined}");
-        assert!(
-            joined.contains("Deploy"),
-            "missing Deploy label:\n{joined}"
-        );
+        assert!(joined.contains("Deploy"), "missing Deploy label:\n{joined}");
         assert!(joined.starts_with('╭'), "missing top-border:\n{joined}");
         assert!(joined.contains('─'), "missing horizontal border:\n{joined}");
     }

@@ -7,7 +7,7 @@ impl RequestId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
-    
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

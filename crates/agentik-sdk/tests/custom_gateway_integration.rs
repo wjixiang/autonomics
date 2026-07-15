@@ -283,8 +283,8 @@ async fn test_bearer_token_authentication() {
                     "https://your-custom-gateway.example.com/v1/anthropic".to_string()
                 }),
             )
-                .with_auth_method(AuthMethod::Bearer)
-                .with_timeout(Duration::from_secs(45)),
+            .with_auth_method(AuthMethod::Bearer)
+            .with_timeout(Duration::from_secs(45)),
         )
         .expect("Should create Bearer auth client")
     };

@@ -109,9 +109,7 @@ impl MdTokens {
                 header: Color::Rgb(180, 180, 255),
                 border: Color::Rgb(100, 100, 120),
             },
-            accent: MdAccent {
-                link: Color::Cyan,
-            },
+            accent: MdAccent { link: Color::Cyan },
         }
     }
 

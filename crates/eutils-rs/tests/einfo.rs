@@ -16,9 +16,18 @@ async fn einfo_lists_all_databases() -> Result<()> {
         "expected 20+ databases, got {}",
         dblist.len()
     );
-    assert!(dblist.iter().any(|d| d == "pubmed"), "pubmed not in database list");
-    assert!(dblist.iter().any(|d| d == "gene"), "gene not in database list");
-    assert!(dblist.iter().any(|d| d == "nucleotide"), "nucleotide not in database list");
+    assert!(
+        dblist.iter().any(|d| d == "pubmed"),
+        "pubmed not in database list"
+    );
+    assert!(
+        dblist.iter().any(|d| d == "gene"),
+        "gene not in database list"
+    );
+    assert!(
+        dblist.iter().any(|d| d == "nucleotide"),
+        "nucleotide not in database list"
+    );
 
     Ok(())
 }
@@ -37,13 +46,12 @@ async fn einfo_single_database() -> Result<()> {
     let info = &dbinfo[0];
     assert_eq!(info.dbname, "pubmed");
 
-    let n: u64 = info
-        .count
-        .as_deref()
-        .unwrap_or("0")
-        .parse()
-        .unwrap_or(0);
-    assert!(n > 35_000_000, "PubMed should have > 35M records, got {}", n);
+    let n: u64 = info.count.as_deref().unwrap_or("0").parse().unwrap_or(0);
+    assert!(
+        n > 35_000_000,
+        "PubMed should have > 35M records, got {}",
+        n
+    );
 
     Ok(())
 }
@@ -60,12 +68,7 @@ async fn einfo_gene_database() -> Result<()> {
     let info = &dbinfo[0];
     assert_eq!(info.dbname, "gene");
 
-    let n: u64 = info
-        .count
-        .as_deref()
-        .unwrap_or("0")
-        .parse()
-        .unwrap_or(0);
+    let n: u64 = info.count.as_deref().unwrap_or("0").parse().unwrap_or(0);
     assert!(n > 50_000, "Gene should have > 50k records, got {}", n);
 
     Ok(())

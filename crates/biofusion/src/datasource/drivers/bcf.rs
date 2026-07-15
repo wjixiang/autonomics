@@ -10,7 +10,7 @@ use datafusion::error::Result;
 use oxbow::variant::BcfScanner;
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{byte_reader, map_ext, BioBatchIter, BioDriver, BioInput};
+use super::super::core::{BioBatchIter, BioDriver, BioInput, byte_reader, map_ext};
 
 fn scanner(header: noodles::vcf::Header) -> Result<BcfScanner> {
     BcfScanner::new(

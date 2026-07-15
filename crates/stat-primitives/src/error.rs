@@ -45,7 +45,10 @@ impl fmt::Display for StatError {
         match self {
             StatError::EmptyInput => write!(f, "input is empty: at least one value required"),
             StatError::InsufficientData { min, actual } => {
-                write!(f, "insufficient data: need at least {min} value(s), got {actual}")
+                write!(
+                    f,
+                    "insufficient data: need at least {min} value(s), got {actual}"
+                )
             }
             StatError::LengthMismatch { a, b } => {
                 write!(f, "length mismatch: {a} vs {b}")

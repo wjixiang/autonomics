@@ -29,8 +29,7 @@ impl SqliteAgentStorage {
                 .map_err(|e| SqliteAgentStorageError::Io(e.to_string()))?;
         }
 
-        let conn = Connection::open(db_path)
-            .map_err(SqliteAgentStorageError::from)?;
+        let conn = Connection::open(db_path).map_err(SqliteAgentStorageError::from)?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS snapshots (
@@ -54,8 +53,7 @@ impl SqliteAgentStorage {
 
     /// Open an in-memory database (useful for tests).
     pub fn in_memory() -> Result<Self, SqliteAgentStorageError> {
-        let conn = Connection::open_in_memory()
-            .map_err(SqliteAgentStorageError::from)?;
+        let conn = Connection::open_in_memory().map_err(SqliteAgentStorageError::from)?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS snapshots (
@@ -100,9 +98,10 @@ fn deserialize_memory(json: &str) -> Result<crate::memory::Memory, SqliteAgentSt
     serde_json::from_str(json).map_err(|e| SqliteAgentStorageError::Serialization(e.to_string()))
 }
 
-fn deserialize_status(s: &str) -> Result<crate::lifecycle::AgentLifecycleStatus, SqliteAgentStorageError> {
-    serde_json::from_str(s)
-        .map_err(|e| SqliteAgentStorageError::Serialization(e.to_string()))
+fn deserialize_status(
+    s: &str,
+) -> Result<crate::lifecycle::AgentLifecycleStatus, SqliteAgentStorageError> {
+    serde_json::from_str(s).map_err(|e| SqliteAgentStorageError::Serialization(e.to_string()))
 }
 
 /// Insert a row and return the number of rows affected.
@@ -129,14 +128,18 @@ fn insert_snapshot(
 }
 
 /// Query a single snapshot by its id.
-fn query_snapshot(conn: &Connection, snapshot_id: &str) -> Result<Option<AgentSnapshot>, SqliteAgentStorageError> {
+fn query_snapshot(
+    conn: &Connection,
+    snapshot_id: &str,
+) -> Result<Option<AgentSnapshot>, SqliteAgentStorageError> {
     let mut stmt = conn
         .prepare(
             "SELECT snapshot_id, agent_id, ts, status, memory FROM snapshots WHERE snapshot_id = ?1",
         )
         .map_err(SqliteAgentStorageError::from)?;
 
-    let mut rows = stmt.query(rusqlite::params![snapshot_id])
+    let mut rows = stmt
+        .query(rusqlite::params![snapshot_id])
         .map_err(SqliteAgentStorageError::from)?;
 
     match rows.next() {
@@ -147,7 +150,10 @@ fn query_snapshot(conn: &Connection, snapshot_id: &str) -> Result<Option<AgentSn
 }
 
 /// Query all snapshots for an agent, ordered by timestamp descending.
-fn query_agent_snapshots(conn: &Connection, agent_id: &str) -> Result<Vec<AgentSnapshot>, SqliteAgentStorageError> {
+fn query_agent_snapshots(
+    conn: &Connection,
+    agent_id: &str,
+) -> Result<Vec<AgentSnapshot>, SqliteAgentStorageError> {
     let mut stmt = conn
         .prepare(
             "SELECT snapshot_id, agent_id, ts, status, memory FROM snapshots WHERE agent_id = ?1 ORDER BY ts DESC",
@@ -183,14 +189,18 @@ fn query_agent_snapshots(conn: &Connection, agent_id: &str) -> Result<Vec<AgentS
 }
 
 /// Query the latest snapshot for an agent.
-fn query_latest_snapshot(conn: &Connection, agent_id: &str) -> Result<Option<AgentSnapshot>, SqliteAgentStorageError> {
+fn query_latest_snapshot(
+    conn: &Connection,
+    agent_id: &str,
+) -> Result<Option<AgentSnapshot>, SqliteAgentStorageError> {
     let mut stmt = conn
         .prepare(
             "SELECT snapshot_id, agent_id, ts, status, memory FROM snapshots WHERE agent_id = ?1 ORDER BY ts DESC LIMIT 1",
         )
         .map_err(SqliteAgentStorageError::from)?;
 
-    let mut rows = stmt.query(rusqlite::params![agent_id])
+    let mut rows = stmt
+        .query(rusqlite::params![agent_id])
         .map_err(SqliteAgentStorageError::from)?;
 
     match rows.next() {
@@ -237,9 +247,15 @@ fn query_all_agent_ids(conn: &Connection) -> Result<Vec<Uuid>, SqliteAgentStorag
     Ok(ids)
 }
 
-fn delete_snapshots_by_agent(conn: &Connection, agent_id: &str) -> Result<usize, SqliteAgentStorageError> {
+fn delete_snapshots_by_agent(
+    conn: &Connection,
+    agent_id: &str,
+) -> Result<usize, SqliteAgentStorageError> {
     let count = conn
-        .execute("DELETE FROM snapshots WHERE agent_id = ?1", rusqlite::params![agent_id])
+        .execute(
+            "DELETE FROM snapshots WHERE agent_id = ?1",
+            rusqlite::params![agent_id],
+        )
         .map_err(SqliteAgentStorageError::from)?;
     Ok(count)
 }
@@ -270,7 +286,9 @@ impl AgentSnapshotStorage for SqliteAgentStorage {
             let guard = conn.lock().unwrap();
             query_snapshot(&guard, &id_str)
                 .map_err(to_storage_error)?
-                .ok_or_else(|| AgentSnapshotStorageError::NotFound(format!("snapshot {id_str} not found")))
+                .ok_or_else(|| {
+                    AgentSnapshotStorageError::NotFound(format!("snapshot {id_str} not found"))
+                })
         })
         .await
         .expect("spawn_blocking task panicked")
@@ -332,20 +350,20 @@ impl AgentSnapshotStorage for SqliteAgentStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message_ext::AgentMessageExt;
-    use crate::memory::{Memory, MemoryItem};
     use crate::lifecycle::AgentLifecycleStatus;
+    use crate::memory::{Memory, MemoryItem};
+    use crate::message_ext::AgentMessageExt;
 
     #[tokio::test]
     async fn test_create_and_get_snapshot() {
         let store = SqliteAgentStorage::in_memory().unwrap();
 
-        let memory = Memory { items: vec![
-            MemoryItem {
+        let memory = Memory {
+            items: vec![MemoryItem {
                 messages: vec![agentik_sdk::types::messages::Message::user("hello")],
                 summary: None,
-            },
-        ]};
+            }],
+        };
 
         let snapshot = AgentSnapshot {
             snapshot_id: uuid::Uuid::new_v4(),
@@ -406,30 +424,39 @@ mod tests {
 
         let memory = Memory::new();
 
-        store.create_snapshot(AgentSnapshot {
-            snapshot_id: uuid::Uuid::new_v4(),
-            ts: 3000,
-            agent_id,
-            agent_status: AgentLifecycleStatus::IDLE,
-            memory: memory.clone(),
-        }).await.unwrap();
+        store
+            .create_snapshot(AgentSnapshot {
+                snapshot_id: uuid::Uuid::new_v4(),
+                ts: 3000,
+                agent_id,
+                agent_status: AgentLifecycleStatus::IDLE,
+                memory: memory.clone(),
+            })
+            .await
+            .unwrap();
 
-        store.create_snapshot(AgentSnapshot {
-            snapshot_id: uuid::Uuid::new_v4(),
-            ts: 1000,
-            agent_id,
-            agent_status: AgentLifecycleStatus::RUNNING,
-            memory: memory.clone(),
-        }).await.unwrap();
+        store
+            .create_snapshot(AgentSnapshot {
+                snapshot_id: uuid::Uuid::new_v4(),
+                ts: 1000,
+                agent_id,
+                agent_status: AgentLifecycleStatus::RUNNING,
+                memory: memory.clone(),
+            })
+            .await
+            .unwrap();
 
         // Different agent — should not appear
-        store.create_snapshot(AgentSnapshot {
-            snapshot_id: uuid::Uuid::new_v4(),
-            ts: 2000,
-            agent_id: other_agent,
-            agent_status: AgentLifecycleStatus::IDLE,
-            memory,
-        }).await.unwrap();
+        store
+            .create_snapshot(AgentSnapshot {
+                snapshot_id: uuid::Uuid::new_v4(),
+                ts: 2000,
+                agent_id: other_agent,
+                agent_status: AgentLifecycleStatus::IDLE,
+                memory,
+            })
+            .await
+            .unwrap();
 
         let snapshots = store.get_agent_snapshots(agent_id).await.unwrap();
         assert_eq!(snapshots.len(), 2);
@@ -441,7 +468,10 @@ mod tests {
     #[tokio::test]
     async fn test_latest_snapshot_none_for_empty() {
         let store = SqliteAgentStorage::in_memory().unwrap();
-        let result = store.get_latest_snapshot(uuid::Uuid::new_v4()).await.unwrap();
+        let result = store
+            .get_latest_snapshot(uuid::Uuid::new_v4())
+            .await
+            .unwrap();
         assert!(result.is_none());
     }
 }

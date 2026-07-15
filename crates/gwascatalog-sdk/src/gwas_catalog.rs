@@ -42,7 +42,11 @@ pub struct HalLinks {
     pub traits: Option<HalLink>,
     #[serde(default, rename = "chromosomes")]
     pub chromosomes: Option<HalLink>,
-    #[serde(default, rename = "trait", deserialize_with = "single_or_vec::deserialize")]
+    #[serde(
+        default,
+        rename = "trait",
+        deserialize_with = "single_or_vec::deserialize"
+    )]
     pub trait_: Option<Vec<HalLink>>,
     #[serde(default, rename = "variant")]
     pub variant: Option<HalLink>,
@@ -103,9 +107,7 @@ mod single_or_vec {
     use super::HalLink;
     use serde::de::{self, Deserialize, Deserializer, IntoDeserializer};
 
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<Option<Vec<HalLink>>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<HalLink>>, D::Error>
     where
         D: Deserializer<'de>,
     {

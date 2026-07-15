@@ -3,8 +3,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use eutils_rs::EutilsClient;
 use agentik_sdk::types::{ToolResult, ToolResultContent};
+use eutils_rs::EutilsClient;
 
 mod common;
 
@@ -28,7 +28,9 @@ async fn run_tool(
     tool: &dyn agentik_core::tools::DynToolFunction,
     input: Value,
 ) -> Result<ToolResult> {
-    tool.execute(input).await.map_err(|e| anyhow::anyhow!("{e}"))
+    tool.execute(input)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 #[tokio::test]
@@ -45,7 +47,11 @@ async fn tool_pubmed_search() -> Result<()> {
         .implementation
         .clone();
 
-    let result = run_tool(&*tool, json!({ "term": "CRISPR[Title/Abstract]", "retmax": 3 })).await?;
+    let result = run_tool(
+        &*tool,
+        json!({ "term": "CRISPR[Title/Abstract]", "retmax": 3 }),
+    )
+    .await?;
     let content = content_str(&result);
     assert!(content.contains("\"count\""));
     assert!(content.contains("\"id_list\""));
@@ -68,11 +74,15 @@ async fn tool_pubmed_fetch() -> Result<()> {
         .clone();
 
     common::rate_limit();
-    let result = run_tool(&*tool, json!({
-        "pmid": common::PMID_CRISPR,
-        "rettype": "abstract",
-        "retmode": "text"
-    })).await?;
+    let result = run_tool(
+        &*tool,
+        json!({
+            "pmid": common::PMID_CRISPR,
+            "rettype": "abstract",
+            "retmode": "text"
+        }),
+    )
+    .await?;
     let content = content_str(&result);
     assert!(content.contains("PMID"));
 
@@ -202,7 +212,10 @@ fn tool_registrations_count() {
     let registrations = eutils_rs::eutils_registrations(client);
     assert_eq!(registrations.len(), 7);
 
-    let names: Vec<&str> = registrations.iter().map(|t| t.definition.name.as_str()).collect();
+    let names: Vec<&str> = registrations
+        .iter()
+        .map(|t| t.definition.name.as_str())
+        .collect();
     assert!(names.contains(&"pubmed_search"));
     assert!(names.contains(&"pubmed_fetch"));
     assert!(names.contains(&"pubmed_summary"));

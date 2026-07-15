@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::{ToTokens, quote};
 use syn::{
-    Expr, ExprLit, Fields, Ident, ItemStruct, Lit, LitStr, Meta, Token, Type,
-    TypePath, parse::Parse,
+    Expr, ExprLit, Fields, Ident, ItemStruct, Lit, LitStr, Meta, Token, Type, TypePath,
+    parse::Parse,
 };
 
 /// 字段信息
@@ -133,14 +133,15 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     let field_known_attrs = ["desc", "default"];
     if let syn::Fields::Named(ref mut fields) = input.fields {
         for field in &mut fields.named {
-            field.attrs.retain(|a| !field_known_attrs.iter().any(|k| a.path().is_ident(k)));
+            field
+                .attrs
+                .retain(|a| !field_known_attrs.iter().any(|k| a.path().is_ident(k)));
         }
     }
 
     // 注入 Serialize + Deserialize（若尚不存在）
     let needs_serde = !input.attrs.iter().any(|a| {
-        a.path().is_ident("derive")
-            && a.meta.to_token_stream().to_string().contains("Serialize")
+        a.path().is_ident("derive") && a.meta.to_token_stream().to_string().contains("Serialize")
     });
     if needs_serde {
         input.attrs.insert(

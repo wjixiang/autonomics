@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -61,8 +61,8 @@ impl ModelPool {
                     model_info.model_name, model_info.provider_id
                 ))
             })?;
-            let model =
-                Model::new(model_info, provider).map_err(|e| ModelPoolError::BuildError(e.to_string()))?;
+            let model = Model::new(model_info, provider)
+                .map_err(|e| ModelPoolError::BuildError(e.to_string()))?;
             pool.add_model(model);
         }
 

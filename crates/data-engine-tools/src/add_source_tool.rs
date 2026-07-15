@@ -45,10 +45,7 @@ impl ToolFunction for AddSourceNodeTool {
                 ident: ident.to_string(),
             }
         } else {
-            let format = input
-                .format
-                .map(|f| parse_file_format(&f))
-                .transpose()?;
+            let format = input.format.map(|f| parse_file_format(&f)).transpose()?;
 
             Source::File {
                 path: input.path,

@@ -11,7 +11,7 @@ use datafusion::error::Result;
 use oxbow::alignment::BamScanner;
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{byte_reader, map_ext, BioBatchIter, BioDriver, BioInput};
+use super::super::core::{BioBatchIter, BioDriver, BioInput, byte_reader, map_ext};
 
 fn scanner(header: noodles::sam::Header) -> Result<BamScanner> {
     BamScanner::new(header, Select::All, None, CoordSystem::OneClosed).map_err(map_ext)

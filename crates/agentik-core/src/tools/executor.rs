@@ -330,8 +330,8 @@ impl Default for ToolExecutionConfigBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::{ToolBuilder, ToolFunction, ToolResultContent};
+    use super::*;
     use async_trait::async_trait;
     use serde_json::{Value, json};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -345,19 +345,17 @@ mod tests {
     impl ToolFunction for TestRetryTool {
         type Input = Value;
 
-        async fn execute(
-            &self,
-            _input: Value,
-        ) -> Result<ToolResult, ToolError> {
+        async fn execute(&self, _input: Value) -> Result<ToolResult, ToolError> {
             let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
             if attempt < self.fail_count {
                 Err(ToolError::ExecutionFailed {
                     source: "Simulated failure".into(),
                 })
             } else {
-                Ok(ToolResult::success(
-                    format!("Success on attempt {}", attempt + 1),
-                ))
+                Ok(ToolResult::success(format!(
+                    "Success on attempt {}",
+                    attempt + 1
+                )))
             }
         }
     }
@@ -370,10 +368,7 @@ mod tests {
     impl ToolFunction for TestSlowTool {
         type Input = Value;
 
-        async fn execute(
-            &self,
-            _input: Value,
-        ) -> Result<ToolResult, ToolError> {
+        async fn execute(&self, _input: Value) -> Result<ToolResult, ToolError> {
             sleep(self.delay).await;
             Ok(ToolResult::success("Slow tool completed"))
         }

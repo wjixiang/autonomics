@@ -1,6 +1,6 @@
 use anyhow::Result;
-use eutils_rs::types::EFetchRequest;
 use eutils_rs::EutilsClient;
+use eutils_rs::types::EFetchRequest;
 
 mod common;
 

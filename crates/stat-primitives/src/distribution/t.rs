@@ -83,7 +83,11 @@ mod tests {
     #[test]
     fn pdf_matches_known_closed_forms() {
         // Cauchy (df=1): pdf(0) = 1/π.
-        assert!(approx_eq(StudentT::new(1.0).pdf(0.0), 1.0 / std::f64::consts::PI, 1e-9));
+        assert!(approx_eq(
+            StudentT::new(1.0).pdf(0.0),
+            1.0 / std::f64::consts::PI,
+            1e-9
+        ));
         // df=2: pdf(0) = 1/(2√2).
         assert!(approx_eq(
             StudentT::new(2.0).pdf(0.0),

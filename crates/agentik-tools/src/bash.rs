@@ -68,14 +68,12 @@ impl ToolFunction for BashTool {
         {
             Ok(Ok(out)) => out,
             Ok(Err(e)) => {
-                return Ok(ToolResult::error(
-                    format!("Failed to spawn command: {e}"),
-                ));
+                return Ok(ToolResult::error(format!("Failed to spawn command: {e}")));
             }
             Err(_) => {
-                return Ok(ToolResult::error(
-                    format!("Command timed out after {timeout_secs}s and was killed."),
-                ));
+                return Ok(ToolResult::error(format!(
+                    "Command timed out after {timeout_secs}s and was killed."
+                )));
             }
         };
 

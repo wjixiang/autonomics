@@ -36,4 +36,4 @@ pub mod regression;
 pub mod util;
 
 pub use error::{Result, StatError};
-pub use meta::{mr_egger, ivw, EggerResult, IvwResult};
+pub use meta::{EggerResult, IvwResult, ivw, mr_egger};

@@ -86,7 +86,11 @@ impl DagError {
                 kind: "duplicate_node".into(),
                 message: s.clone(),
             },
-            Self::PortNotFound { node, port, direction } => super::runtime::DagErrorReport {
+            Self::PortNotFound {
+                node,
+                port,
+                direction,
+            } => super::runtime::DagErrorReport {
                 kind: "port_not_found".into(),
                 message: format!("node `{node}` has no {direction} port `{port}`"),
             },
@@ -108,9 +112,7 @@ impl DagError {
                 reason,
             } => super::runtime::DagErrorReport {
                 kind: "schema_mismatch".into(),
-                message: format!(
-                    "edge {from_node}.{from_port} -> {to_node}.{to_port}: {reason}"
-                ),
+                message: format!("edge {from_node}.{from_port} -> {to_node}.{to_port}: {reason}"),
             },
             Self::Schedule(s) => super::runtime::DagErrorReport {
                 kind: "schedule".into(),

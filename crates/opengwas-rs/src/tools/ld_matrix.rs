@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
+use agentik_proc::tool;
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use agentik_proc::tool;
 
 use super::json_err;
 use crate::format::format_ld_matrix;
@@ -29,7 +29,9 @@ pub struct LdMatrixTool {
 impl ToolFunction for LdMatrixTool {
     type Input = LdMatrixInput;
 
-    fn timeout_seconds(&self) -> u64 { 120 }
+    fn timeout_seconds(&self) -> u64 {
+        120
+    }
 
     async fn run(&self, input: Self::Input) -> Result<AgentToolResult, ToolError> {
         let result = self

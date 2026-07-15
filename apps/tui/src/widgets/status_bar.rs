@@ -40,12 +40,17 @@ impl Widget for StatusBar<'_> {
             Span::raw(" "),
             Span::styled(
                 status_text,
-                Style::default().fg(indicator_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(indicator_color)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  │  "),
             Span::styled(format!("in: {}", in_tok), Style::default().fg(Color::Gray)),
             Span::raw("  "),
-            Span::styled(format!("out: {}", out_tok), Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!("out: {}", out_tok),
+                Style::default().fg(Color::Gray),
+            ),
         ];
         if self.cache_read_tokens > 0 {
             let cache_tok = format_tokens(self.cache_read_tokens);

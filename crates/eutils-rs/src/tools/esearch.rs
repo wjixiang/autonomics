@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use agentik_core::tools::{ToolError, ToolFunction, ToolResult};
+use agentik_proc::tool;
 use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
-use agentik_proc::tool;
 
 use crate::{EutilsClient, format::format_esearch};
 
@@ -60,14 +60,13 @@ impl ToolFunction for PubmedSearchTool {
             maxdate: input.maxdate,
         };
 
-        let result = self
-            .client
-            .esearch(&req)
-            .await
-            .map_err(super::json_err)?;
+        let result = self.client.esearch(&req).await.map_err(super::json_err)?;
 
         let mut map = serde_json::Map::new();
-        map.insert("count".into(), serde_json::Value::String(result.result.count));
+        map.insert(
+            "count".into(),
+            serde_json::Value::String(result.result.count),
+        );
         map.insert(
             "id_list".into(),
             serde_json::to_value(&result.result.id_list).unwrap_or_default(),
@@ -88,6 +87,8 @@ impl ToolFunction for PubmedSearchTool {
             );
         }
 
-        Ok(AgentToolResult::success(format_esearch(&serde_json::Value::Object(map))))
+        Ok(AgentToolResult::success(format_esearch(
+            &serde_json::Value::Object(map),
+        )))
     }
 }

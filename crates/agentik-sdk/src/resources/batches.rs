@@ -1,8 +1,8 @@
-use crate::types::{
-    MessageBatch, BatchCreateParams, BatchListParams, BatchList, BatchResult,
-    AnthropicError, Result,
-};
 use crate::http::HttpClient;
+use crate::types::{
+    AnthropicError, BatchCreateParams, BatchList, BatchListParams, BatchResult, MessageBatch,
+    Result,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -20,13 +20,13 @@ impl BatchesResource {
     }
 
     /// Create a new message batch
-    /// 
+    ///
     /// # Arguments
     /// * `params` - Parameters for creating the batch
-    /// 
+    ///
     /// # Returns
     /// A new `MessageBatch` object with status information
-    /// 
+    ///
     /// # Errors
     /// Returns an error if the request fails or if the batch parameters are invalid
     pub async fn create(&self, params: BatchCreateParams) -> Result<MessageBatch> {
@@ -42,13 +42,13 @@ impl BatchesResource {
     }
 
     /// Retrieve a specific message batch by ID
-    /// 
+    ///
     /// # Arguments
     /// * `batch_id` - The ID of the batch to retrieve
-    /// 
+    ///
     /// # Returns
     /// The `MessageBatch` object with current status
-    /// 
+    ///
     /// # Errors
     /// Returns an error if the batch is not found or if the request fails
     pub async fn get(&self, batch_id: &str) -> Result<MessageBatch> {
@@ -63,13 +63,13 @@ impl BatchesResource {
     }
 
     /// List message batches
-    /// 
+    ///
     /// # Arguments
     /// * `params` - Optional parameters for pagination and filtering
-    /// 
+    ///
     /// # Returns
     /// A `BatchList` containing batches and pagination information
-    /// 
+    ///
     /// # Errors
     /// Returns an error if the request fails
     pub async fn list(&self, params: Option<BatchListParams>) -> Result<BatchList> {
@@ -90,13 +90,13 @@ impl BatchesResource {
     }
 
     /// Cancel a message batch
-    /// 
+    ///
     /// # Arguments
     /// * `batch_id` - The ID of the batch to cancel
-    /// 
+    ///
     /// # Returns
     /// The updated `MessageBatch` object with cancellation status
-    /// 
+    ///
     /// # Errors
     /// Returns an error if the batch cannot be cancelled or if the request fails
     pub async fn cancel(&self, batch_id: &str) -> Result<MessageBatch> {
@@ -111,13 +111,13 @@ impl BatchesResource {
     }
 
     /// Get the results of a completed batch
-    /// 
+    ///
     /// # Arguments
     /// * `batch_id` - The ID of the completed batch
-    /// 
+    ///
     /// # Returns
     /// A vector of `BatchResult` objects containing the results
-    /// 
+    ///
     /// # Errors
     /// Returns an error if the batch is not completed or if the request fails
     pub async fn get_results(&self, batch_id: &str) -> Result<Vec<BatchResult>> {
@@ -130,9 +130,9 @@ impl BatchesResource {
             ));
         }
 
-        let output_file_id = batch.output_file_id.ok_or_else(|| {
-            AnthropicError::Other("Batch has no output file".to_string())
-        })?;
+        let output_file_id = batch
+            .output_file_id
+            .ok_or_else(|| AnthropicError::Other("Batch has no output file".to_string()))?;
 
         // Download the results file
         let response = self
@@ -157,15 +157,15 @@ impl BatchesResource {
     }
 
     /// Wait for a batch to complete
-    /// 
+    ///
     /// # Arguments
     /// * `batch_id` - The ID of the batch to wait for
     /// * `poll_interval` - How often to check the status (default: 5 seconds)
     /// * `timeout` - Maximum time to wait (default: 1 hour)
-    /// 
+    ///
     /// # Returns
     /// The completed `MessageBatch` object
-    /// 
+    ///
     /// # Errors
     /// Returns an error if the batch fails, expires, or if the timeout is reached
     pub async fn wait_for_completion(
@@ -202,16 +202,19 @@ impl BatchesResource {
     }
 
     /// Get the status and progress of a batch
-    /// 
+    ///
     /// # Arguments
     /// * `batch_id` - The ID of the batch to check
-    /// 
+    ///
     /// # Returns
     /// A tuple containing (status, completion_percentage, pending_requests)
-    /// 
+    ///
     /// # Errors
     /// Returns an error if the request fails
-    pub async fn get_status(&self, batch_id: &str) -> Result<(crate::types::BatchStatus, f64, u32)> {
+    pub async fn get_status(
+        &self,
+        batch_id: &str,
+    ) -> Result<(crate::types::BatchStatus, f64, u32)> {
         let batch = self.get(batch_id).await?;
         Ok((
             batch.processing_status,
@@ -224,14 +227,14 @@ impl BatchesResource {
 /// High-level batch processing utilities
 impl BatchesResource {
     /// Create and monitor a batch until completion
-    /// 
+    ///
     /// # Arguments
     /// * `params` - Parameters for creating the batch
     /// * `poll_interval` - How often to check status (default: 5 seconds)
-    /// 
+    ///
     /// # Returns
     /// A tuple containing the completed batch and its results
-    /// 
+    ///
     /// # Errors
     /// Returns an error if batch creation, processing, or result retrieval fails
     pub async fn create_and_wait(
@@ -243,13 +246,19 @@ impl BatchesResource {
         let batch = self.create(params).await?;
         let batch_id = &batch.id;
 
-        println!("Created batch {} with {} requests", batch_id, batch.request_counts.total);
+        println!(
+            "Created batch {} with {} requests",
+            batch_id, batch.request_counts.total
+        );
 
         // Wait for completion
-        let completed_batch = self.wait_for_completion(batch_id, poll_interval, None).await?;
+        let completed_batch = self
+            .wait_for_completion(batch_id, poll_interval, None)
+            .await?;
 
-        println!("Batch {} completed: {}/{} requests successful", 
-            batch_id, 
+        println!(
+            "Batch {} completed: {}/{} requests successful",
+            batch_id,
             completed_batch.request_counts.completed,
             completed_batch.request_counts.total
         );
@@ -261,15 +270,15 @@ impl BatchesResource {
     }
 
     /// Monitor batch progress with callbacks
-    /// 
+    ///
     /// # Arguments
     /// * `batch_id` - The ID of the batch to monitor
     /// * `progress_callback` - Called with progress updates
     /// * `poll_interval` - How often to check status
-    /// 
+    ///
     /// # Returns
     /// The completed batch
-    /// 
+    ///
     /// # Errors
     /// Returns an error if monitoring fails
     pub async fn monitor_progress<F>(
@@ -317,7 +326,7 @@ impl BatchesResource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{BatchRequest, BatchStatus, BatchRequestCounts};
+    use crate::types::{BatchRequest, BatchRequestCounts, BatchStatus};
 
     #[test]
     fn test_batch_completion_check() {
@@ -361,4 +370,4 @@ mod tests {
         assert_eq!(request.body.system, Some("You are helpful".to_string()));
         assert_eq!(request.body.temperature, Some(0.7));
     }
-} 
+}

@@ -49,12 +49,7 @@ impl ToolFunction for AddLinearRegressionNodeTool {
         }
         let intercept = input.intercept.unwrap_or(true);
         self.client
-            .add_linear_regression_node(
-                input.id,
-                input.x_columns,
-                input.y_column,
-                intercept,
-            )
+            .add_linear_regression_node(input.id, input.x_columns, input.y_column, intercept)
             .await
             .map_err(ExecError::from)?;
 

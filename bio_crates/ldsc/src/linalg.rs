@@ -62,7 +62,9 @@ pub fn wls(x: MatRef<'_, f64>, y: &[f64], w: &[f64]) -> Result<Vec<f64>> {
     let n = y.len();
     let p = x.ncols();
     if x.nrows() != n || w.len() != n {
-        return Err(LdscError::DimensionMismatch("wls: dimension mismatch".into()));
+        return Err(LdscError::DimensionMismatch(
+            "wls: dimension mismatch".into(),
+        ));
     }
     let wsum: f64 = w.iter().sum();
     if !(wsum > 0.0) {

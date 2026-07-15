@@ -37,7 +37,10 @@ impl Retryable for ToolError {
     fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::NotFound { .. } | Self::ValidationFailed { .. } | Self::ExecutionFailed { .. } | Self::Timeout { .. }
+            Self::NotFound { .. }
+                | Self::ValidationFailed { .. }
+                | Self::ExecutionFailed { .. }
+                | Self::Timeout { .. }
         )
     }
 

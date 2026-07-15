@@ -49,7 +49,12 @@ pub fn weighted_variance(values: &[f64], weights: &[f64]) -> Result<f64> {
         });
     }
     let mu = weighted_mean(values, weights)?;
-    let num = compensated_sum(values.iter().zip(weights).map(|(&x, &w)| w * (x - mu) * (x - mu)));
+    let num = compensated_sum(
+        values
+            .iter()
+            .zip(weights)
+            .map(|(&x, &w)| w * (x - mu) * (x - mu)),
+    );
     Ok(num / (wsum - 1.0))
 }
 
@@ -57,16 +62,17 @@ pub fn weighted_variance(values: &[f64], weights: &[f64]) -> Result<f64> {
 pub fn weighted_variance_population(values: &[f64], weights: &[f64]) -> Result<f64> {
     let wsum = validate_weights(values, weights)?;
     let mu = weighted_mean(values, weights)?;
-    let num = compensated_sum(values.iter().zip(weights).map(|(&x, &w)| w * (x - mu) * (x - mu)));
+    let num = compensated_sum(
+        values
+            .iter()
+            .zip(weights)
+            .map(|(&x, &w)| w * (x - mu) * (x - mu)),
+    );
     Ok(num / wsum)
 }
 
 /// Weighted sample covariance (`Σw − 1`).
-pub fn weighted_covariance(
-    xs: &[f64],
-    ys: &[f64],
-    weights: &[f64],
-) -> Result<f64> {
+pub fn weighted_covariance(xs: &[f64], ys: &[f64], weights: &[f64]) -> Result<f64> {
     let wsum = validate_weights(xs, weights)?;
     if ys.len() != xs.len() {
         return Err(StatError::LengthMismatch {
@@ -91,11 +97,7 @@ pub fn weighted_covariance(
 /// Weighted Pearson correlation.
 ///
 /// Errors if either weighted variable has zero variance.
-pub fn weighted_correlation(
-    xs: &[f64],
-    ys: &[f64],
-    weights: &[f64],
-) -> Result<f64> {
+pub fn weighted_correlation(xs: &[f64], ys: &[f64], weights: &[f64]) -> Result<f64> {
     let wsum = validate_weights(xs, weights)?;
     if ys.len() != xs.len() {
         return Err(StatError::LengthMismatch {
@@ -197,7 +199,11 @@ mod tests {
         let v = [1.0, 2.0, 3.0, 4.0, 5.0];
         let w = [2.0; 5];
         // Σ 2·(x−3)² = 2·10 = 20, over 10 − 1 = 9.
-        assert!(approx_eq(weighted_variance(&v, &w).unwrap(), 20.0 / 9.0, 1e-12));
+        assert!(approx_eq(
+            weighted_variance(&v, &w).unwrap(),
+            20.0 / 9.0,
+            1e-12
+        ));
     }
 
     #[test]

@@ -3,12 +3,12 @@
 //! Each tool maps to one or more E-utility methods. Wire them into an agent's
 //! toolset via [`eutils_registrations`].
 
+mod efetch;
 mod egquery;
 mod einfo;
-mod efetch;
 mod elink;
-mod espell;
 mod esearch;
+mod espell;
 mod esummary;
 
 use std::sync::Arc;

@@ -5,8 +5,8 @@ use agentik_sdk::types::ToolResult as AgentToolResult;
 use async_trait::async_trait;
 
 use super::json_err;
-use crate::format::format_gwasinfo_table;
 use crate::OpengwasClient;
+use crate::format::format_gwasinfo_table;
 use agentik_proc::tool;
 
 #[tool(
@@ -44,13 +44,20 @@ impl ToolFunction for GwasinfoSearchTool {
         let limit = input.limit.unwrap_or(50);
 
         // Normalize sort_by: map "trait" → "trait_" for the DB column.
-        let sort_by = input.sort_by.as_deref().map(|col| {
-            if col == "trait" { "trait_" } else { col }
-        });
+        let sort_by = input
+            .sort_by
+            .as_deref()
+            .map(|col| if col == "trait" { "trait_" } else { col });
 
         let result = self
             .client
-            .gwasinfo_search(&input.keyword, db_field, limit, sort_by, input.sort_order.as_deref())
+            .gwasinfo_search(
+                &input.keyword,
+                db_field,
+                limit,
+                sort_by,
+                input.sort_order.as_deref(),
+            )
             .await
             .map_err(json_err)?;
         Ok(AgentToolResult::success(format_gwasinfo_table(

@@ -157,7 +157,8 @@ impl RetryPolicy {
                 }
                 RetryCondition::ServerError => {
                     if let AnthropicError::HttpError { status, .. } = error
-                        && *status >= 500 && *status < 600
+                        && *status >= 500
+                        && *status < 600
                     {
                         return true;
                     }
@@ -179,9 +180,9 @@ impl RetryPolicy {
         let base_delay = self.initial_delay.as_millis() as f64;
         let delay_ms = base_delay * self.multiplier.powi(attempt as i32);
         let delay = Duration::from_millis(delay_ms as u64);
-        
+
         let delay = std::cmp::min(delay, self.max_delay);
-        
+
         if self.jitter {
             self.add_jitter(delay)
         } else {
@@ -281,7 +282,7 @@ pub fn api_retry() -> RetryExecutor {
                 RetryCondition::ServerError,
                 RetryCondition::Timeout,
                 RetryCondition::ConnectionError,
-            ])
+            ]),
     )
 }
 
@@ -292,7 +293,7 @@ mod tests {
     #[test]
     fn test_retry_policy_should_retry() {
         let policy = RetryPolicy::default();
-        
+
         assert!(policy.should_retry(&AnthropicError::Timeout));
         assert!(policy.should_retry(&AnthropicError::HttpError {
             status: 429,
@@ -311,7 +312,7 @@ mod tests {
             .initial_delay(Duration::from_millis(100))
             .multiplier(2.0)
             .jitter(false);
-        
+
         assert_eq!(policy.calculate_delay(0), Duration::from_millis(100));
         assert_eq!(policy.calculate_delay(1), Duration::from_millis(200));
         assert_eq!(policy.calculate_delay(2), Duration::from_millis(400));
@@ -321,11 +322,11 @@ mod tests {
     async fn test_retry_executor_success() {
         let policy = RetryPolicy::exponential().max_retries(2);
         let executor = RetryExecutor::new(policy);
-        
-        let result = executor.execute(|| async {
-            Ok::<i32, AnthropicError>(42)
-        }).await;
-        
+
+        let result = executor
+            .execute(|| async { Ok::<i32, AnthropicError>(42) })
+            .await;
+
         match result {
             RetryResult::Success(value) => assert_eq!(value, 42),
             _ => panic!("Expected success"),
@@ -338,13 +339,13 @@ mod tests {
             .max_retries(1)
             .initial_delay(Duration::from_millis(1));
         let executor = RetryExecutor::new(policy);
-        
-        let result = executor.execute(|| async {
-            Err::<i32, AnthropicError>(AnthropicError::InvalidApiKey)
-        }).await;
-        
+
+        let result = executor
+            .execute(|| async { Err::<i32, AnthropicError>(AnthropicError::InvalidApiKey) })
+            .await;
+
         match result {
-            RetryResult::Failed(_) => {},
+            RetryResult::Failed(_) => {}
             _ => panic!("Expected failure"),
         }
     }

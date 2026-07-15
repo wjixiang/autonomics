@@ -310,8 +310,7 @@ impl MdRenderer {
                     }
                     CodeBlockKind::Indented => None,
                 };
-                self.code_block_is_mermaid =
-                    self.code_block_lang.as_deref() == Some("mermaid");
+                self.code_block_is_mermaid = self.code_block_lang.as_deref() == Some("mermaid");
                 self.code_block_content.clear();
                 if !self.current_spans.is_empty() {
                     self.flush_line();
@@ -624,12 +623,30 @@ mod tests {
         let lines = render_markdown_to_lines(md, 80);
         let out = joined(&lines);
 
-        assert!(out.contains("Build"), "mermaid body must contain Build:\n{out}");
-        assert!(out.contains("Test"), "mermaid body must contain Test:\n{out}");
-        assert!(out.contains("Deploy"), "mermaid body must contain Deploy:\n{out}");
-        assert!(out.contains('╭'), "mermaid block must emit a top border:\n{out}");
-        assert!(out.contains("Lead"), "preceding prose must still render:\n{out}");
-        assert!(out.contains("Trail"), "trailing prose must still render:\n{out}");
+        assert!(
+            out.contains("Build"),
+            "mermaid body must contain Build:\n{out}"
+        );
+        assert!(
+            out.contains("Test"),
+            "mermaid body must contain Test:\n{out}"
+        );
+        assert!(
+            out.contains("Deploy"),
+            "mermaid body must contain Deploy:\n{out}"
+        );
+        assert!(
+            out.contains('╭'),
+            "mermaid block must emit a top border:\n{out}"
+        );
+        assert!(
+            out.contains("Lead"),
+            "preceding prose must still render:\n{out}"
+        );
+        assert!(
+            out.contains("Trail"),
+            "trailing prose must still render:\n{out}"
+        );
     }
 
     /// A non-mermaid code block must NOT emit the mermaid-specific chrome,

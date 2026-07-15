@@ -1,8 +1,8 @@
+use crate::message_ext::AgentMessageExt;
 use agentik_sdk::model::Model;
 use agentik_sdk::types::errors::AnthropicError;
 use agentik_sdk::types::messages::{ContentBlock, Message};
 use agentik_sdk::types::{Role, ToolDefinition};
-use crate::message_ext::AgentMessageExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -70,7 +70,10 @@ fn estimate_message_tokens(msg: &Message) -> u64 {
         .map(|block| match block {
             ContentBlock::Text { text } => text.clone(),
             ContentBlock::ToolUse { name, input, .. } => {
-                format!("[tool:{name} {}", serde_json::to_string(input).unwrap_or_default())
+                format!(
+                    "[tool:{name} {}",
+                    serde_json::to_string(input).unwrap_or_default()
+                )
             }
             ContentBlock::ToolResult { content, .. } => {
                 content.as_deref().unwrap_or("").to_string()
@@ -175,10 +178,7 @@ fn truncate_for_compact(text: &str) -> String {
 /// "head" (to be summarized), everything after is "recent" (preserved).
 ///
 /// Returns `None` if the conversation is too short to need compaction.
-fn select_for_compaction(
-    items: &[MemoryItem],
-    keep_tokens: u64,
-) -> Option<CompactionSelection> {
+fn select_for_compaction(items: &[MemoryItem], keep_tokens: u64) -> Option<CompactionSelection> {
     if items.len() <= 1 {
         // Only one segment — nothing to compact yet
         return None;
@@ -196,7 +196,13 @@ fn select_for_compaction(
     }
 
     // Serialize all historical messages
-    let all_text = serialize_messages(&historical_messages.iter().copied().cloned().collect::<Vec<_>>());
+    let all_text = serialize_messages(
+        &historical_messages
+            .iter()
+            .copied()
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
     let total_tokens = estimate_tokens(&all_text);
 
     if total_tokens <= keep_tokens {
@@ -426,7 +432,9 @@ impl Memory {
 
         let mut messages: Vec<Message> = vec![];
         messages.push(Message::system(prompt_text));
-        let response = model.request(messages, &Vec::<ToolDefinition>::new()).await?;
+        let response = model
+            .request(messages, &Vec::<ToolDefinition>::new())
+            .await?;
 
         // Step 4: Extract the summary text from the LLM response
         let raw_summary: String = response
@@ -488,7 +496,11 @@ impl Memory {
         ];
 
         // Append the current segment's messages to the new last item
-        self.items.last_mut().unwrap().messages.extend(current_messages);
+        self.items
+            .last_mut()
+            .unwrap()
+            .messages
+            .extend(current_messages);
 
         tracing::debug!(
             items = self.items.len(),
@@ -525,7 +537,9 @@ mod tests {
         let mut memory = Memory::new();
         // Add some messages to the first segment
         memory.remember(Message::user("task: fix the bug")).unwrap();
-        memory.remember(Message::assistant_text("I'll fix it")).unwrap();
+        memory
+            .remember(Message::assistant_text("I'll fix it"))
+            .unwrap();
 
         // Compact (manually set summary for testing)
         memory.items[0].summary = Some("Fixed the authentication bug in auth.rs".to_string());
@@ -633,10 +647,7 @@ mod tests {
 
     #[test]
     fn test_build_compaction_prompt_anchored() {
-        let prompt = build_compaction_prompt(
-            "[User]: next step",
-            Some("Previous summary content"),
-        );
+        let prompt = build_compaction_prompt("[User]: next step", Some("Previous summary content"));
         assert!(prompt.contains("Update the anchored summary"));
         assert!(prompt.contains("<previous-summary>"));
         assert!(prompt.contains("Previous summary content"));

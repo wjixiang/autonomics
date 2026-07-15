@@ -202,17 +202,17 @@ impl ModelListParams {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn before_id(mut self, before_id: impl Into<String>) -> Self {
         self.before_id = Some(before_id.into());
         self
     }
-    
+
     pub fn after_id(mut self, after_id: impl Into<String>) -> Self {
         self.after_id = Some(after_id.into());
         self
     }
-    
+
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit.min(1000).max(1));
         self
@@ -223,52 +223,52 @@ impl ModelRequirements {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn max_input_cost_per_token(mut self, cost: f64) -> Self {
         self.max_input_cost_per_token = Some(cost);
         self
     }
-    
+
     pub fn max_output_cost_per_token(mut self, cost: f64) -> Self {
         self.max_output_cost_per_token = Some(cost);
         self
     }
-    
+
     pub fn min_context_length(mut self, length: u64) -> Self {
         self.min_context_length = Some(length);
         self
     }
-    
+
     pub fn require_capability(mut self, capability: ModelCapability) -> Self {
         self.required_capabilities.push(capability);
         self
     }
-    
+
     pub fn capabilities(mut self, capabilities: Vec<ModelCapability>) -> Self {
         self.required_capabilities = capabilities;
         self
     }
-    
+
     pub fn preferred_family(mut self, family: impl Into<String>) -> Self {
         self.preferred_family = Some(family.into());
         self
     }
-    
+
     pub fn require_vision(mut self) -> Self {
         self.requires_vision = Some(true);
         self
     }
-    
+
     pub fn require_tools(mut self) -> Self {
         self.requires_tools = Some(true);
         self
     }
-    
+
     pub fn min_quality_score(mut self, score: u8) -> Self {
         self.min_quality_score = Some(score.min(10));
         self
     }
-    
+
     pub fn min_speed_score(mut self, score: u8) -> Self {
         self.min_speed_score = Some(score.min(10));
         self
@@ -279,7 +279,7 @@ impl ModelObject {
     pub fn is_alias(&self) -> bool {
         self.id.contains("latest") || self.id.ends_with("-0")
     }
-    
+
     pub fn family(&self) -> String {
         let parts: Vec<&str> = self.id.split('-').collect();
         if parts.len() >= 3 {
@@ -288,11 +288,11 @@ impl ModelObject {
             parts[0].to_string()
         }
     }
-    
+
     pub fn is_family(&self, family: &str) -> bool {
         self.id.starts_with(family)
     }
-    
+
     pub fn model_size(&self) -> Option<String> {
         if self.id.contains("opus") {
             Some("opus".to_string())
@@ -313,14 +313,14 @@ impl ModelComparison {
             .max_by_key(|p| p.speed_score)
             .and_then(|p| self.models.iter().find(|m| m.id == p.model_id))
     }
-    
+
     pub fn best_for_quality(&self) -> Option<&ModelObject> {
         self.performance
             .iter()
             .max_by_key(|p| p.quality_score)
             .and_then(|p| self.models.iter().find(|m| m.id == p.model_id))
     }
-    
+
     pub fn most_cost_effective(&self) -> Option<&ModelObject> {
         self.performance
             .iter()
@@ -338,7 +338,7 @@ impl CostEstimation {
             0.0
         }
     }
-    
+
     pub fn savings_percentage(&self) -> f64 {
         let original_cost = self.input_cost_usd + self.output_cost_usd;
         if original_cost > 0.0 {
@@ -352,18 +352,16 @@ impl CostEstimation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_model_list_params_builder() {
-        let params = ModelListParams::new()
-            .limit(50)
-            .after_id("model_123");
-            
+        let params = ModelListParams::new().limit(50).after_id("model_123");
+
         assert_eq!(params.limit, Some(50));
         assert_eq!(params.after_id, Some("model_123".to_string()));
         assert_eq!(params.before_id, None);
     }
-    
+
     #[test]
     fn test_model_requirements_builder() {
         let requirements = ModelRequirements::new()
@@ -371,13 +369,17 @@ mod tests {
             .min_context_length(100000)
             .require_vision()
             .require_capability(ModelCapability::ToolUse);
-            
+
         assert_eq!(requirements.max_input_cost_per_token, Some(0.01));
         assert_eq!(requirements.min_context_length, Some(100000));
         assert_eq!(requirements.requires_vision, Some(true));
-        assert!(requirements.required_capabilities.contains(&ModelCapability::ToolUse));
+        assert!(
+            requirements
+                .required_capabilities
+                .contains(&ModelCapability::ToolUse)
+        );
     }
-    
+
     #[test]
     fn test_model_object_methods() {
         let model = ModelObject {
@@ -386,13 +388,13 @@ mod tests {
             created_at: Utc::now(),
             object_type: "model".to_string(),
         };
-        
+
         assert!(model.is_alias());
         assert_eq!(model.family(), "claude-3");
         assert!(model.is_family("claude-3-5"));
         assert_eq!(model.model_size(), Some("sonnet".to_string()));
     }
-    
+
     #[test]
     fn test_cost_estimation_calculations() {
         let estimation = CostEstimation {
@@ -412,26 +414,26 @@ mod tests {
                 cost_vs_alternatives: HashMap::new(),
             },
         };
-        
+
         assert!((estimation.cost_per_1k_tokens() - 0.02333).abs() < 0.001);
         assert!((estimation.savings_percentage() - 12.5).abs() < 0.1);
     }
-    
+
     #[test]
     fn test_limit_validation() {
         let params = ModelListParams::new().limit(2000);
         assert_eq!(params.limit, Some(1000));
-        
+
         let params = ModelListParams::new().limit(0);
         assert_eq!(params.limit, Some(1));
     }
-    
+
     #[test]
     fn test_model_capability_serialization() {
         let capability = ModelCapability::Vision;
         let serialized = serde_json::to_string(&capability).unwrap();
         assert_eq!(serialized, "\"vision\"");
-        
+
         let deserialized: ModelCapability = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized, ModelCapability::Vision);
     }

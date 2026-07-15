@@ -33,8 +33,14 @@ async fn epost_and_chain_to_efetch() -> Result<()> {
     };
     let text = client.efetch(&req).await?;
 
-    assert!(text.contains(common::PMID_CRISPR), "should contain first PMID");
-    assert!(text.contains(common::PMID_BRCA1), "should contain second PMID");
+    assert!(
+        text.contains(common::PMID_CRISPR),
+        "should contain first PMID"
+    );
+    assert!(
+        text.contains(common::PMID_BRCA1),
+        "should contain second PMID"
+    );
 
     Ok(())
 }
@@ -50,7 +56,11 @@ async fn epost_returns_valid_key_and_webenv() -> Result<()> {
 
     let key_num: u32 = query_key.parse().expect("query_key should be integer");
     assert_eq!(key_num, 1);
-    assert!(web_env.len() > 20, "web_env too short: len={}", web_env.len());
+    assert!(
+        web_env.len() > 20,
+        "web_env too short: len={}",
+        web_env.len()
+    );
 
     Ok(())
 }

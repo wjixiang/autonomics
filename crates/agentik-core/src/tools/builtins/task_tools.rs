@@ -4,8 +4,8 @@ mod view_task_status;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::tools::task_runtime::TaskEntry;
 use crate::tools::ToolRegistration;
+use crate::tools::task_runtime::TaskEntry;
 
 pub use view_task_results::{TaskResultViewerTool, ViewTaskResultsInput};
 pub use view_task_status::{TaskStatusViewerTool, ViewTaskStatusInput};

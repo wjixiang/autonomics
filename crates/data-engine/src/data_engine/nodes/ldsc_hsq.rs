@@ -283,10 +283,9 @@ impl DagNode for LdscHsqNode {
             n_blocks,
             intercept,
         } = &self.ldsc_hsq;
-        let result =
-            ldsc::hsq::estimate_h2(joined_df, cols, m, *n_blocks, *intercept)
-                .await
-                .map_err(LdscNodeError::from)?;
+        let result = ldsc::hsq::estimate_h2(joined_df, cols, m, *n_blocks, *intercept)
+            .await
+            .map_err(LdscNodeError::from)?;
 
         // 7. Build a single-row summary RecordBatch and return.
         let batch = build_result_batch(&result)?;

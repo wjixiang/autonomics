@@ -173,17 +173,20 @@ fn render_footer_hint(
         " Ctrl+C cancel  Ctrl+R history ".to_string()
     } else {
         match mode {
-            InputMode::Browse => " Enter edit  j/k scroll  gg top  G bottom  Ctrl+C quit ".to_string(),
+            InputMode::Browse => {
+                " Enter edit  j/k scroll  gg top  G bottom  Ctrl+C quit ".to_string()
+            }
             InputMode::Input => {
                 " Insert  Esc normal  Enter send  Shift+Enter newline  Ctrl+R history ".to_string()
             }
             InputMode::Normal => {
-                " NORMAL  i/a/o insert  h j k l w b e 0 $ gg G  x dd dw D u  Esc exit "
-                    .to_string()
+                " NORMAL  i/a/o insert  h j k l w b e 0 $ gg G  x dd dw D u  Esc exit ".to_string()
             }
         }
     };
-    let style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM);
+    let style = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::DIM);
     Paragraph::new(hint)
         .style(style)
         .alignment(Alignment::Right)

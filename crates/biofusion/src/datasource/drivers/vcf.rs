@@ -60,8 +60,7 @@ mod tests {
     /// Run with: cargo test -p biofusion -- vcf::tests::parse_vcf_gz --nocapture
     #[test]
     fn parse_vcf_gz() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../fixtures/sample.vcf.gz");
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/sample.vcf.gz");
         let raw = fs::read(&path).expect("failed to read VCF.gz");
 
         println!("file: {}", path.display());

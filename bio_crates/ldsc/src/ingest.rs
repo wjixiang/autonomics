@@ -38,7 +38,9 @@ pub struct HsqArrays {
 pub async fn to_arrays(df: DataFrame, cols: &HsqColumns<'_>) -> Result<HsqArrays> {
     let batches = df.collect().await?;
     if batches.is_empty() {
-        return Err(LdscError::InvalidInput("estimate_h2: empty DataFrame (no record batches)".into()));
+        return Err(LdscError::InvalidInput(
+            "estimate_h2: empty DataFrame (no record batches)".into(),
+        ));
     }
     let z = extract_column(&batches, cols.z)?;
     let n = extract_column(&batches, cols.n)?;
@@ -53,7 +55,9 @@ pub async fn to_arrays(df: DataFrame, cols: &HsqColumns<'_>) -> Result<HsqArrays
         )));
     }
     if cols.ref_ld.is_empty() {
-        return Err(LdscError::InvalidInput("estimate_h2: at least one ref_ld column is required".into()));
+        return Err(LdscError::InvalidInput(
+            "estimate_h2: at least one ref_ld column is required".into(),
+        ));
     }
 
     let mut flat: Vec<f64> = Vec::with_capacity(nrows * cols.ref_ld.len());
