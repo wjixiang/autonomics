@@ -9,7 +9,7 @@ rust-version.workspace = true
 agentik-core = { path = "../agentik-core" }
 agentik-proc = { path = "../agentik-proc" }
 agentik-sdk = { path = "../agentik-sdk" }
-anyhow.workspace = true
+thiserror.workspace = true
 reqwest = { version = "0.13.4", features = ["json", "multipart", "stream"] }
 rusqlite = { version = "0.40.0", features = ["bundled"] }
 fs = { path = "../fs" }

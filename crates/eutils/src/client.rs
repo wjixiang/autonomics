@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
 use reqwest::Client;
 use serde_json::Value;
 
-use crate::error::EutilsError;
+use crate::error::{EutilsError, Result};
 use crate::types::*;
 
 /// Base URL for all NCBI E-utility requests.

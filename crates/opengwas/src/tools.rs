@@ -30,8 +30,12 @@ use crate::OpengwasClient;
 mod helpers {
     use agentik_core::tools::ToolError;
 
-    pub(crate) fn json_err(e: anyhow::Error) -> ToolError {
-        e.into()
+    use crate::error::OpengwasError;
+
+    pub(crate) fn json_err(e: OpengwasError) -> ToolError {
+        ToolError::ExecutionFailed {
+            source: Box::new(e),
+        }
     }
 }
 

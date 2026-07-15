@@ -15,3 +15,6 @@ pub enum EutilsError {
     #[error("failed to parse response: {0}")]
     Parse(#[from] serde_json::Error),
 }
+
+/// Result alias for E-utilities operations.
+pub type Result<T> = std::result::Result<T, EutilsError>;

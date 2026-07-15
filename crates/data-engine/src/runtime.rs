@@ -1,3 +1,6 @@
+//! Runtime of Data Engine based on tokio runtime
+//!
+
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::data_engine::IcebergDataEngine;

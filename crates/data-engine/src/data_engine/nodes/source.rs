@@ -14,6 +14,7 @@ use datafusion::{
     common::HashMap,
     prelude::{CsvReadOptions, DataFrame, ParquetReadOptions, SessionContext},
 };
+use datalake::Datalake;
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
@@ -224,6 +225,7 @@ async fn read_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use datalake::Datalake;
     use fs::OpendalFileStorage;
 
     #[tokio::test]
@@ -260,5 +262,18 @@ mod tests {
 
         // let schema = res.schema();
         // dbg!(schema);
+    }
+
+    #[tokio::test]
+    async fn test_load_from_iceberg() {
+        let ctx = Datalake::default().get_ctx().await.unwrap();
+        let source = Source::Iceberg {
+            ident: "gwas.gwas_study".to_string(),
+        };
+        let mut node = SourceNode::new("test_id", source, ctx);
+        let res = node.execute(&[]).await.unwrap();
+        let df = res.get(&0).unwrap().clone();
+        df.limit(0, Some(10)).unwrap().show().await.unwrap();
+        panic!()
     }
 }

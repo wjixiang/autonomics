@@ -59,7 +59,6 @@ dependencies = [
  "agentik-proc",
  "agentik-sdk",
  "agentik-types",
- "anyhow",
  "async-trait",
  "dotenvy",
  "futures",
@@ -2693,7 +2692,6 @@ dependencies = [
  "agentik-core",
  "agentik-proc",
  "agentik-sdk",
- "anyhow",
  "async-trait",
  "reqwest 0.13.4",
  "serde",
@@ -5223,7 +5221,6 @@ dependencies = [
  "agentik-core",
  "agentik-proc",
  "agentik-sdk",
- "anyhow",
  "async-trait",
  "fs",
  "futures",
@@ -5232,6 +5229,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -6440,7 +6438,6 @@ version = "0.1.0"
 dependencies = [
  "agentik-core",
  "agentik-sdk",
- "anyhow",
  "data-engine",
  "data-engine-tools",
  "datalake",
@@ -6448,6 +6445,7 @@ dependencies = [
  "eutils",
  "fs",
  "opengwas",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
 ]
@@ -7793,7 +7791,6 @@ version = "0.1.0"
 dependencies = [
  "agentik-core",
  "agentik-sdk",
- "anyhow",
  "color-eyre",
  "crossterm",
  "pulldown-cmark",

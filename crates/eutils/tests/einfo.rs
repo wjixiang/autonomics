@@ -1,12 +1,12 @@
-use anyhow::Result;
 use eutils::EutilsClient;
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 mod common;
 
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn einfo_lists_all_databases() -> Result<()> {
+async fn einfo_lists_all_databases() -> TestResult<()> {
     let client = common::test_client();
     let resp = client.einfo(None).await?;
 
@@ -35,7 +35,7 @@ async fn einfo_lists_all_databases() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn einfo_single_database() -> Result<()> {
+async fn einfo_single_database() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let resp = client.einfo(Some("pubmed")).await?;
@@ -59,7 +59,7 @@ async fn einfo_single_database() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn einfo_gene_database() -> Result<()> {
+async fn einfo_gene_database() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let resp = client.einfo(Some("gene")).await?;

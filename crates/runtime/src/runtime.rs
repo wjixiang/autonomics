@@ -2,13 +2,29 @@ use std::sync::Arc;
 
 use agentik_core::Agent;
 use agentik_core::agent::InternalEvent;
+use agentik_core::error::AgentError;
 use agentik_sdk::model::model_pool::ModelPool;
 use agentik_sdk::types::{AgentEvent, ContentBlock};
 use data_engine::data_engine::DataEngine;
 use data_engine::runtime::spawn_with_engine;
 use datalake::Datalake;
 use fs::OpendalFileStorage;
+use thiserror::Error;
 use tokio_util::sync::CancellationToken;
+
+/// Errors that can occur while building or driving an [`AgentRuntime`].
+#[derive(Debug, Error)]
+pub enum RuntimeError {
+    /// The agent could not be assembled (e.g. model pool misconfiguration,
+    /// missing required tools, internal initialization failure).
+    #[error("failed to build agent: {0}")]
+    AgentBuild(#[from] AgentError),
+
+    #[error("{0}")]
+    Engine(#[from] data_engine::data_engine::error::Error),
+}
+
+pub type Result<T> = std::result::Result<T, RuntimeError>;
 
 pub struct AgentRuntime {
     internal_tx: tokio::sync::mpsc::UnboundedSender<InternalEvent>,
@@ -20,7 +36,7 @@ pub struct AgentRuntime {
 }
 
 impl AgentRuntime {
-    pub fn new(runtime: &tokio::runtime::Runtime, model_pool: ModelPool) -> anyhow::Result<Self> {
+    pub fn new(runtime: &tokio::runtime::Runtime, model_pool: ModelPool) -> Result<Self> {
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let cancel_token = CancellationToken::new();
 
@@ -29,8 +45,8 @@ impl AgentRuntime {
         let (internal_tx, engine_handle, agent_handle) = runtime.block_on(async {
             // Build and spawn DataEngine actor
             let engine = DataEngine::builder()
-                .register_opendal_fs(file_storage.clone())
-                .unwrap()
+                .register_opendal_fs(file_storage.clone())?
+                .register_iceberg().await?
                 .build();
             let (data_engine_client, engine_handle) = spawn_with_engine(engine);
 
@@ -40,7 +56,7 @@ impl AgentRuntime {
                 file_storage,
                 datalake,
                 Arc::new(data_engine_client),
-            )?;
+            );
 
             let system_prompt = "\
 ## Core Competencies
@@ -98,7 +114,7 @@ proactively rather than answering from memory alone.
                 agent.run().await;
             });
 
-            Ok::<_, anyhow::Error>((tx, engine_handle, agent_handle))
+            Ok::<_, RuntimeError>((tx, engine_handle, agent_handle))
         })?;
 
         Ok(Self {

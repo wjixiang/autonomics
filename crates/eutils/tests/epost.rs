@@ -1,12 +1,12 @@
-use anyhow::Result;
 use eutils::EutilsClient;
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 mod common;
 
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn epost_and_chain_to_efetch() -> Result<()> {
+async fn epost_and_chain_to_efetch() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
 
@@ -48,7 +48,7 @@ async fn epost_and_chain_to_efetch() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn epost_returns_valid_key_and_webenv() -> Result<()> {
+async fn epost_returns_valid_key_and_webenv() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let ids = vec![common::PMID_CRISPR.to_string()];

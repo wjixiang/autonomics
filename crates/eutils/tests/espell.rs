@@ -1,12 +1,12 @@
-use anyhow::Result;
 use eutils::EutilsClient;
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 mod common;
 
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn espell_correct_spelling() -> Result<()> {
+async fn espell_correct_spelling() -> TestResult<()> {
     if !common::espell_available().await {
         return Ok(());
     }
@@ -30,7 +30,7 @@ async fn espell_correct_spelling() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn espell_misspelled_term() -> Result<()> {
+async fn espell_misspelled_term() -> TestResult<()> {
     if !common::espell_available().await {
         return Ok(());
     }
@@ -53,7 +53,7 @@ async fn espell_misspelled_term() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn espell_response_structure() -> Result<()> {
+async fn espell_response_structure() -> TestResult<()> {
     if !common::espell_available().await {
         return Ok(());
     }

@@ -1,13 +1,14 @@
-use anyhow::Result;
 use eutils::EutilsClient;
 use eutils::types::EFetchRequest;
 
 mod common;
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn efetch_abstract_single_pmid() -> Result<()> {
+async fn efetch_abstract_single_pmid() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = EFetchRequest {
@@ -29,7 +30,7 @@ async fn efetch_abstract_single_pmid() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn efetch_medline_format() -> Result<()> {
+async fn efetch_medline_format() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = EFetchRequest {
@@ -50,7 +51,7 @@ async fn efetch_medline_format() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn efetch_multiple_pmids() -> Result<()> {
+async fn efetch_multiple_pmids() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let ids = format!("{},{}", common::PMID_CRISPR, common::PMID_BRCA1);
@@ -91,7 +92,7 @@ async fn efetch_invalid_pmid() {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn efetch_default_text_mode() -> Result<()> {
+async fn efetch_default_text_mode() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = EFetchRequest {

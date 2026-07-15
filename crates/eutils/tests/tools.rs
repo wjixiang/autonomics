@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
-use anyhow::Result;
 use serde_json::{Value, json};
 
 use agentik_sdk::types::{ToolResult, ToolResultContent};
 use eutils::EutilsClient;
 
 mod common;
+
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 /// Extract content of a `ToolResult` as a string.
 fn content_str(result: &ToolResult) -> String {
@@ -27,16 +28,16 @@ fn content_str(result: &ToolResult) -> String {
 async fn run_tool(
     tool: &dyn agentik_core::tools::DynToolFunction,
     input: Value,
-) -> Result<ToolResult> {
+) -> TestResult<ToolResult> {
     tool.execute(input)
         .await
-        .map_err(|e| anyhow::anyhow!("{e}"))
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { Box::new(e) })
 }
 
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn tool_pubmed_search() -> Result<()> {
+async fn tool_pubmed_search() -> TestResult<()> {
     let client = Arc::new(common::test_client());
     let registrations = eutils::eutils_registrations(client);
 
@@ -62,7 +63,7 @@ async fn tool_pubmed_search() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn tool_pubmed_fetch() -> Result<()> {
+async fn tool_pubmed_fetch() -> TestResult<()> {
     let client = Arc::new(common::test_client());
     let registrations = eutils::eutils_registrations(client);
 
@@ -92,7 +93,7 @@ async fn tool_pubmed_fetch() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn tool_pubmed_summary() -> Result<()> {
+async fn tool_pubmed_summary() -> TestResult<()> {
     let client = Arc::new(common::test_client());
     let registrations = eutils::eutils_registrations(client);
 
@@ -114,7 +115,7 @@ async fn tool_pubmed_summary() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn tool_pubmed_related() -> Result<()> {
+async fn tool_pubmed_related() -> TestResult<()> {
     let client = Arc::new(common::test_client());
     let registrations = eutils::eutils_registrations(client);
 
@@ -136,7 +137,7 @@ async fn tool_pubmed_related() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn tool_pubmed_spell() -> Result<()> {
+async fn tool_pubmed_spell() -> TestResult<()> {
     let client = Arc::new(common::test_client());
     let registrations = eutils::eutils_registrations(client);
 
@@ -161,7 +162,7 @@ async fn tool_pubmed_spell() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn tool_einfo() -> Result<()> {
+async fn tool_einfo() -> TestResult<()> {
     let client = Arc::new(common::test_client());
     let registrations = eutils::eutils_registrations(client);
 
@@ -183,7 +184,7 @@ async fn tool_einfo() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn tool_egquery() -> Result<()> {
+async fn tool_egquery() -> TestResult<()> {
     let client = Arc::new(common::test_client());
     let registrations = eutils::eutils_registrations(client);
 

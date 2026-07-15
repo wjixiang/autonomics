@@ -37,7 +37,7 @@ pub fn default_tool_set(
     file_storage: Arc<OpendalFileStorage>,
     datalake: Arc<Datalake>,
     data_engine_client: Arc<DataEngineClient>,
-) -> anyhow::Result<Vec<ToolRegistration>> {
+) -> Vec<ToolRegistration> {
     let mut tools = fs::file_base_registrations(file_storage.clone());
     tools.extend(opengwas_tools(file_storage));
     tools.extend(eutils_tools());
@@ -46,5 +46,5 @@ pub fn default_tool_set(
         data_engine_client,
         datalake,
     ));
-    Ok(tools)
+    tools
 }

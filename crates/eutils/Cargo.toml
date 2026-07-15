@@ -10,7 +10,6 @@ description = "Async Rust SDK for NCBI Entrez Programming Utilities (E-utilities
 agentik-core = { path = "../agentik-core" }
 agentik-proc = { path = "../agentik-proc" }
 agentik-sdk = { path = "../agentik-sdk" }
-anyhow = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { version = "0.13", features = ["json", "form"] }
 serde = { workspace = true }

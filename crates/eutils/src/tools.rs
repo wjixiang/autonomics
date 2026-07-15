@@ -25,8 +25,12 @@ use crate::EutilsClient;
 mod helpers {
     use agentik_core::tools::ToolError;
 
-    pub(crate) fn json_err(e: anyhow::Error) -> ToolError {
-        e.into()
+    use crate::error::EutilsError;
+
+    pub(crate) fn json_err(e: EutilsError) -> ToolError {
+        ToolError::ExecutionFailed {
+            source: Box::new(e),
+        }
     }
 }
 

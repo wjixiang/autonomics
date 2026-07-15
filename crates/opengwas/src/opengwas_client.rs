@@ -1,13 +1,13 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::Result;
 use reqwest::{Client, header, multipart};
 use rusqlite::Connection;
 use serde_json::Value;
 
 use fs::OpendalFileStorage;
 
+use crate::error::{OpengwasError, Result};
 use crate::types::*;
 
 const BASE_URL: &str = "https://api.opengwas.io/api";
@@ -245,7 +245,9 @@ impl OpengwasClient {
                     .collect()
             })
             .ok_or_else(|| {
-                anyhow::anyhow!("failed to deserialize gwasinfo response: expected a map")
+                OpengwasError::UnexpectedResponse(
+                    "failed to deserialize gwasinfo response: expected a map".into(),
+                )
             })?;
 
         let db = Self::init_db()?;
@@ -399,7 +401,9 @@ impl OpengwasClient {
                     .collect()
             })
             .ok_or_else(|| {
-                anyhow::anyhow!("failed to deserialize gwasinfo response: expected a map")
+                OpengwasError::UnexpectedResponse(
+                    "failed to deserialize gwasinfo response: expected a map".into(),
+                )
             })?;
 
         // Replace table contents inside spawn_blocking.
@@ -407,7 +411,7 @@ impl OpengwasClient {
         tokio::task::spawn_blocking(move || {
             let guard = db_clone.lock().unwrap();
             Self::bulk_insert(&guard, &infos)?;
-            Ok::<_, anyhow::Error>(infos)
+            Ok::<_, OpengwasError>(infos)
         })
         .await
         .expect("spawn_blocking task panicked")
@@ -457,20 +461,24 @@ impl OpengwasClient {
         const ALLOWED_ORDER: &[&str] = &["asc", "desc"];
 
         if !ALLOWED.contains(&field) {
-            anyhow::bail!("invalid search field: {field} (allowed: trait, author, population)");
+            return Err(OpengwasError::Param(format!(
+                "invalid search field: {field} (allowed: trait, author, population)"
+            )));
         }
 
         // Validate sort parameters if provided.
         if let Some(col) = sort_by {
             if !ALLOWED_SORT.contains(&col) {
-                anyhow::bail!(
+                return Err(OpengwasError::Param(format!(
                     "invalid sort column: {col} (allowed: nsnp, sample_size, year, ncase, ncontrol, pmid, mr, priority, sd, author, trait)"
-                );
+                )));
             }
         }
         if let Some(order) = sort_order {
             if !ALLOWED_ORDER.contains(&order) {
-                anyhow::bail!("invalid sort order: {order} (allowed: asc, desc)");
+                return Err(OpengwasError::Param(format!(
+                    "invalid sort order: {order} (allowed: asc, desc)"
+                )));
             }
         }
 
@@ -776,8 +784,7 @@ impl OpengwasClient {
         storage
             .op
             .write(path, bytes.to_vec())
-            .await
-            .map_err(|e| anyhow::anyhow!(e))?;
+            .await?;
 
         Ok(size)
     }

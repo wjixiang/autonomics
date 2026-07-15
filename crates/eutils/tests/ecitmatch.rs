@@ -1,13 +1,13 @@
-use anyhow::Result;
 use eutils::EutilsClient;
 use eutils::types::ECitMatchRequest;
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 mod common;
 
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn ecitmatch_known_article() -> Result<()> {
+async fn ecitmatch_known_article() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
 
@@ -25,7 +25,7 @@ async fn ecitmatch_known_article() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn ecitmatch_batch_citations() -> Result<()> {
+async fn ecitmatch_batch_citations() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
 
@@ -47,7 +47,7 @@ async fn ecitmatch_batch_citations() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn ecitmatch_empty_batch() -> Result<()> {
+async fn ecitmatch_empty_batch() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ECitMatchRequest { bdata: vec![] };

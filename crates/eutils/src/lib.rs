@@ -15,7 +15,7 @@
 //! ```no_run
 //! use eutils::{EutilsClient, types::ESearchRequest};
 //!
-//! # async fn run() -> anyhow::Result<()> {
+//! # async fn run() -> eutils::error::Result<()> {
 //! let client = EutilsClient::new("my-tool", "dev@example.com", None);
 //! let resp = client
 //!     .esearch(&ESearchRequest::new("pubmed", "CRISPR[Title]"))

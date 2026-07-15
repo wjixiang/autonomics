@@ -1,13 +1,13 @@
-use anyhow::Result;
 use eutils::EutilsClient;
 use eutils::types::ESearchRequest;
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 mod common;
 
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_basic_pubmed_search() -> Result<()> {
+async fn esearch_basic_pubmed_search() -> TestResult<()> {
     let client = common::test_client();
     let resp = client
         .esearch(&ESearchRequest::new("pubmed", "CRISPR"))
@@ -27,7 +27,7 @@ async fn esearch_basic_pubmed_search() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_with_retmax_pagination() -> Result<()> {
+async fn esearch_with_retmax_pagination() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ESearchRequest {
@@ -47,7 +47,7 @@ async fn esearch_with_retmax_pagination() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_retstart_offset() -> Result<()> {
+async fn esearch_retstart_offset() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ESearchRequest {
@@ -67,7 +67,7 @@ async fn esearch_retstart_offset() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_with_usehistory() -> Result<()> {
+async fn esearch_with_usehistory() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ESearchRequest {
@@ -90,7 +90,7 @@ async fn esearch_with_usehistory() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_date_filter() -> Result<()> {
+async fn esearch_date_filter() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ESearchRequest {
@@ -113,7 +113,7 @@ async fn esearch_date_filter() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_reldate_filter() -> Result<()> {
+async fn esearch_reldate_filter() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ESearchRequest {
@@ -135,7 +135,7 @@ async fn esearch_reldate_filter() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_sort_pub_date() -> Result<()> {
+async fn esearch_sort_pub_date() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ESearchRequest {
@@ -154,7 +154,7 @@ async fn esearch_sort_pub_date() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_empty_result() -> Result<()> {
+async fn esearch_empty_result() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let resp = client
@@ -174,7 +174,7 @@ async fn esearch_empty_result() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_specific_pmid_query() -> Result<()> {
+async fn esearch_specific_pmid_query() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let resp = client
@@ -193,7 +193,7 @@ async fn esearch_specific_pmid_query() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esearch_two_pages_dont_overlap() -> Result<()> {
+async fn esearch_two_pages_dont_overlap() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
 

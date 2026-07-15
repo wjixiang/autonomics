@@ -98,4 +98,11 @@ mod tests {
         assert!(matches!(parse_file_format("VCF"), Ok(FileFormat::Vcf)));
         assert!(parse_file_format("xyz").is_err());
     }
+
+    // #[test]
+    // fn test_source_iceberg() {
+    //     let test_ident = "iceberg://abc.def";
+    //     let ident = test_ident.strip_prefix("iceberg://").unwrap();
+    //     assert_eq!(ident, "abc.def");
+    // }
 }

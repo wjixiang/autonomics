@@ -254,7 +254,7 @@ impl DagNode for LdscHsqNode {
                FROM sumstats AS s
                INNER JOIN iceberg.ld_score.{table} AS l
                ON s."{rsid}" = l.rsid
-               ORDER BY l.locus.pos"#,
+               ORDER BY l.locus.position"#,
             z = self.z_column,
             n = self.n_column,
             rsid = self.rsid_column,
@@ -267,6 +267,8 @@ impl DagNode for LdscHsqNode {
 
         // 4. Execute the join and collect the result.
         let joined_df = ctx.sql(&sql).await.map_err(LdscNodeError::ReadBatch)?;
+
+        joined_df.clone().show().await.unwrap();
 
         // 5. Build the LDSC column-name descriptor.
         let cols = ldsc::hsq::HsqColumns {
@@ -373,7 +375,7 @@ mod tests {
     #[tokio::test]
     async fn test_ld_panel_fetching_e2e() {
         let n = 20;
-        let _datalake = Datalake::default();
+        let datalake = Datalake::default();
         let mut node = LdscHsqNode::new(
             "ldsc_test",
             Arc::new(Datalake::default()),
@@ -383,8 +385,18 @@ mod tests {
             LdscHsqConfig::new(vec![n as f64], 5, None),
         );
         let input = make_test_input(n);
+
+        // let catalog = datalake.get_ctx().await.unwrap();
+        // let ld_score = catalog
+        //     .sql("SELECT * FROM iceberg.ld_score.ukbb_eur")
+        //     .await
+        //     .unwrap();
+        // ld_score.limit(0, Some(10)).unwrap().show().await.unwrap();
         // input.data.show().await.unwrap();
+
         let res = node.execute(&[input]).await.unwrap();
-        dbg!(res);
+        let first_df = res.get(&0).unwrap();
+        first_df.clone().show().await.unwrap();
+        // panic!()
     }
 }

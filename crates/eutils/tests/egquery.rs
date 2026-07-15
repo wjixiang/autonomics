@@ -1,12 +1,12 @@
-use anyhow::Result;
 use eutils::EutilsClient;
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 mod common;
 
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn egquery_cross_database_search() -> Result<()> {
+async fn egquery_cross_database_search() -> TestResult<()> {
     if !common::egquery_available().await {
         return Ok(());
     }
@@ -37,7 +37,7 @@ async fn egquery_cross_database_search() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn egquery_niche_term() -> Result<()> {
+async fn egquery_niche_term() -> TestResult<()> {
     if !common::egquery_available().await {
         return Ok(());
     }
@@ -67,7 +67,7 @@ async fn egquery_niche_term() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn egquery_no_matches() -> Result<()> {
+async fn egquery_no_matches() -> TestResult<()> {
     if !common::egquery_available().await {
         return Ok(());
     }

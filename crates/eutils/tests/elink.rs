@@ -1,13 +1,13 @@
-use anyhow::Result;
 use eutils::EutilsClient;
 use eutils::types::ELinkRequest;
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 mod common;
 
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn elink_related_articles() -> Result<()> {
+async fn elink_related_articles() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ELinkRequest {
@@ -38,7 +38,7 @@ async fn elink_related_articles() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn elink_gene_to_pubmed() -> Result<()> {
+async fn elink_gene_to_pubmed() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ELinkRequest {
@@ -59,7 +59,7 @@ async fn elink_gene_to_pubmed() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn elink_neighbor_history() -> Result<()> {
+async fn elink_neighbor_history() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ELinkRequest {
@@ -80,7 +80,7 @@ async fn elink_neighbor_history() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn elink_multiple_pmids() -> Result<()> {
+async fn elink_multiple_pmids() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let ids = format!("{},{}", common::PMID_CRISPR, common::PMID_BRCA1);

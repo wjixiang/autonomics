@@ -1,13 +1,13 @@
-use anyhow::Result;
 use eutils::EutilsClient;
 use eutils::types::ESummaryRequest;
 
+type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 mod common;
 
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esummary_single_pmid_v2() -> Result<()> {
+async fn esummary_single_pmid_v2() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ESummaryRequest {
@@ -43,7 +43,7 @@ async fn esummary_single_pmid_v2() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esummary_multiple_pmids() -> Result<()> {
+async fn esummary_multiple_pmids() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let ids = format!("{},{}", common::PMID_CRISPR, common::PMID_BRCA1);
@@ -65,7 +65,7 @@ async fn esummary_multiple_pmids() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esummary_invalid_pmid_returns_empty() -> Result<()> {
+async fn esummary_invalid_pmid_returns_empty() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ESummaryRequest {
@@ -87,7 +87,7 @@ async fn esummary_invalid_pmid_returns_empty() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[common::serial]
-async fn esummary_article_has_expected_fields() -> Result<()> {
+async fn esummary_article_has_expected_fields() -> TestResult<()> {
     let client = common::test_client();
     common::rate_limit();
     let req = ESummaryRequest {

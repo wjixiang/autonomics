@@ -61,14 +61,6 @@ impl std::fmt::Display for ErrorMessage {
 
 impl std::error::Error for ErrorMessage {}
 
-impl From<anyhow::Error> for ToolError {
-    fn from(value: anyhow::Error) -> Self {
-        ToolError::ExecutionFailed {
-            source: value.into(),
-        }
-    }
-}
-
 impl From<&str> for ToolError {
     fn from(message: &str) -> Self {
         ToolError::ValidationFailed {
