@@ -299,7 +299,9 @@ impl<D: BioDriver + 'static> FileSource for BioSource<D> {
         if let Some(batch_size) = self.batch_size {
             options.batch_size = batch_size;
         }
-        let opener: Arc<dyn FileOpener> = Arc::new(BioOpener::<D>::new(object_store, options));
+        let file_indices = self.projection.file_indices.clone();
+        let opener: Arc<dyn FileOpener> =
+            Arc::new(BioOpener::<D>::new(object_store, options, file_indices));
         // The opener yields the full file schema; ProjectionOpener applies the
         // column projection (and resolves partition-column references).
         ProjectionOpener::try_new(
@@ -359,15 +361,21 @@ impl<D: BioDriver + 'static> FileSource for BioSource<D> {
 pub struct BioOpener<D: BioDriver> {
     object_store: Arc<dyn ObjectStore>,
     options: BioOptions,
+    file_indices: Vec<usize>,
     _driver: PhantomData<D>,
 }
 
 impl<D: BioDriver> BioOpener<D> {
-    pub fn new(object_store: Arc<dyn ObjectStore>, options: BioOptions) -> Self {
+    pub fn new(
+        object_store: Arc<dyn ObjectStore>,
+        options: BioOptions,
+        file_indices: Vec<usize>,
+    ) -> Self {
         Self {
             object_store,
             options,
             _driver: PhantomData,
+            file_indices,
         }
     }
 }
@@ -376,6 +384,7 @@ impl<D: BioDriver + 'static> FileOpener for BioOpener<D> {
     fn open(&self, partitioned_file: PartitionedFile) -> Result<FileOpenFuture> {
         let store = Arc::clone(&self.object_store);
         let batch_size = self.options.batch_size;
+        let indices = self.file_indices.clone();
 
         Ok(Box::pin(async move {
             let location = partitioned_file.object_meta.location.clone();
@@ -387,7 +396,14 @@ impl<D: BioDriver + 'static> FileOpener for BioOpener<D> {
             // scan returns a synchronous iterator over Result<RecordBatch, _>.
             let batches = D::scan(input, batch_size)?;
             let stream = stream::iter(batches)
-                .map(|r| r.map_err(DataFusionError::from))
+                .map(move |r| {
+                    let batch = r?;
+                    if indices.len() < batch.num_columns() {
+                        batch.project(&indices).map_err(DataFusionError::from)
+                    } else {
+                        Ok(batch)
+                    }
+                })
                 .boxed();
             Ok(stream)
         }))

@@ -48,6 +48,7 @@ iceberg-storage-opendal = { git = "https://github.com/apache/iceberg-rust.git", 
 iceberg-datafusion = { git = "https://github.com/apache/iceberg-rust.git", rev = "713e2016" }
 arrow = { version = "58.3.0", features = ["prettyprint"] }
 arrow-array = "58.3.0"
+arrow-buffer = "58.3.0"
 arrow-schema = "58.3.0"
 arrow-csv = "58.3.0"
 arrow-select = "58.3.0"

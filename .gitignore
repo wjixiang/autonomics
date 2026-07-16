@@ -1,11 +1,7 @@
 .claude
 .env
 target
-dendrite/
 *.db
-apps/phloem-web/node_modules/
-apps/phloem-web/.svelte-kit/
-apps/phloem-web/build/
 
 # TUI logs and runtime artefacts
 apps/phloem-tui/logs/
@@ -16,3 +12,5 @@ phloem.json
 
 # Vendored external crate (cloned for local reference, not part of workspace)
 ratatui-comfy-tabs/
+dendrite/
+notes/

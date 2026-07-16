@@ -16,6 +16,6 @@ pub mod sql_node;
 pub use ldsc_hsq::{LdscHsqConfig, LdscHsqNode};
 pub use linear_regression::LinearRegressionNode;
 pub use meta::{DEFAULT_PORT, DagNode, NodeId, NodeInput, NodeMeta, Port};
-pub use sink::{Sink, SinkNode, WriteFormat};
+pub use sink::{Sink, SinkMode, SinkNode, WriteFormat};
 pub use source::{FileFormat, Source, SourceNode};
 pub use sql_node::SqlNode;

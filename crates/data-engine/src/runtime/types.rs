@@ -3,7 +3,7 @@ use tokio::sync::oneshot;
 use crate::data_engine::dag::RunReport;
 use crate::data_engine::dag::graph::PortOutputs;
 use crate::data_engine::error::Result as EngineResult;
-use crate::data_engine::{LdscHsqConfig, Sink, Source};
+use crate::data_engine::{LdscHsqConfig, Sink, SinkMode, Source};
 
 pub enum DataEngineCmd {
     AddSourceNode {
@@ -19,6 +19,8 @@ pub enum DataEngineCmd {
     AddSinkNode {
         id: String,
         sink: Sink,
+        mode: SinkMode,
+        datalake: std::sync::Arc<datalake::Datalake>,
         reply: oneshot::Sender<EngineResult<()>>,
     },
     AddLinearRegressionNode {

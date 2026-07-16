@@ -32,6 +32,17 @@ pub enum RuntimeStatus {
 pub struct SchedulerConfig {
     /// Maximum number of nodes running concurrently (semaphore permits).
     pub max_concurrency: usize,
+    /// When `true`, [`NodeReport::output_rows`] is populated by forcing every
+    /// successful node's `DataFrame` to be collected (i.e. `SELECT COUNT(*)`
+    /// over the LogicalPlan). This is an **eager** operation — for a source
+    /// node reading `.vcf.gz` or similar, it triggers full decompression and
+    /// parsing of every record, dominating the run cost.
+    ///
+    /// Defaults to `false` so that `run_dag` remains a "logical only" call:
+    /// `SourceNode`/`SqlNode` execute lazily, the report reflects timings and
+    /// schema without doing the I/O. Enable explicitly when downstream tooling
+    /// (agents, dashboards, callers) needs row counts.
+    pub compute_row_counts: bool,
 }
 
 impl Default for SchedulerConfig {
@@ -41,6 +52,7 @@ impl Default for SchedulerConfig {
             .unwrap_or(1);
         Self {
             max_concurrency: cpus,
+            compute_row_counts: false,
         }
     }
 }

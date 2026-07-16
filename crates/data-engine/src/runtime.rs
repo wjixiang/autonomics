@@ -31,8 +31,8 @@ impl DataEngineServer {
             DataEngineCmd::AddSqlNode { id, query, reply } => {
                 let _ = reply.send(self.engine.sql_node(id, query).map(|_| ()));
             }
-            DataEngineCmd::AddSinkNode { id, sink, reply } => {
-                let _ = reply.send(self.engine.sink_node(id, sink).map(|_| ()));
+            DataEngineCmd::AddSinkNode { id, sink, mode, datalake, reply } => {
+                let _ = reply.send(self.engine.sink_node(id, sink, mode, datalake).map(|_| ()));
             }
             DataEngineCmd::AddLinearRegressionNode {
                 id,
@@ -150,12 +150,20 @@ impl DataEngineClient {
         .await
     }
 
-    pub async fn add_sink_node(&self, id: String, sink: crate::data_engine::Sink) -> Result<()> {
+    pub async fn add_sink_node(
+        &self,
+        id: String,
+        sink: crate::data_engine::Sink,
+        mode: crate::data_engine::SinkMode,
+        datalake: std::sync::Arc<datalake::Datalake>,
+    ) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::AddSinkNode {
                 id,
                 sink,
+                mode,
+                datalake,
                 reply: reply_tx,
             },
             reply_rx,

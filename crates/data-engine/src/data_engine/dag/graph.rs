@@ -262,7 +262,7 @@ impl DAG {
 
         // Build per-node reports for the agent-friendly result.
         let node_reports = self
-            .build_node_reports(&all_ids, &durations, &skipped_because)
+            .build_node_reports(&all_ids, &durations, &skipped_because, cfg.compute_row_counts)
             .await;
 
         Ok(RunReport {
@@ -275,29 +275,29 @@ impl DAG {
 
     /// Build per-node [`NodeReport`] summaries from the execution state
     /// available after the scheduler loop.
+    ///
+    /// Row counts (`output_rows`) require running `SELECT COUNT(*)` over the
+    /// LogicalPlan of every successful node's primary output DataFrame. That is
+    /// an **eager** operation — for a source over a multi-GB VCF.gz it forces
+    /// the file to be decompressed, parsed, and counted end-to-end. We never
+    /// compute row counts here unless the caller explicitly opted in via
+    /// [`SchedulerConfig::compute_row_counts`]. When opted in, the per-node
+    /// count futures are joined concurrently via `futures::future::join_all`
+    /// so the count phase runs in parallel rather than sequentially.
     async fn build_node_reports(
         &self,
         all_ids: &[NodeId],
         durations: &HashMap<NodeId, std::time::Duration>,
         skipped_because: &HashMap<NodeId, NodeId>,
+        compute_row_counts: bool,
     ) -> Vec<NodeReport> {
-        // We collect all futures for row counts at once to avoid sequential awaits.
-        let mut count_futs = Vec::new();
-        for id in all_ids {
-            if let Some(dfs) = self.outputs.get(id) {
-                // Take the first output port's DataFrame for the row count.
-                if let Some((_name, df)) = dfs.iter().next() {
-                    count_futs.push((id.clone(), df.clone().count()));
-                }
-            }
-        }
-
-        let counts: HashMap<NodeId, usize> = {
-            let mut map = HashMap::new();
-            for (id, fut) in count_futs {
-                map.insert(id, fut.await.unwrap_or(0));
-            }
-            map
+        // Only run `count()` when the caller opted in. Default is off, so a
+        // VCF source node does NOT trigger full decompression/parse just to
+        // surface `output_rows` in the report.
+        let counts: HashMap<NodeId, usize> = if compute_row_counts {
+            self.collect_row_counts(all_ids).await
+        } else {
+            HashMap::new()
         };
 
         all_ids
@@ -316,6 +316,8 @@ impl DAG {
                     .to_string();
 
                 // Extract output schema from the first output port's DataFrame.
+                // `schema()` only inspects the LogicalPlan — it does NOT trigger
+                // execution, so it's safe (and free) to query unconditionally.
                 let output_schema = self.outputs.get(id).and_then(|dfs| {
                     dfs.values().next().map(|df| {
                         df.schema()
@@ -355,6 +357,62 @@ impl DAG {
                 }
             })
             .collect()
+    }
+
+    /// Drive `df.count()` for every successful node's primary output DataFrame
+    /// concurrently. Returns an empty map if no node produced output.
+    ///
+    /// **This is the only place in the runtime that voluntarily does eager I/O
+    /// on output DataFrames.** Callers must gate it behind
+    /// `SchedulerConfig::compute_row_counts` — invoking it unconditionally
+    /// would force every source (e.g. `.vcf.gz`) to be fully scanned.
+    ///
+    /// Execution model: each count future is spawned on the runtime and we
+    /// `join_all` them so multiple nodes' counts run in parallel instead of
+    /// blocking the report on the slowest single scan.
+    async fn collect_row_counts(&self, all_ids: &[NodeId]) -> HashMap<NodeId, usize> {
+        // Build a list of (id, owned future). Cloning `DataFrame` is cheap (it
+        // wraps an `Arc<LogicalPlan>`), so we can move each clone into its own
+        // future without contention.
+        let mut pairs: Vec<(
+            NodeId,
+            futures::future::BoxFuture<'static, datafusion::error::Result<usize>>,
+        )> = Vec::new();
+        for id in all_ids {
+            let Some(dfs) = self.outputs.get(id) else {
+                continue;
+            };
+            let Some(df) = dfs.values().next() else {
+                continue;
+            };
+            let owned = df.clone();
+            let id_owned = id.clone();
+            pairs.push((
+                id_owned,
+                Box::pin(async move { owned.count().await }),
+            ));
+        }
+
+        // Join all counts concurrently. If any future panics or returns an
+        // error, fall back to 0 for that node — the row count is purely
+        // diagnostic and shouldn't poison the report.
+        let futs: Vec<_> = pairs.into_iter().map(|(_, f)| f).collect();
+        let results = futures::future::join_all(futs).await;
+
+        // We need the ids in the order that matches `results`. Rebuild the
+        // ordered list by walking `all_ids` and skipping nodes that had no
+        // output DataFrame — keeping the result-index aligned with the source
+        // ordering.
+        let mut counts: HashMap<NodeId, usize> = HashMap::new();
+        let mut result_iter = results.into_iter();
+        for id in all_ids {
+            if self.outputs.get(id).and_then(|d| d.values().next()).is_some() {
+                if let Some(res) = result_iter.next() {
+                    counts.insert(id.clone(), res.unwrap_or(0));
+                }
+            }
+        }
+        counts
     }
 }
 

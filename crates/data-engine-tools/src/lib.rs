@@ -74,7 +74,10 @@ pub fn registrations(
     vec![
         ToolRegistration::from(add_source_tool::AddSourceNodeTool::new(client.clone())),
         ToolRegistration::from(add_sql_tool::AddSqlNodeTool::new(client.clone())),
-        ToolRegistration::from(add_sink_tool::AddSinkNodeTool::new(client.clone())),
+        ToolRegistration::from(add_sink_tool::AddSinkNodeTool::new(
+            client.clone(),
+            datalake.clone(),
+        )),
         ToolRegistration::from(
             add_linear_regression_tool::AddLinearRegressionNodeTool::new(client.clone()),
         ),

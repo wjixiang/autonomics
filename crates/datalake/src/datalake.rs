@@ -184,6 +184,10 @@ impl Datalake {
         creation: iceberg::TableCreation,
     ) -> crate::error::Result<iceberg::table::Table> {
         let rest_catalog = self.get_catalog().await?;
+
+        // Ensure namespace exist
+        self.create_namespace_if_not_exist(namespace).await?;
+
         let tableident: iceberg::TableIdent =
             iceberg::TableIdent::new(namespace.clone(), creation.name.clone());
         if rest_catalog.table_exists(&tableident).await? {

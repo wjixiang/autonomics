@@ -139,3 +139,391 @@ async fn test_add_source_sql_run_dag() {
     assert_eq!(results.len(), 1);
     check_ok(&results[0], "add_edge sql->sink");
 }
+
+/// Regression: when a SqlNode output contains a Struct-typed column,
+/// `get_output` must report `returned_rows == total_rows > 0`, not
+/// `returned_rows: 0, total_rows: N`.
+///
+/// The agent's obstacle #2 reported exactly that pattern on a real VCF source
+/// (`SELECT * FROM port_0 LIMIT 5` → `returned_rows: 0, total_rows: 5`). The
+/// VCF `info` column carries Dictionary/List-encoded subfields that, on
+/// `collect().await`, can error out and get silently swallowed by
+/// `unwrap_or_default()` in `get_output_tool.rs:155`, yielding an empty batch
+/// vector while `df.count()` (a separate, `COUNT(*)`-shaped plan) still
+/// reports the true row count.
+///
+/// This test exercises the exact scenario end-to-end: real `sample.vcf.gz`
+/// source → `SELECT * FROM port_0 LIMIT 5` SqlNode → run → `get_output`. It
+/// pins that `returned_rows` matches `total_rows`, which is the contract the
+/// agent's pipeline relied on.
+#[tokio::test]
+async fn test_get_output_vcf_select_star_returns_correct_rows() {
+    let file_storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let vcf_path =
+        std::path::Path::new(&manifest_dir).join("../data-engine/test_datasets/sample.vcf.gz");
+    let vcf_data = std::fs::read(vcf_path).unwrap();
+    file_storage
+        .op
+        .write("/sample.vcf.gz", vcf_data)
+        .await
+        .unwrap();
+
+    let engine = DataEngine::builder()
+        .register_opendal_fs(file_storage)
+        .unwrap()
+        .build();
+    let (client, _handle) = spawn_with_engine(engine);
+    let tools = data_engine_tools::registrations(
+        Arc::new(client.clone()),
+        Arc::new(datalake::Datalake::new()),
+    );
+    let mut toolset = Toolset::new(None);
+    toolset.register_all(tools).unwrap();
+
+    // 1. VCF source — auto-detected from the `.vcf.gz` extension.
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "v1",
+                "add_source_node",
+                json!({"id": "vcf_src", "path": "/sample.vcf.gz"}),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_source_node (vcf)");
+
+    // 2. `SELECT * FROM port_0 LIMIT 5` — the exact query from the agent's
+    //    obstacle #2 report. Forces the VCF (Struct + Dictionary/List info
+    //    subfields) through the SqlNode collect path.
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "v2",
+                "add_sql_node",
+                json!({
+                    "id": "preview",
+                    "query": "SELECT * FROM port_0 LIMIT 5"
+                }),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_sql_node (SELECT * LIMIT 5)");
+
+    // 3. Edge + run.
+    let res = toolset
+        .execute(
+            &[build_tooluse("v3", "add_edge", json!({"from": "vcf_src", "to": "preview"}))],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_edge vcf_src->preview");
+
+    let res = toolset
+        .execute(&[build_tooluse("v4", "run_dag", json!({}))], None, None)
+        .await
+        .unwrap();
+    check_ok(&res[0], "run_dag");
+
+    // 4. get_output and parse the JSON envelope.
+    let res = toolset
+        .execute(
+            &[build_tooluse("v5", "get_output", json!({"id": "preview", "limit": 100}))],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "get_output preview");
+
+    let parsed = parse_tool_json(&res[0].content);
+
+    let outputs = parsed
+        .get("outputs")
+        .and_then(|o| o.as_array())
+        .expect("get_output JSON should have `outputs` array");
+    assert!(!outputs.is_empty(), "expected at least one output entry");
+
+    let entry = &outputs[0];
+    let total_rows = entry
+        .get("total_rows")
+        .and_then(|v| v.as_u64())
+        .expect("total_rows should be a number") as usize;
+    let returned_rows = entry
+        .get("returned_rows")
+        .and_then(|v| v.as_u64())
+        .expect("returned_rows should be a number") as usize;
+
+    // The agent saw `total_rows: 5` and `returned_rows: 0` for exactly this
+    // query. Pin that the two counts agree; if they ever diverge again the
+    // `collect().await.unwrap_or_default()` swallow in
+    // `get_output_tool.rs:155` is silently dropping batches.
+    assert!(
+        total_rows > 0,
+        "expected total_rows > 0 for sample.vcf.gz; got {total_rows}"
+    );
+    assert_eq!(
+        total_rows, returned_rows,
+        "OBSTACLE #2 regression: total_rows ({total_rows}) != returned_rows \
+         ({returned_rows}); `collect()` on the VCF preview likely errored and \
+         was swallowed by `unwrap_or_default()` in get_output_tool.rs."
+    );
+}
+
+/// Obstacle #2 fix verification: when `collect()` of the limited plan errors
+/// at runtime but `count()` (a separate, column-eliminated plan) succeeds,
+/// `get_output` MUST surface the real error in-band (`collect_error`) instead
+/// of the old behavior — silently swallowing it via `unwrap_or_default()` and
+/// reporting the misleading `returned_rows: 0, total_rows: N`.
+///
+/// We force exactly that divergence with a runtime-erroring projection:
+/// `SELECT cast(s AS int) ...` over a string column that holds non-numeric
+/// values. `count(*)` eliminates the unused (and erroring) cast, so it
+/// returns 5; the `SELECT *` collect materializes the cast and errors.
+///
+/// Before the fix this produced `total_rows=5, returned_rows=0` (silent
+/// swallow). After the fix it produces `total_rows=5, returned_rows=null,
+/// collect_error="<msg>"` — the agent sees the real failure.
+#[tokio::test]
+async fn test_get_output_surfaces_collect_error_instead_of_swallowing() {
+    let file_storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
+    // 5 rows where `s` is non-numeric → cast(s as int) errors at execution.
+    let csv = b"age,s\n1,abc\n2,def\n3,ghi\n4,jkl\n5,mno\n";
+    file_storage.op.write("/badcast.csv", csv.to_vec()).await.unwrap();
+
+    let engine = DataEngine::builder()
+        .register_opendal_fs(file_storage)
+        .unwrap()
+        .build();
+    let (client, _handle) = spawn_with_engine(engine);
+    let tools = data_engine_tools::registrations(
+        Arc::new(client.clone()),
+        Arc::new(datalake::Datalake::new()),
+    );
+    let mut toolset = Toolset::new(None);
+    toolset.register_all(tools).unwrap();
+
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "e1",
+                "add_source_node",
+                json!({"id": "src", "path": "/badcast.csv"}),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_source_node");
+
+    // Runtime-erroring projection. `count(*)` over this typically eliminates
+    // the cast (column unused), so it returns 5; `SELECT *` must materialize
+    // the cast and fails.
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "e2",
+                "add_sql_node",
+                json!({
+                    "id": "badcast",
+                    "query": "SELECT cast(s as int) AS n FROM port_0"
+                }),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_sql_node (badcast)");
+
+    let res = toolset
+        .execute(
+            &[build_tooluse("e3", "add_edge", json!({"from": "src", "to": "badcast"}))],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_edge");
+
+    let res = toolset
+        .execute(&[build_tooluse("e4", "run_dag", json!({}))], None, None)
+        .await
+        .unwrap();
+    check_ok(&res[0], "run_dag");
+
+    let res = toolset
+        .execute(
+            &[build_tooluse("e5", "get_output", json!({"id": "badcast", "limit": 100}))],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    // NOTE: get_output returns success_json (stable envelope) but with a
+    // per-output `collect_error` field instead of the old silent 0 rows.
+    let parsed = parse_tool_json(&res[0].content);
+    let entry = &parsed["outputs"][0];
+    let total_rows = entry["total_rows"].as_u64().unwrap() as usize;
+    let collect_error = entry["collect_error"].as_str();
+    let returned_rows = &entry["returned_rows"];
+    eprintln!(
+        "[badcast get_output] total_rows={total_rows} returned_rows={returned_rows} collect_error={collect_error:?}"
+    );
+
+    // total_rows still comes from COUNT(*) which eliminated the cast → 5.
+    assert!(
+        total_rows > 0,
+        "count(*) should still return the row count (cast eliminated); got {total_rows}."
+    );
+    // The fix: the collect error is surfaced in-band, not swallowed.
+    assert!(
+        collect_error.is_some(),
+        "FIX REGRESSION: get_output must surface the collect error in \
+         `collect_error`; got none. entry: {entry}"
+    );
+    // And returned_rows is now `null` (not a misleading 0).
+    assert!(
+        returned_rows.is_null(),
+        "returned_rows must be null when collect errors (was silently 0 \
+         before the fix); got {returned_rows}"
+    );
+}
+
+/// Synthetic baseline: a hand-built Struct column (via `named_struct`) does
+/// NOT trigger obstacle #2 — `returned_rows` matches `total_rows`. This
+/// narrows the VCF bug to the Dictionary/List-encoded INFO subfields, not to
+/// Struct columns in general. Keep it as a control alongside the VCF test.
+#[tokio::test]
+async fn test_get_output_synthetic_struct_column_baseline() {
+    let file_storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let csv_path =
+        std::path::Path::new(&manifest_dir).join("../data-engine/test_datasets/insurance.csv");
+    let csv_data = std::fs::read(csv_path).unwrap();
+    file_storage
+        .op
+        .write("/insurance.csv", csv_data)
+        .await
+        .unwrap();
+
+    let engine = DataEngine::builder()
+        .register_opendal_fs(file_storage)
+        .unwrap()
+        .build();
+    let (client, _handle) = spawn_with_engine(engine);
+    let tools = data_engine_tools::registrations(
+        Arc::new(client.clone()),
+        Arc::new(datalake::Datalake::new()),
+    );
+    let mut toolset = Toolset::new(None);
+    toolset.register_all(tools).unwrap();
+
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "b1",
+                "add_source_node",
+                json!({"id": "src", "path": "/insurance.csv"}),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_source_node");
+
+    // Struct column via named_struct — plain Struct(Float64, Float64), no
+    // Dictionary/List encoding. Baseline that should always work.
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "b2",
+                "add_sql_node",
+                json!({
+                    "id": "struct_node",
+                    "query": "SELECT age, named_struct('lo', 0.0, 'hi', charges) AS bounds \
+                              FROM port_0 WHERE age > 30 LIMIT 5"
+                }),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_sql_node (synthetic struct)");
+
+    let res = toolset
+        .execute(
+            &[build_tooluse("b3", "add_edge", json!({"from": "src", "to": "struct_node"}))],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_edge");
+
+    let res = toolset
+        .execute(&[build_tooluse("b4", "run_dag", json!({}))], None, None)
+        .await
+        .unwrap();
+    check_ok(&res[0], "run_dag");
+
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "b5",
+                "get_output",
+                json!({"id": "struct_node", "limit": 100}),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "get_output struct_node");
+
+    let parsed = parse_tool_json(&res[0].content);
+    let entry = &parsed["outputs"][0];
+    let total_rows = entry["total_rows"].as_u64().unwrap() as usize;
+    let returned_rows = entry["returned_rows"].as_u64().unwrap() as usize;
+    assert!(total_rows > 0, "baseline: expected total_rows > 0");
+    assert_eq!(
+        total_rows, returned_rows,
+        "baseline synthetic struct should never hit obstacle #2"
+    );
+}
+
+/// Normalize the untagged `ToolResultContent` enum (Text | Json | Blocks) to
+/// a parsed `serde_json::Value`. `get_output` emits `success_json` (→ Json),
+/// but we handle all variants so the helper is robust.
+fn parse_tool_json(content: &agentik_sdk::types::tools::ToolResultContent) -> serde_json::Value {
+    use agentik_sdk::types::tools::{ToolResultBlock, ToolResultContent};
+    match content {
+        ToolResultContent::Json(v) => v.clone(),
+        ToolResultContent::Text(s) => serde_json::from_str(s).unwrap_or_else(|e| {
+            panic!("tool Text content wasn't valid JSON: {e}; body: {s}")
+        }),
+        ToolResultContent::Blocks(blocks) => {
+            let text: String = blocks
+                .iter()
+                .filter_map(|b| match b {
+                    ToolResultBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            serde_json::from_str(&text).unwrap_or_else(|e| {
+                panic!("tool Blocks content wasn't valid JSON: {e}; body: {text}")
+            })
+        }
+    }
+}

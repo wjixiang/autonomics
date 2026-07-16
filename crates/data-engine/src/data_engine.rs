@@ -15,7 +15,7 @@ pub mod error;
 pub mod nodes;
 
 pub use nodes::{
-    FileFormat, LdscHsqConfig, LdscHsqNode, LinearRegressionNode, Sink, SinkNode, Source,
+    FileFormat, LdscHsqConfig, LdscHsqNode, LinearRegressionNode, Sink, SinkMode, SinkNode, Source,
     SourceNode, SqlNode, WriteFormat,
 };
 
@@ -122,11 +122,17 @@ impl<R: Catalog> DataEngine<R> {
     }
 
     /// Convenience: add a [`SinkNode`] (chaining-safe).
-    pub fn sink_node(&mut self, id: impl Into<String>, sink: Sink) -> Result<&mut Self> {
+    pub fn sink_node(
+        &mut self,
+        id: impl Into<String>,
+        sink: Sink,
+        mode: SinkMode,
+        datalake: Arc<Datalake>,
+    ) -> Result<&mut Self> {
         let id = id.into();
         self.dag.add_node(
             id.clone(),
-            Box::new(SinkNode::new(id, sink, self.ctx.clone())),
+            Box::new(SinkNode::new(id, sink, mode, self.ctx.clone(), datalake)),
         )?;
         Ok(self)
     }
@@ -272,13 +278,14 @@ impl DataEngineBuilder {
 mod tests {
     use std::sync::Arc;
 
-    use super::{DataEngine, Sink, Source, WriteFormat};
+    use super::{DataEngine, Sink, SinkMode, Source, WriteFormat};
     use crate::data_engine::dag::graph::PortOutputs;
     use crate::data_engine::dag::{DagError, RuntimeStatus, SchedulerConfig};
     use crate::data_engine::error::Error;
     use crate::data_engine::nodes::{DagNode, NodeInput, NodeMeta};
     use datafusion::common::HashMap;
     use datafusion::prelude::CsvReadOptions;
+    use datalake::Datalake;
     use fs::OpendalFileStorage;
 
     fn datasets_dir() -> std::path::PathBuf {
@@ -347,6 +354,8 @@ mod tests {
                     path: out_path.into(),
                     format: WriteFormat::Csv,
                 },
+                SinkMode::Overwrite,
+                Arc::new(Datalake::default()),
             )
             .unwrap()
             // Default edges: each node has a single relevant port, resolved automatically.
@@ -415,7 +424,10 @@ mod tests {
         // collision between concurrent consumers of the same source port.
         let mut engine = DataEngine::builder()
             .build()
-            .with_config(SchedulerConfig { max_concurrency: 2 });
+            .with_config(SchedulerConfig {
+                max_concurrency: 2,
+                ..SchedulerConfig::default()
+            });
         let iris = datasets_dir().join("Iris.csv");
 
         engine
@@ -501,6 +513,8 @@ mod tests {
                     path: "/tmp/dag_join_out.csv".into(),
                     format: WriteFormat::Csv,
                 },
+                SinkMode::Overwrite,
+                Arc::new(Datalake::default()),
             )
             .unwrap()
             .add_edge("src_a", "join", 0, 0)
@@ -540,6 +554,96 @@ mod tests {
         let report = engine.run().await.expect("run should succeed");
         assert!(report.ok);
         assert_eq!(report.status("vcf"), Some(RuntimeStatus::Success));
+    }
+
+    /// Regression: with default `compute_row_counts = false`, running a
+    /// source-only VCF DAG must NOT eagerly `count()` the dataset. The
+    /// `output_rows` field of the report should stay `None`, which proves the
+    /// eager COUNT(*) scan never ran.
+    ///
+    /// Before the fix, `build_node_reports` unconditionally called `df.count()`
+    /// on every output, forcing a full decompression + parse of the VCF — the
+    /// worst-case behavior for "source node, no downstream consumer".
+    #[tokio::test]
+    async fn vcf_source_skips_count_by_default() {
+        let mut engine = DataEngine::builder().build();
+        let vcf = datasets_dir().join("sample.vcf.gz");
+
+        engine
+            .source_node(
+                "vcf",
+                Source::File {
+                    path: vcf.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("vcf"), Some(RuntimeStatus::Success));
+
+        let node = report
+            .nodes
+            .iter()
+            .find(|n| n.id == "vcf")
+            .expect("source node should be in the report");
+
+        // The whole point of the fix: default config must NOT compute rows.
+        assert!(
+            node.output_rows.is_none(),
+            "default config should skip row counting; got {:?}",
+            node.output_rows
+        );
+    }
+
+    /// Opt-in path: when the caller explicitly sets
+    /// `compute_row_counts = true`, the report must contain a row count for
+    /// every successful source node — proving that the parallel `join_all`
+    /// path works end-to-end.
+    #[tokio::test]
+    async fn vcf_source_computes_rows_when_opted_in() {
+        let mut engine = DataEngine::builder()
+            .build()
+            .with_config(SchedulerConfig {
+                compute_row_counts: true,
+                ..SchedulerConfig::default()
+            });
+        let vcf = datasets_dir().join("sample.vcf.gz");
+
+        engine
+            .source_node(
+                "vcf",
+                Source::File {
+                    path: vcf.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+
+        let node = report
+            .nodes
+            .iter()
+            .find(|n| n.id == "vcf")
+            .expect("source node should be in the report");
+
+        let rows = node
+            .output_rows
+            .expect("opted-in run must populate row counts");
+        assert!(
+            rows > 0,
+            "sample VCF should report a positive row count, got {rows}"
+        );
+
+        // Output schema should still be populated regardless of the count
+        // setting — `schema()` inspects the LogicalPlan only, not data.
+        assert!(
+            node.output_schema.is_some(),
+            "schema should be visible from the LogicalPlan without execution"
+        );
     }
 
     #[tokio::test]
@@ -710,6 +814,7 @@ mod tests {
         for &concurrency in &[4usize, 1] {
             let mut engine = DataEngine::builder().build().with_config(SchedulerConfig {
                 max_concurrency: concurrency,
+                ..SchedulerConfig::default()
             });
             for i in 0..4 {
                 let id = format!("s{i}");
