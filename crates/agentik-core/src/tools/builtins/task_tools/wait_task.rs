@@ -91,9 +91,10 @@ impl ToolFunction for WaitTaskTool {
     type Input = WaitTaskInput;
 
     fn sync_seconds(&self) -> u64 {
-        // The tool itself should start quickly; the actual wait is handled
-        // internally via tokio::select! with the user-specified timeout.
-        5
+        // This tool is inherently a blocking wait — it must never be
+        // demoted to background itself. Return the same value as the
+        // hard timeout so the sync window always covers the full wait.
+        self.timeout_seconds()
     }
 
     fn timeout_seconds(&self) -> u64 {
