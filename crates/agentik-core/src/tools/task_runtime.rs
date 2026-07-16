@@ -280,6 +280,14 @@ impl TaskEntry {
     pub fn output_tx(&self) -> watch::Sender<String> {
         self.output_tx.clone()
     }
+
+    /// Clone the internal status watch receiver.
+    ///
+    /// Callers can `await receiver.changed()` outside any lock to wait for
+    /// task completion without holding the task list's `RwLock`.
+    pub fn status_receiver_clone(&self) -> watch::Receiver<TaskStatus> {
+        self.status.clone()
+    }
 }
 
 #[cfg(test)]

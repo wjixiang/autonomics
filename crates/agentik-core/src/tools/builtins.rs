@@ -8,4 +8,6 @@ pub mod lifecycle;
 pub mod task_tools;
 
 pub use lifecycle::{AbortTaskInput, AbortTaskTool, lifecycle_registrations};
-pub use task_tools::{TaskResultViewerTool, ViewTaskResultsInput, task_registrations};
+pub use task_tools::{
+    TaskResultViewerTool, ViewTaskResultsInput, WaitTaskInput, WaitTaskTool, task_registrations,
+};

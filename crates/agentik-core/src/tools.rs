@@ -31,6 +31,6 @@ pub use agentik_sdk::types::{
 // Re-export lifecycle tools at the `tools` facade so callers can do
 // `use agentik_core::tools::{AbortTaskTool, ...}`.
 pub use builtins::{
-    AbortTaskInput, AbortTaskTool, TaskResultViewerTool, ViewTaskResultsInput,
-    lifecycle_registrations, task_registrations,
+    AbortTaskInput, AbortTaskTool, TaskResultViewerTool, ViewTaskResultsInput, WaitTaskInput,
+    WaitTaskTool, lifecycle_registrations, task_registrations,
 };

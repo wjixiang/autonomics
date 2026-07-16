@@ -18,7 +18,10 @@ use agentik_sdk::types::ToolResult;
                   all available tables and namespaces in the data lake. \
                   Returns results as JSON with windowed pagination via `offset` + `max_rows`. \
                   The response includes `total_available`, `offset`, `row_count`, and `has_more` \
-                  so you can page through large tables without re-running the query from scratch."
+                  so you can page through large tables without re-running the query from scratch.
+
+        **IMPORTANT**: you need to add `iceberg` before the table ident (e.g. `SELECT * FROM iceberg.ns.tb`).
+        "
 )]
 pub struct QueryIcebergInput {
     #[desc = "SQL query (SELECT ...) or 'LIST TABLES' / 'SHOW TABLES' to list all tables"]
