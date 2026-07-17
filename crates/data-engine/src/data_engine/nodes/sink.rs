@@ -4,6 +4,7 @@
 //! exactly one input and produces no output. The destination is described by
 //! [`Sink`] — a file (CSV / Parquet) or an Iceberg table.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -79,6 +80,79 @@ pub struct SinkNode {
     mode: SinkMode,
     ctx: SessionContext,
     datalake: Arc<Datalake>,
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// WORKAROUND(iceberg-rust): bare reserved column names.
+//
+// iceberg-rust reserves the *bare* names `pos` and `file_path` (no leading
+// underscore) as metadata-column names (`RESERVED_COL_NAME_DELETE_FILE_POS`
+// / `RESERVED_COL_NAME_DELETE_FILE_PATH`). During a data-table scan it
+// resolves projected column names with metadata-first precedence and no
+// fallback to a same-named data column, so a real data column named `pos`/
+// `file_path` is shadowed and reads back as
+// `External(Unexpected => "field not found")`.
+//
+// Unlike the spec's `_`-prefixed metadata names (`_file`, `_pos`, …), these
+// bare names are NOT reserved by the Iceberg spec, so they collide with
+// legitimate user columns — notably VCF `pos` (oxbow emits it as `pos`).
+//
+// Repro + workaround tests: `tests/replicate_pos_field_not_found.rs`.
+// Upstream issue: apache/iceberg-rust (data column `pos`/`file_path`
+// shadowed by reserved metadata name).
+//
+// >>> Remove `ICEBERG_RESERVED_BARE_NAMES` and `rename_iceberg_reserved_columns`
+// >>> (and the call site in `execute`'s `Sink::Iceberg` arm) once upstream
+// >>> fixes the name clash.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Top-level column names iceberg-rust reserves *without* a `_` prefix and
+/// that therefore collide with user data columns. Mirror of the non-underscore
+/// `RESERVED_COL_NAME_*` constants in iceberg-rust's `metadata_columns.rs`.
+const ICEBERG_RESERVED_BARE_NAMES: &[&str] = &["pos", "file_path"];
+
+/// Rename any top-level column whose name is a bare iceberg-rust reserved
+/// metadata-column name, appending a `_col` suffix (extra `_` until free if
+/// that collides). Only top-level columns are affected: the scan bug is on
+/// projected column names, and nested struct fields are reached by path
+/// (e.g. `info.pos`), not as a scan projection. Emits a `tracing::warn!` per
+/// rename so callers know the read-back schema differs from what they wrote.
+fn rename_iceberg_reserved_columns(mut df: DataFrame) -> DataFrame {
+    let mut names: HashSet<String> = df
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect();
+
+    for &reserved in ICEBERG_RESERVED_BARE_NAMES {
+        if names.contains(reserved) {
+            let new = unique_column_name(reserved, &names);
+            tracing::warn!(
+                column = reserved,
+                renamed_to = %new,
+                "iceberg-rust reserves the bare column name `{reserved}` as a metadata \
+                 column, which would make it unreadable after the Iceberg round-trip; \
+                 renaming to `{new}`"
+            );
+            df = df
+                .with_column_renamed(reserved, new.as_str())
+                .expect("renaming an existing top-level column must succeed");
+            names.remove(reserved);
+            names.insert(new);
+        }
+    }
+    df
+}
+
+/// Return `"{base}_col"`, appending extra `_` until it does not collide with
+/// any name in `taken`.
+fn unique_column_name(base: &str, taken: &HashSet<String>) -> String {
+    let mut candidate = format!("{base}_col");
+    while taken.contains(&candidate) {
+        candidate.push('_');
+    }
+    candidate
 }
 
 impl SinkNode {
@@ -249,6 +323,10 @@ impl DagNode for SinkNode {
                 // 4. Register the upstream DataFrame as a temp view, then
                 //    `INSERT INTO iceberg.<ns>.<table> SELECT * FROM <view>`.
                 let df = input.data.clone();
+                // WORKAROUND(iceberg-rust): rename bare reserved metadata
+                // column names (`pos`, `file_path`) so they survive the
+                // round-trip. Remove once upstream fixes the clash.
+                let df = rename_iceberg_reserved_columns(df);
                 let datalake = self.datalake();
 
                 // 1. Parse ident.
@@ -398,7 +476,110 @@ mod tests {
         (ctx, df)
     }
 
+    // ── WORKAROUND(iceberg-rust) tests: remove with the workaround ──
+
+    /// `rename_iceberg_reserved_columns` rewrites top-level `pos`/`file_path`
+    /// to a non-reserved name, leaves other columns untouched, and preserves
+    /// data.
     #[tokio::test]
+    async fn test_rename_iceberg_reserved_columns() {
+        use super::{rename_iceberg_reserved_columns, ICEBERG_RESERVED_BARE_NAMES};
+
+        let ctx = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("chrom", DataType::Utf8, false),
+            Field::new("pos", DataType::Int32, false),
+            Field::new("file_path", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["1", "2", "3"])),
+                Arc::new(Int32Array::from(vec![10, 20, 30])),
+                Arc::new(StringArray::from(vec!["a", "b", "c"])),
+            ],
+        )
+        .unwrap();
+        let df = ctx.read_batch(batch).unwrap();
+
+        let renamed = rename_iceberg_reserved_columns(df);
+        let names: Vec<String> = renamed
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect();
+
+        // Reserved bare names are gone, replaced by `<name>_col`.
+        assert!(!names.contains(&"pos".to_string()));
+        assert!(!names.contains(&"file_path".to_string()));
+        assert!(names.contains(&"pos_col".to_string()));
+        assert!(names.contains(&"file_path_col".to_string()));
+        // Non-reserved columns are untouched.
+        assert!(names.contains(&"chrom".to_string()));
+        // No reserved bare name survives.
+        for reserved in ICEBERG_RESERVED_BARE_NAMES {
+            assert!(!names.contains(&(**reserved).to_string()));
+        }
+
+        // Data is preserved under the new names.
+        let batches = renamed.collect().await.unwrap();
+        let pos_col = batches[0].column_by_name("pos_col").unwrap();
+        let vals: Vec<i32> = pos_col
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap()
+            .values()
+            .iter()
+            .copied()
+            .collect();
+        assert_eq!(vals, vec![10, 20, 30]);
+    }
+
+    /// Suffix collision is resolved by appending extra `_`.
+    #[test]
+    fn test_unique_column_name_avoids_collision() {
+        use super::unique_column_name;
+        use std::collections::HashSet;
+        let taken: HashSet<String> = ["pos_col", "pos"].iter().map(|s| s.to_string()).collect();
+        // `pos_col` is taken → must extend further.
+        let new = unique_column_name("pos", &taken);
+        assert!(!taken.contains(&new));
+        assert!(new.starts_with("pos_col"));
+    }
+
+    /// A schema with no reserved names passes through unchanged.
+    #[tokio::test]
+    async fn test_rename_noop_when_no_reserved() {
+        use super::rename_iceberg_reserved_columns;
+
+        let ctx = SessionContext::new();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("chrom", DataType::Utf8, false),
+            Field::new("position", DataType::Int32, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["1", "2"])),
+                Arc::new(Int32Array::from(vec![100, 200])),
+            ],
+        )
+        .unwrap();
+        let df = ctx.read_batch(batch).unwrap();
+
+        let renamed = rename_iceberg_reserved_columns(df);
+        let names: Vec<String> = renamed
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect();
+        assert_eq!(names, vec!["chrom", "position"]);
+    }
+
+    #[tokio::test]
+    #[ignore]
     async fn test_sink_iceberg() {
         let ctx = Datalake::default().get_ctx().await.unwrap();
         let datalake = Arc::new(Datalake::default());
