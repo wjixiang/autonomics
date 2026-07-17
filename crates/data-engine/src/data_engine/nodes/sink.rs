@@ -483,7 +483,7 @@ mod tests {
     /// data.
     #[tokio::test]
     async fn test_rename_iceberg_reserved_columns() {
-        use super::{rename_iceberg_reserved_columns, ICEBERG_RESERVED_BARE_NAMES};
+        use super::{ICEBERG_RESERVED_BARE_NAMES, rename_iceberg_reserved_columns};
 
         let ctx = SessionContext::new();
         let schema = Arc::new(Schema::new(vec![

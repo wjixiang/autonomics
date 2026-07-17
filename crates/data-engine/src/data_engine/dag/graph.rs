@@ -6,7 +6,7 @@ use std::sync::Arc;
 use datafusion::common::HashMap;
 use datafusion::prelude::DataFrame;
 use petgraph::Direction;
-use petgraph::algo::{is_cyclic_directed, kosaraju_scc, toposort};
+use petgraph::algo::{has_path_connecting, is_cyclic_directed, kosaraju_scc, toposort};
 use petgraph::dot::Dot;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
@@ -436,8 +436,8 @@ impl DAG {
     }
 
     /// Add an edge from `from`'s `from_port` output port to `to`'s `to_port`
-    /// input port. Port existence and the strict 1:1 / completeness constraints
-    /// are checked later in [`Self::validate`].
+    /// input port. Enforces the strict 1:1 rule on declared input ports at
+    /// insertion time (does not defer to [`Self::validate`]).
     pub fn add_edge(
         &mut self,
         from: impl Into<NodeId>,
@@ -448,45 +448,56 @@ impl DAG {
         let from = from.into();
         let to = to.into();
         self.resolve_nodes(&from, &to)?;
+
+        // Enforce strict 1:1 on declared input ports at edge-insertion time.
+        let to_meta = self.nodes[&to].meta();
+        if to_meta.is_fixed_input() && to_meta.input_port(to_port).is_some() {
+            self.ensure_port_available(&to, to_port)?;
+        }
+
+        // Validate schema compatibility for this edge before inserting it.
+        self.validate_edge_schema(&from, from_port, &to, to_port)?;
+
         if let (Some(&a), Some(&b)) = (self.id_to_idx.get(&from), self.id_to_idx.get(&to)) {
+            // Reject if adding `from -> to` would close a cycle, i.e. `to` can
+            // already reach `from` (also covers the self-loop case where from==to).
+            if has_path_connecting(&self.graph, b, a, None) {
+                return Err(DagError::Cycle(format!(
+                    "adding edge {from} -> {to} would create a cycle"
+                )));
+            }
             self.graph.add_edge(a, b, EdgeLabel { from_port, to_port });
         }
         Ok(())
     }
 
-    // /// Add an edge connecting `from`'s `from_port` (an output port) to `to`'s
-    // /// `to_port` (an input port). Port existence and 1:1 constraints are checked
-    // /// in [`Self::validate`].
-    // pub fn add_edge_port(
-    //     &mut self,
-    //     from: impl Into<NodeId>,
-    //     from_port: impl Into<String>,
-    //     to: impl Into<NodeId>,
-    //     to_port: impl Into<String>,
-    // ) -> Result<()> {
-    //     let from = from.into();
-    //     let to = to.into();
-    //     self.resolve_nodes(&from, &to)?;
-    //     if let (Some(&a), Some(&b)) = (self.id_to_idx.get(&from), self.id_to_idx.get(&to)) {
-    //         self.graph.add_edge(
-    //             a,
-    //             b,
-    //             EdgeLabel {
-    //                 from_port: from_port.into(),
-    //                 to_port: to_port.into(),
-    //             },
-    //         );
-    //     }
-    //     Ok(())
-    // }
-    //
     /// Validate that `from` and `to` refer to existing nodes.
     fn resolve_nodes(&self, from: &str, to: &str) -> Result<()> {
         if !self.nodes.contains_key(from) {
             return Err(DagError::UnknownNode(from.to_string()));
         }
+
         if !self.nodes.contains_key(to) {
             return Err(DagError::UnknownNode(to.to_string()));
+        };
+
+        Ok(())
+    }
+
+    /// Reject if `node`'s input `port` already has an incoming edge.
+    fn ensure_port_available(&self, node: &str, port: u8) -> Result<()> {
+        let Some(&idx) = self.id_to_idx.get(node) else {
+            return Ok(());
+        };
+        if self
+            .graph
+            .edges_directed(idx, Direction::Incoming)
+            .any(|e| e.weight().to_port == port)
+        {
+            return Err(DagError::PortOverconnected {
+                node: node.to_string(),
+                port,
+            });
         }
         Ok(())
     }
@@ -579,14 +590,10 @@ impl DAG {
     }
 
     /// Port existence, default-edge disambiguation, strict-1:1, and completeness.
-    /// TODO: Add port wiring validation to add_edge checkpoint
     fn validate_port_wiring(&self) -> Result<()> {
-        use datafusion::common::HashMap;
-        // node id -> (input port index -> incoming edge count)
-        let mut incoming_counts: HashMap<NodeId, HashMap<u8, usize>> = HashMap::new();
-        for id in self.nodes.keys() {
-            incoming_counts.insert(id.clone(), HashMap::new());
-        }
+        // (node, port) pairs that have at least one incoming edge.
+        let mut connected: std::collections::HashSet<(NodeId, u8)> =
+            std::collections::HashSet::new();
 
         for edge in self.graph.edge_references() {
             let from = self.graph[edge.source()].clone();
@@ -612,11 +619,8 @@ impl DAG {
                 });
             }
 
-            // Strict 1:1 on the input port.
-            let counter = incoming_counts.get_mut(&to).unwrap();
-            let entry = counter.entry(label.to_port).or_insert(0);
-            *entry += 1;
-            if *entry > 1 {
+            // Strict 1:1 on the input port (shared with add_edge).
+            if !connected.insert((to.clone(), label.to_port)) {
                 return Err(DagError::PortOverconnected {
                     node: to,
                     port: label.to_port,
@@ -625,11 +629,10 @@ impl DAG {
         }
 
         // Completeness: every declared input port must have exactly one edge.
-        for (id, counts) in &incoming_counts {
+        for id in self.nodes.keys() {
             let meta = self.nodes[id].meta();
             for port in meta.input_ports().iter() {
-                let n = counts.get(&port.index).copied().unwrap_or(0);
-                if n == 0 {
+                if !connected.contains(&((*id).clone(), port.index)) {
                     return Err(DagError::PortDisconnected {
                         node: id.clone(),
                         port: port.index,
@@ -641,30 +644,43 @@ impl DAG {
     }
 
     /// Schema compatibility between connected ports (skipped when either side's
-    /// schema is `None`).
+    /// schema is `None`). Iterates every edge and delegates the per-edge check
+    /// to [`Self::validate_edge_schema`], which is also used at `add_edge` time.
     fn validate_schemas(&self) -> Result<()> {
         for edge in self.graph.edge_references() {
-            let from = self.graph[edge.source()].clone();
-            let to = self.graph[edge.target()].clone();
+            let from = &self.graph[edge.source()];
+            let to = &self.graph[edge.target()];
             let label = edge.weight();
-            let from_port = self.nodes[&from].meta().output_port(label.from_port);
-            let to_port = self.nodes[&to].meta().input_port(label.to_port);
-            let (Some(fp), Some(tp)) = (from_port, to_port) else {
-                continue;
-            };
-            let (Some(out_schema), Some(in_schema)) = (fp.schema.as_ref(), tp.schema.as_ref())
-            else {
-                continue; // unknown on either side → skip
-            };
-            if let Err(reason) = schema_compatible(out_schema, in_schema) {
-                return Err(DagError::SchemaMismatch {
-                    from_node: from,
-                    from_port: label.from_port,
-                    to_node: to,
-                    to_port: label.to_port,
-                    reason,
-                });
-            }
+            self.validate_edge_schema(from, label.from_port, to, label.to_port)?;
+        }
+        Ok(())
+    }
+
+    /// Validate schema compatibility for a single edge: the output port's schema
+    /// must cover every field required by the input port's schema, with matching
+    /// types. Skipped (returns `Ok`) when either port has no declared schema —
+    /// shared by [`Self::add_edge`] (early check) and [`Self::validate_schemas`]
+    /// (bulk pass).
+    fn validate_edge_schema(&self, from: &str, from_port: u8, to: &str, to_port: u8) -> Result<()> {
+        let (Some(from_node), Some(to_node)) = (self.nodes.get(from), self.nodes.get(to)) else {
+            return Ok(());
+        };
+        let from_port_field = from_node.meta().output_port(from_port);
+        let to_port_field = to_node.meta().input_port(to_port);
+        let (Some(fp), Some(tp)) = (from_port_field, to_port_field) else {
+            return Ok(());
+        };
+        let (Some(out_schema), Some(in_schema)) = (fp.schema.as_ref(), tp.schema.as_ref()) else {
+            return Ok(()); // unknown on either side → skip
+        };
+        if let Err(reason) = schema_compatible(out_schema, in_schema) {
+            return Err(DagError::SchemaMismatch {
+                from_node: from.to_string(),
+                from_port,
+                to_node: to.to_string(),
+                to_port,
+                reason,
+            });
         }
         Ok(())
     }
@@ -879,12 +895,18 @@ mod tests {
         add(&mut dag, "x");
         add(&mut dag, "y");
         dag.add_edge("x", "y", 0, 0).unwrap();
-        dag.add_edge("y", "x", 0, 0).unwrap();
-        let err = dag.validate().unwrap_err();
+        // Closing the cycle (y -> x) is rejected at add_edge time.
+        let err = dag.add_edge("y", "x", 0, 0).unwrap_err();
         assert!(matches!(err, DagError::Cycle(_)), "{err:?}");
-        let err = dag.topo_order().unwrap_err();
-        assert!(matches!(err, DagError::Cycle(_)));
-        dbg!(err);
+    }
+
+    #[test]
+    fn self_loop_rejected() {
+        // A self-edge (x -> x) is a trivial cycle — rejected at add_edge.
+        let mut dag = DAG::default();
+        add(&mut dag, "x");
+        let err = dag.add_edge("x", "x", 0, 0).unwrap_err();
+        assert!(matches!(err, DagError::Cycle(_)), "{err:?}");
     }
 
     #[test]
@@ -1041,8 +1063,8 @@ mod tests {
             )),
         )
         .unwrap();
-        dag.add_edge("src", "dst", 0, 0).unwrap();
-        let err = dag.validate().unwrap_err();
+        // Schema mismatch is caught at `add_edge` time (via validate_edge_schema).
+        let err = dag.add_edge("src", "dst", 0, 0).unwrap_err();
         assert!(
             matches!(err, DagError::SchemaMismatch { ref from_node, ref to_port, .. } if from_node == "src" && *to_port == 0),
             "expected SchemaMismatch, got {err:?}"
@@ -1119,13 +1141,60 @@ mod tests {
         // Fan-out: node_a's single output 0 feeds both node_b and node_c.
         // Each input port must end up with exactly one incoming edge.
         dag.add_edge("node_a_id", "node_b_id", 0, 0).unwrap();
-        dag.add_edge("node_c_id", "node_b_id", 0, 0).unwrap();
-
-        let wiring_validate_result = dag.validate_port_wiring();
+        // Second edge to node_b_id's declared input port 0 — rejected at add_edge.
+        let err = dag.add_edge("node_c_id", "node_b_id", 0, 0).unwrap_err();
         assert_matches!(
-            wiring_validate_result,
-            Err(DagError::PortOverconnected { node, port })
+            err,
+            DagError::PortOverconnected { node, port }
                 if node == "node_b_id" && port == 0
-        )
+        );
+    }
+
+    #[test]
+    fn add_edge_rejects_overconnected_port() {
+        // `add_edge` enforces the 1:1 rule on declared input ports at insertion
+        // time. Two nodes (a, c) both trying to connect to b's declared input
+        // port 0 — the second `add_edge` must reject immediately.
+        let mut dag = DAG::default();
+        let node_a_meta = NodeMeta::new("node_a_id").add_output_port(None);
+        let node_b_meta = NodeMeta::new("node_b_id").add_input_port(None);
+        let node_c_meta = NodeMeta::new("node_c_id").add_output_port(None);
+
+        dag.add_node("node_a_id".into(), Box::new(PortedNode(node_a_meta)))
+            .unwrap();
+        dag.add_node("node_b_id".into(), Box::new(PortedNode(node_b_meta)))
+            .unwrap();
+        dag.add_node("node_c_id".into(), Box::new(PortedNode(node_c_meta)))
+            .unwrap();
+
+        // First edge to b's declared input port 0 — OK.
+        dag.add_edge("node_a_id", "node_b_id", 0, 0).unwrap();
+
+        // Second edge to the same declared input port 0 — must reject at add_edge.
+        let err = dag.add_edge("node_c_id", "node_b_id", 0, 0).unwrap_err();
+        assert_matches!(
+            err,
+            DagError::PortOverconnected { node, port }
+                if node == "node_b_id" && port == 0
+        );
+    }
+
+    #[test]
+    fn add_edge_allows_undeclared_port_fan_in() {
+        // When the target node has NO declared input ports (empty Ports), `add_edge`
+        // does NOT enforce 1:1 — multiple edges to the same port index are allowed.
+        // This is what happens in diamond DAGs with EchoNode (default meta has
+        // empty Ports).
+        let mut dag = DAG::default();
+        for id in ["a", "b", "c", "d"] {
+            add(&mut dag, id);
+        }
+
+        // d has no declared ports, so both edges to port 0 are accepted.
+        dag.add_edge("b", "d", 0, 0).unwrap();
+        dag.add_edge("c", "d", 0, 0).unwrap();
+
+        // The diamond edges are all present.
+        assert_eq!(dag.incoming_edges_with_ports("d").len(), 2);
     }
 }

@@ -39,7 +39,6 @@
 //! * [`sink_auto_renames_reserved_columns`] — end-to-end: writing a `pos`
 //!   column through `SinkNode` yields a readable `pos_col` (needs a catalog).
 
-
 use std::sync::Arc;
 
 use arrow_array::{ArrayRef, Int32Array, RecordBatch, StringArray};
@@ -49,8 +48,8 @@ use data_engine::data_engine::nodes::{NodeInput, Sink, SinkMode, SinkNode};
 use datafusion::prelude::SessionContext;
 use datalake::Datalake;
 use iceberg::metadata_columns::{
-    get_metadata_field_id, is_metadata_column_name, RESERVED_COL_NAME_DELETE_FILE_POS,
-    RESERVED_FIELD_ID_DELETE_FILE_POS,
+    RESERVED_COL_NAME_DELETE_FILE_POS, RESERVED_FIELD_ID_DELETE_FILE_POS, get_metadata_field_id,
+    is_metadata_column_name,
 };
 
 /// Zero-dependency logic-level repro of the upstream iceberg-rust bug: the bare

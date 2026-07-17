@@ -25,6 +25,9 @@ pub enum DagError {
     #[error("unknown node id: {0}")]
     UnknownNode(String),
 
+    #[error("fail to resolve node_id to node_idx")]
+    CannotResolveNodeIdx { node_id: String },
+
     /// `add_node` was called twice with the same id.
     #[error("duplicate node id: {0}")]
     DuplicateNode(String),
@@ -81,6 +84,12 @@ impl DagError {
             Self::UnknownNode(s) => super::runtime::DagErrorReport {
                 kind: "unknown_node".into(),
                 message: s.clone(),
+            },
+            Self::CannotResolveNodeIdx { node_id } => super::runtime::DagErrorReport {
+                kind: "error_resolve_idx".into(),
+                message: format!(
+                    "Error occured when resolve node_id '{node_id}' into graph idx. This may caused by Node didn't registered in graph set properly."
+                ),
             },
             Self::DuplicateNode(s) => super::runtime::DagErrorReport {
                 kind: "duplicate_node".into(),

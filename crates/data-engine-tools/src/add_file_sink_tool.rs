@@ -135,7 +135,10 @@ mod tests {
     #[test]
     fn test_detect_file_format() {
         assert_eq!(detect_file_format("out.csv"), Some(WriteFormat::Csv));
-        assert_eq!(detect_file_format("out.parquet"), Some(WriteFormat::Parquet));
+        assert_eq!(
+            detect_file_format("out.parquet"),
+            Some(WriteFormat::Parquet)
+        );
         assert_eq!(detect_file_format("out.pq"), Some(WriteFormat::Parquet));
         assert_eq!(detect_file_format("out.txt"), None);
         assert_eq!(detect_file_format("noext"), None);

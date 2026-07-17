@@ -105,7 +105,15 @@ pub async fn estimate_h2(
     };
 
     let hsq = crate::regress::Hsq::new(
-        &chisq, &ref_ld, &w_ld, &n, m, n_blocks, intercept, two_step, old_weights,
+        &chisq,
+        &ref_ld,
+        &w_ld,
+        &n,
+        m,
+        n_blocks,
+        intercept,
+        two_step,
+        old_weights,
     )?;
 
     Ok(HsqResult {
