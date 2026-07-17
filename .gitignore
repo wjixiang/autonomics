@@ -10,7 +10,9 @@ logs/
 # Config
 phloem.json
 
-# Vendored external crate (cloned for local reference, not part of workspace)
+# Vendored external crates / R packages (cloned for reference, not part of workspace)
 ratatui-comfy-tabs/
 dendrite/
 notes/
+TwoSampleMR/
+MVMR/
