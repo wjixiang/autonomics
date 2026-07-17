@@ -146,36 +146,24 @@ impl NodeMeta {
     pub fn source(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            input_ports: vec![].into(),
-            output_ports: vec![Port::default_port()].into(),
+            input_ports: Ports::default(),
+            output_ports: Ports::default(),
         }
+        .add_output_port(None)
     }
 
     /// A sink node: a single default input port, no outputs.
     pub fn sink(id: impl Into<String>) -> Self {
         Self {
             id: id.into(),
-            input_ports: vec![Port::default_port()].into(),
-            output_ports: vec![].into(),
+            input_ports: Ports::default(),
+            output_ports: Ports::default(),
         }
+        .add_input_port(None)
     }
 
     pub fn set_fixed_input(mut self, is_fixed: bool) -> Self {
         self.input_ports.is_fixed = is_fixed;
-        self
-    }
-
-    /// Replace the input ports.
-    #[deprecated]
-    pub fn with_inputs(mut self, ports: Vec<Port>) -> Self {
-        self.input_ports = ports.into();
-        self
-    }
-
-    /// Replace the output ports.
-    #[deprecated]
-    pub fn with_outputs(mut self, ports: Vec<Port>) -> Self {
-        self.output_ports = ports.into();
         self
     }
 

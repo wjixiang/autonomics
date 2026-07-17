@@ -103,12 +103,12 @@ async fn test_add_source_sql_run_dag() {
     assert_eq!(results.len(), 1);
     check_ok(&results[0], "add_edge");
 
-    // 7. Add sink node
+    // 7. Add file sink node
     let results = toolset
         .execute(
             &[build_tooluse(
                 "tc4",
-                "add_sink_node",
+                "add_file_sink_node",
                 json!({
                     "id": "sink",
                     "path": "/output.csv",
@@ -121,7 +121,7 @@ async fn test_add_source_sql_run_dag() {
         .await
         .unwrap();
     assert_eq!(results.len(), 1);
-    check_ok(&results[0], "add_sink_node");
+    check_ok(&results[0], "add_file_sink_node");
 
     // 8. Edge (sql -> sink) via tool
     let results = toolset
@@ -138,6 +138,26 @@ async fn test_add_source_sql_run_dag() {
         .unwrap();
     assert_eq!(results.len(), 1);
     check_ok(&results[0], "add_edge sql->sink");
+
+    // 9. Add datalake sink node (separate from the file sink above; both tools
+    //    must coexist in the toolset and accept inputs independently).
+    let results = toolset
+        .execute(
+            &[build_tooluse(
+                "tc6",
+                "add_datalake_sink_node",
+                json!({
+                    "id": "sink_lake",
+                    "table": "gwas.iris_test"
+                }),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    check_ok(&results[0], "add_datalake_sink_node");
 }
 
 /// Regression: when a SqlNode output contains a Struct-typed column,

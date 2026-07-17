@@ -1,7 +1,8 @@
+mod add_datalake_sink_tool;
 mod add_edge_tool;
+mod add_file_sink_tool;
 mod add_ldsc_tool;
 mod add_linear_regression_tool;
-mod add_sink_tool;
 mod add_source_tool;
 mod add_sql_tool;
 mod clear_dag_tool;
@@ -74,7 +75,11 @@ pub fn registrations(
     vec![
         ToolRegistration::from(add_source_tool::AddSourceNodeTool::new(client.clone())),
         ToolRegistration::from(add_sql_tool::AddSqlNodeTool::new(client.clone())),
-        ToolRegistration::from(add_sink_tool::AddSinkNodeTool::new(
+        ToolRegistration::from(add_file_sink_tool::AddFileSinkNodeTool::new(
+            client.clone(),
+            datalake.clone(),
+        )),
+        ToolRegistration::from(add_datalake_sink_tool::AddDatalakeSinkNodeTool::new(
             client.clone(),
             datalake.clone(),
         )),

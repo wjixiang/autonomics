@@ -604,14 +604,12 @@ impl DAG {
                 });
             }
 
-            if to_meta.is_fixed_input() {
-                if to_meta.input_port(label.to_port).is_none() {
-                    return Err(DagError::PortNotFound {
-                        node: to.clone(),
-                        port: label.to_port,
-                        direction: "input",
-                    });
-                }
+            if to_meta.is_fixed_input() && to_meta.input_port(label.to_port).is_none() {
+                return Err(DagError::PortNotFound {
+                    node: to.clone(),
+                    port: label.to_port,
+                    direction: "input",
+                });
             }
 
             // Strict 1:1 on the input port.
@@ -811,6 +809,9 @@ fn schema_compatible(
 
 #[cfg(test)]
 mod tests {
+    use crate::data_engine::dag::NodeMeta;
+    use std::assert_matches;
+
     use super::*;
 
     fn dummy_meta(id: &str) -> super::super::NodeMeta {
@@ -822,6 +823,7 @@ mod tests {
         for id in ["a", "b", "c", "d"] {
             add(&mut dag, id);
         }
+
         dag.add_edge("a", "b", 0, 0).unwrap();
         dag.add_edge("a", "c", 0, 0).unwrap();
         dag.add_edge("b", "d", 0, 0).unwrap();
@@ -966,6 +968,7 @@ mod tests {
     /// A no-op node with caller-supplied port topology (for schema/port tests).
     #[derive(Clone)]
     struct PortedNode(super::super::NodeMeta);
+
     #[async_trait::async_trait]
     impl super::super::DagNode for PortedNode {
         fn meta(&self) -> &super::super::NodeMeta {
@@ -1021,25 +1024,20 @@ mod tests {
 
     #[test]
     fn validate_schema_mismatch_between_ports() {
-        use crate::data_engine::nodes::Port;
         let mut dag = DAG::default();
         let out_schema = make_schema(&[("a", arrow_schema::DataType::Int32)]);
         let in_schema = make_schema(&[("a", arrow_schema::DataType::Int64)]);
         dag.add_node(
             "src".into(),
             Box::new(PortedNode(
-                super::super::NodeMeta::new("src")
-                    .with_inputs(vec![])
-                    .with_outputs(vec![Port::typed(0, out_schema)]),
+                super::super::NodeMeta::new("src").add_output_port(Some(out_schema)),
             )),
         )
         .unwrap();
         dag.add_node(
             "dst".into(),
             Box::new(PortedNode(
-                super::super::NodeMeta::new("dst")
-                    .with_inputs(vec![Port::typed(0, in_schema)])
-                    .with_outputs(vec![]),
+                super::super::NodeMeta::new("dst").add_input_port(Some(in_schema)),
             )),
         )
         .unwrap();
@@ -1078,5 +1076,56 @@ mod tests {
 
         // Smoke-check: non-trivial output (a 4-node DAG should be > 20 chars)
         assert!(dot.len() > 20, "DOT output seems too short, got: {dot}");
+    }
+
+    #[test]
+    fn one_to_multi_wiring_accept() {
+        let mut dag = DAG::default();
+        let node_a_meta = NodeMeta::new("node_a_id").add_output_port(None);
+        let node_b_meta = NodeMeta::new("node_b_id").add_input_port(None);
+        let node_c_meta = NodeMeta::new("node_c_id").add_input_port(None);
+
+        let node_a = PortedNode(node_a_meta);
+        let node_b = PortedNode(node_b_meta);
+        let node_c = PortedNode(node_c_meta);
+
+        dag.add_node("node_a_id".into(), Box::new(node_a)).unwrap();
+        dag.add_node("node_b_id".into(), Box::new(node_b)).unwrap();
+        dag.add_node("node_c_id".into(), Box::new(node_c)).unwrap();
+
+        // Fan-out: node_a's single output 0 feeds both node_b and node_c.
+        // Each input port must end up with exactly one incoming edge.
+        dag.add_edge("node_a_id", "node_b_id", 0, 0).unwrap();
+        dag.add_edge("node_a_id", "node_c_id", 0, 0).unwrap();
+
+        dag.validate_port_wiring().unwrap();
+    }
+
+    #[test]
+    fn multi_to_one_wiring_reject() {
+        let mut dag = DAG::default();
+        let node_a_meta = NodeMeta::new("node_a_id").add_output_port(None);
+        let node_b_meta = NodeMeta::new("node_b_id").add_input_port(None);
+        let node_c_meta = NodeMeta::new("node_c_id").add_output_port(None);
+
+        let node_a = PortedNode(node_a_meta);
+        let node_b = PortedNode(node_b_meta);
+        let node_c = PortedNode(node_c_meta);
+
+        dag.add_node("node_a_id".into(), Box::new(node_a)).unwrap();
+        dag.add_node("node_b_id".into(), Box::new(node_b)).unwrap();
+        dag.add_node("node_c_id".into(), Box::new(node_c)).unwrap();
+
+        // Fan-out: node_a's single output 0 feeds both node_b and node_c.
+        // Each input port must end up with exactly one incoming edge.
+        dag.add_edge("node_a_id", "node_b_id", 0, 0).unwrap();
+        dag.add_edge("node_c_id", "node_b_id", 0, 0).unwrap();
+
+        let wiring_validate_result = dag.validate_port_wiring();
+        assert_matches!(
+            wiring_validate_result,
+            Err(DagError::PortOverconnected { node, port })
+                if node == "node_b_id" && port == 0
+        )
     }
 }

@@ -146,6 +146,7 @@ async fn read_vcf_struct_field_query_succeeds() {
         .read_vcf(path.to_str().unwrap(), BioReadOptions::default())
         .await
         .expect("read_vcf should succeed");
+
     let registered_type = df
         .schema()
         .field_with_name(None, SAMPLE_COL)
@@ -210,3 +211,18 @@ async fn read_vcf_struct_field_query_succeeds() {
     let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
     assert!(rows > 0, "struct-field query should return rows");
 }
+
+// #[tokio::test]
+// async fn replicate_unnessary_list() {
+//     let path = fixture("opengwas_gwas_sumstat_sample.vcf.gz");
+//
+//     let ctx = SessionContext::new();
+//     let df = ctx
+//         .read_vcf(path.to_str().unwrap(), BioReadOptions::default())
+//         .await
+//         .expect("read_vcf should succeed");
+//
+//     let schema = df.schema().inner().as_ref().clone();
+//     dbg!(schema);
+//     panic!()
+// }
