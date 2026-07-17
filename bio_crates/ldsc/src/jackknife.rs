@@ -13,11 +13,16 @@ use crate::{LdscError, Result};
 
 use crate::linalg::{build_mat_col_major, solve_spd};
 
-/// Jackknife output: point estimate (mean of pseudovalues), full coefficient
-/// covariance, and per-coefficient standard errors.
+/// Jackknife output. Matches LDSC's `LstsqJackknifeFast` attributes.
 pub struct JackknifeResult {
-    /// `mean(pseudovalues)` — the reported coefficient vector (length `p`).
+    /// Whole-data estimate (`jknife.est` = `block_values_to_est`). LDSC reports
+    /// this as the point estimate. Length `p`.
     pub est: Vec<f64>,
+    /// Pseudovalue-mean estimate (`jknife_est`). Length `p`. Equal to `est` only
+    /// for exactly-linear statistics.
+    pub jknife_est: Vec<f64>,
+    /// Leave-one-block-out estimates (`delete_values`), `n_blocks × p`.
+    pub delete_values: Vec<Vec<f64>>,
     /// Coefficient covariance `cov(pseudovalues, ddof=1) / n_blocks` (p×p).
     pub cov: Mat<f64>,
     /// `sqrt(diag(cov))` (length `p`).
@@ -42,7 +47,6 @@ pub fn separators(n: usize, n_blocks: usize) -> Vec<usize> {
 /// structure has meaning only if correlated SNPs fall in the same block.
 pub fn jackknife_fast(x: &Mat<f64>, y: &[f64], n_blocks: usize) -> Result<JackknifeResult> {
     let n = y.len();
-    let p = x.ncols();
     if x.nrows() != n {
         return Err(LdscError::DimensionMismatch(
             "jackknife: x.nrows() != y.len()".into(),
@@ -55,7 +59,25 @@ pub fn jackknife_fast(x: &Mat<f64>, y: &[f64], n_blocks: usize) -> Result<Jackkn
     }
 
     let sep = separators(n, n_blocks);
-    // Merge any trailing empty blocks caused by floor (e.g. when n < n_blocks).
+    jackknife_fast_with_separators(x, y, &sep)
+}
+
+/// Like [`jackknife_fast`] but with explicit block separators (length
+/// `n_blocks + 1`, `sep[0] == 0`, `sep[last] == n`). Used by the two-step
+/// estimator, which maps masked-space separators back to the full space.
+pub fn jackknife_fast_with_separators(
+    x: &Mat<f64>,
+    y: &[f64],
+    sep: &[usize],
+) -> Result<JackknifeResult> {
+    let n = y.len();
+    let p = x.ncols();
+    if x.nrows() != n {
+        return Err(LdscError::DimensionMismatch(
+            "jackknife: x.nrows() != y.len()".into(),
+        ));
+    }
+    // Merge any empty blocks caused by floor (e.g. when n < n_blocks).
     let blocks: Vec<(usize, usize)> = sep
         .windows(2)
         .map(|w| (w[0], w[1]))
@@ -110,6 +132,7 @@ pub fn jackknife_fast(x: &Mat<f64>, y: &[f64], n_blocks: usize) -> Result<Jackkn
     let est = solve_spd(build_mat_col_major(p, p, &xtx_tot).as_ref(), &xty_tot)?;
 
     // Leave-one-block-out estimates and pseudovalues.
+    let mut delete_values: Vec<Vec<f64>> = Vec::with_capacity(nb); // nb × p
     let mut pseudo: Vec<Vec<f64>> = Vec::with_capacity(nb); // nb × p
     for j in 0..nb {
         let mut del_xtx = xtx_tot.clone();
@@ -121,13 +144,14 @@ pub fn jackknife_fast(x: &Mat<f64>, y: &[f64], n_blocks: usize) -> Result<Jackkn
             del_xty[a] -= xty_blocks[j][a];
         }
         let del = solve_spd(build_mat_col_major(p, p, &del_xtx).as_ref(), &del_xty)?;
+        delete_values.push(del.clone());
         let pseudo_j: Vec<f64> = (0..p)
             .map(|a| (nb as f64) * est[a] - ((nb - 1) as f64) * del[a])
             .collect();
         pseudo.push(pseudo_j);
     }
 
-    // Reported estimate = mean of pseudovalues.
+    // Pseudovalue-mean estimate.
     let mut jknife_est = vec![0.0; p];
     for j in 0..nb {
         for a in 0..p {
@@ -156,8 +180,81 @@ pub fn jackknife_fast(x: &Mat<f64>, y: &[f64], n_blocks: usize) -> Result<Jackkn
     let se: Vec<f64> = (0..p).map(|a| cov[a * p + a].max(0.0).sqrt()).collect();
 
     Ok(JackknifeResult {
-        est: jknife_est,
+        est,
+        jknife_est,
+        delete_values,
         cov: cov_mat,
+        se,
+    })
+}
+
+/// Output of [`ratio_jackknife`] — port of LDSC's `RatioJackknife`.
+pub struct RatioJackknifeResult {
+    /// Whole-data ratio estimate (`est` input), length `p`.
+    pub est: Vec<f64>,
+    /// Pseudovalue-mean estimate (`jknife_est`), length `p`.
+    pub jknife_est: Vec<f64>,
+    /// Covariance (p×p, row-major flat, length p²).
+    pub cov: Vec<f64>,
+    /// Standard errors (length `p`).
+    pub se: Vec<f64>,
+}
+
+/// `RatioJackknife(est, numer_delete, denom_delete)` — block-jackknife of a
+/// ratio. `est` length `p`; `numer_delete`/`denom_delete` `n_blocks × p`.
+/// Pseudovalue `j = n*est - (n-1)*numer[j]/denom[j]`.
+pub fn ratio_jackknife(
+    est: &[f64],
+    numer_delete: &[Vec<f64>],
+    denom_delete: &[Vec<f64>],
+) -> Result<RatioJackknifeResult> {
+    let nb = numer_delete.len();
+    if nb != denom_delete.len() {
+        return Err(LdscError::DimensionMismatch(
+            "ratio_jackknife: numer/denom length mismatch".into(),
+        ));
+    }
+    let p = est.len();
+    if nb == 0 {
+        return Err(LdscError::InvalidInput("ratio_jackknife: no blocks".into()));
+    }
+    let mut pseudo = vec![vec![0.0; p]; nb];
+    for j in 0..nb {
+        for a in 0..p {
+            let d = denom_delete[j][a];
+            if d == 0.0 {
+                return Err(LdscError::Numerical(
+                    "ratio_jackknife: zero denominator delete value".into(),
+                ));
+            }
+            pseudo[j][a] = (nb as f64) * est[a] - ((nb - 1) as f64) * numer_delete[j][a] / d;
+        }
+    }
+    let mut jknife_est = vec![0.0; p];
+    for j in 0..nb {
+        for a in 0..p {
+            jknife_est[a] += pseudo[j][a];
+        }
+    }
+    for a in 0..p {
+        jknife_est[a] /= nb as f64;
+    }
+    let mut cov = vec![0.0; p * p];
+    if nb > 1 {
+        for a in 0..p {
+            for b in 0..p {
+                let s: f64 = (0..nb)
+                    .map(|j| (pseudo[j][a] - jknife_est[a]) * (pseudo[j][b] - jknife_est[b]))
+                    .sum();
+                cov[a * p + b] = s / ((nb - 1) as f64 * nb as f64);
+            }
+        }
+    }
+    let se: Vec<f64> = (0..p).map(|a| cov[a * p + a].max(0.0).sqrt()).collect();
+    Ok(RatioJackknifeResult {
+        est: est.to_vec(),
+        jknife_est,
+        cov,
         se,
     })
 }

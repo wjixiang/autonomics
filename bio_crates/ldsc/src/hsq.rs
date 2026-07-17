@@ -15,13 +15,10 @@
 //! `h² = Σₖ Mₖ·βₖ` where `βₖ = estₖ / N̄`.
 
 use datafusion::prelude::DataFrame;
-use faer::Mat;
 
 use crate::{LdscError, Result};
 
 use crate::ingest::{self, HsqArrays};
-use crate::irwls::{self, IrwlsOutput};
-use crate::jackknife::{self, JackknifeResult};
 
 /// Column names in the joined input `DataFrame`.
 pub struct HsqColumns<'a> {
@@ -68,18 +65,6 @@ pub struct HsqResult {
     pub coef_se: Vec<f64>,
 }
 
-/// Median of chi², matching numpy's `np.median` (averages the two middle values
-/// for even length).
-fn median(v: &mut [f64]) -> f64 {
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let n = v.len();
-    if n % 2 == 1 {
-        v[n / 2]
-    } else {
-        (v[n / 2 - 1] + v[n / 2]) / 2.0
-    }
-}
-
 /// Estimate h² from a joined GWAS + LD-Score `DataFrame`.
 ///
 /// * `df` — already joined on SNP (sumstats ⨝ ref_ld ⨝ w_ld).
@@ -97,8 +82,6 @@ pub async fn estimate_h2(
     intercept: Option<f64>,
 ) -> Result<HsqResult> {
     let HsqArrays { z, n, ref_ld, w_ld } = ingest::to_arrays(df, &cols).await?;
-    let nrows = z.len();
-    // Count of functional annotation columns
     let n_annot = ref_ld.ncols();
     if m.len() != n_annot {
         return Err(LdscError::DimensionMismatch(format!(
@@ -106,125 +89,55 @@ pub async fn estimate_h2(
             m.len()
         )));
     }
-    let free_intercept = intercept.is_none();
-    let fixed_intercept = intercept.unwrap_or(1.0);
 
-    // χ² and summary stats.
-    let y: Vec<f64> = z.iter().map(|zj| zj * zj).collect();
-    let mean_chisq: f64 = y.iter().sum::<f64>() / (nrows as f64);
-    let lambda_gc = median(&mut y.clone()) / 0.4549;
+    // χ² = Z².
+    let chisq: Vec<f64> = z.iter().map(|zj| zj * zj).collect();
 
-    let nbar: f64 = n.iter().sum::<f64>() / (nrows as f64);
-    // Total LD per SNP (sum over annotations, raw — used by the weight formula).
-    let ld_tot: Vec<f64> = (0..nrows)
-        .map(|i| (0..n_annot).map(|k| ref_ld[(i, k)]).sum())
-        .collect();
-    let m_tot: f64 = m.iter().sum();
-
-    // Initial aggregate h² (regressions.py:237-244).
-    let mean_ldn: f64 = (0..nrows).map(|i| ld_tot[i] * n[i]).sum::<f64>() / (nrows as f64);
-    let initial_hsq = if mean_ldn > 0.0 {
-        m_tot * (mean_chisq - fixed_intercept) / mean_ldn
+    // Apply the same defaults Python's `sumstats.estimate_h2` uses before calling
+    // `reg.Hsq`: single annotation + free intercept → two-step estimator
+    // (cutoff 30); multiple annotations → `old_weights`. This makes the
+    // DataFrame entry produce the same numbers as the canonical Python path.
+    let old_weights = n_annot > 1;
+    let two_step = if n_annot == 1 && intercept.is_none() {
+        Some(30.0)
     } else {
-        0.0
+        None
     };
 
-    // Build the design matrix: N·ref_ld / Nbar for each annotation, plus an
-    // intercept column when free.
-    let p = if free_intercept { n_annot + 1 } else { n_annot };
-    let x = Mat::from_fn(nrows, p, |i, j| {
-        if j < n_annot {
-            n[i] * ref_ld[(i, j)] / nbar
-        } else {
-            1.0 // intercept column
-        }
-    });
-    let yp: Vec<f64> = if free_intercept {
-        y.clone()
-    } else {
-        y.iter().map(|yi| yi - fixed_intercept).collect()
-    };
-
-    // IRWLS → weighted design/response for the jackknife.
-    let IrwlsOutput { x: xw, y: yw } = irwls::irwls(
-        &x,
-        &yp,
-        &ld_tot,
-        &w_ld,
-        &n,
-        m_tot,
-        nbar,
-        n_annot,
-        free_intercept,
-        initial_hsq,
-        fixed_intercept,
+    let hsq = crate::regress::Hsq::new(
+        &chisq, &ref_ld, &w_ld, &n, m, n_blocks, intercept, two_step, old_weights,
     )?;
 
-    // Block jackknife.
-    let JackknifeResult { est, cov, .. } = jackknife::jackknife_fast(&xw, &yw, n_blocks)?;
-
-    // Coefficients and covariance (per-annotation slopes, divided by Nbar).
-    let mut coef = vec![0.0; n_annot];
-    let mut coef_cov = vec![0.0; n_annot * n_annot];
-    for a in 0..n_annot {
-        coef[a] = est[a] / nbar;
-        for b in 0..n_annot {
-            coef_cov[a * n_annot + b] = cov[(a, b)] / (nbar * nbar);
-        }
-    }
-    let coef_se: Vec<f64> = (0..n_annot)
-        .map(|a| (coef_cov[a * n_annot + a]).max(0.0).sqrt())
-        .collect();
-
-    // Per-annotation and total h²: cat_k = M_k·β_k, tot = Σ cat_k,
-    // tot_cov = Σ_{a,b} M_a M_b coef_cov[a][b]  (regressions.py:271-283).
-    let mut h2 = 0.0;
-    let mut tot_cov = 0.0;
-    for a in 0..n_annot {
-        h2 += m[a] * coef[a];
-        for b in 0..n_annot {
-            tot_cov += m[a] * m[b] * coef_cov[a * n_annot + b];
-        }
-    }
-    let h2_se = tot_cov.max(0.0).sqrt();
-
-    // Intercept.
-    let (intercept_est, intercept_se, ratio, ratio_se) = if free_intercept {
-        let int_est = est[n_annot];
-        let int_se = cov[(n_annot, n_annot)].max(0.0).sqrt();
-        if mean_chisq > 1.0 {
-            let denom = mean_chisq - 1.0;
-            (
-                Some(int_est),
-                Some(int_se),
-                Some((int_est - 1.0) / denom),
-                Some(int_se / denom),
-            )
-        } else {
-            (Some(int_est), Some(int_se), None, None)
-        }
-    } else {
-        (intercept, None, None, None)
-    };
-
     Ok(HsqResult {
-        h2,
-        h2_se,
-        intercept: intercept_est,
-        intercept_se,
-        ratio,
-        ratio_se,
-        mean_chisq,
-        lambda_gc,
-        n_snp: nrows,
-        coef,
-        coef_se,
+        h2: hsq.reg.tot,
+        h2_se: hsq.reg.tot_se,
+        intercept: hsq.reg.intercept,
+        intercept_se: hsq.reg.intercept_se,
+        ratio: hsq.ratio,
+        ratio_se: hsq.ratio_se,
+        mean_chisq: hsq.mean_chisq,
+        lambda_gc: hsq.lambda_gc,
+        n_snp: chisq.len(),
+        coef: hsq.reg.coef,
+        coef_se: hsq.reg.coef_se,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Median, matching numpy's `np.median` (averages the two middle values for
+    /// even length). Kept as a local test helper to pin the λ_GC convention.
+    fn median(v: &mut [f64]) -> f64 {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let n = v.len();
+        if n % 2 == 1 {
+            v[n / 2]
+        } else {
+            (v[n / 2 - 1] + v[n / 2]) / 2.0
+        }
+    }
 
     #[test]
     fn median_matches_numpy() {

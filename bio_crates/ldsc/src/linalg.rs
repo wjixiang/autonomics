@@ -44,6 +44,23 @@ pub fn solve_spd(a: MatRef<'_, f64>, b: &[f64]) -> Result<Vec<f64>> {
     Ok((0..p).map(|i| x[(i, 0)]).collect())
 }
 
+/// 2-norm condition number `σ_max / σ_min` (numpy's `np.linalg.cond` default).
+pub fn cond_number(a: MatRef<'_, f64>) -> Result<f64> {
+    let sv = a
+        .singular_values()
+        .map_err(|e| LdscError::Linalg(format!("SVD failed: {e:?}")))?;
+    if sv.is_empty() {
+        return Ok(f64::NAN);
+    }
+    let smax = sv[0];
+    let smin = *sv.last().unwrap();
+    if smin == 0.0 {
+        Ok(f64::INFINITY)
+    } else {
+        Ok(smax / smin)
+    }
+}
+
 /// Inverse of a symmetric positive-definite matrix (for the coefficient
 /// covariance `(Xᵀ W X)⁻¹`).
 pub fn inv_spd(a: MatRef<'_, f64>) -> Result<Mat<f64>> {

@@ -21,6 +21,7 @@
 
 use faer::Mat;
 
+use crate::jackknife::{JackknifeResult, jackknife_fast};
 use crate::{LdscError, Result};
 
 use crate::linalg::wls;
@@ -58,6 +59,41 @@ pub struct IrwlsOutput {
     pub x: Mat<f64>,
     /// Row-scaled response (length `n`).
     pub y: Vec<f64>,
+}
+
+/// Per-SNP Gencov regression weights — port of `Gencov.weights`
+/// (`regressions.py:621-677`). `w = 1/(w_ld·(a·b + c²))` with
+/// `a = N1·h1·ld/M + int1`, `b = N2·h2·ld/M + int2`,
+/// `c = √(N1·N2)·ρg·ld/M + int_gencov`.
+pub fn gencov_weights(
+    ld: &[f64],
+    w_ld: &[f64],
+    n1: &[f64],
+    n2: &[f64],
+    m_tot: f64,
+    h1: f64,
+    h2: f64,
+    rho_g: f64,
+    intercept_gencov: f64,
+    intercept_hsq1: f64,
+    intercept_hsq2: f64,
+) -> Vec<f64> {
+    let h1 = h1.clamp(0.0, 1.0);
+    let h2 = h2.clamp(0.0, 1.0);
+    let rho_g = rho_g.clamp(-1.0, 1.0);
+    (0..ld.len())
+        .map(|i| {
+            let ldi = ld[i].max(1.0);
+            let wldi = w_ld[i].max(1.0);
+            let a = n1[i] * h1 * ldi / m_tot + intercept_hsq1;
+            let b = n2[i] * h2 * ldi / m_tot + intercept_hsq2;
+            let sqrt_n1n2 = (n1[i] * n2[i]).sqrt();
+            let c = sqrt_n1n2 * rho_g * ldi / m_tot + intercept_gencov;
+            let het_w = 1.0 / (a * b + c * c);
+            let oc_w = 1.0 / wldi;
+            het_w * oc_w
+        })
+        .collect()
 }
 
 /// Run the two-pass IRWLS reweighting.
@@ -122,6 +158,76 @@ pub fn irwls(
     let yw: Vec<f64> = (0..n).map(|i| y[i] * sqrtw[i]).collect();
 
     Ok(IrwlsOutput { x: xw, y: yw })
+}
+
+/// Generalized IRWLS → block jackknife. Performs exactly two reweighting passes
+/// (LDSC `IRWLS.irwls`), where `update(coef)` returns the new inverse-CVF
+/// weight vector for the current least-squares coefficients, then hands the
+/// `√w`-scaled design/response to [`jackknife_fast`].
+///
+/// This is the engine behind [`crate::regress`]'s Hsq/Gencov regressions.
+pub fn irwls_jackknife<F>(
+    x: &Mat<f64>,
+    y: &[f64],
+    n_blocks: usize,
+    initial_w: &[f64],
+    mut update: F,
+) -> Result<JackknifeResult>
+where
+    F: FnMut(&[f64]) -> Vec<f64>,
+{
+    let n = y.len();
+    if x.nrows() != n || initial_w.len() != n {
+        return Err(LdscError::DimensionMismatch(
+            "irwls_jackknife: mismatch".into(),
+        ));
+    }
+    let mut w = initial_w.to_vec();
+    for _ in 0..2 {
+        let coef = wls(x.as_ref(), y, &w)?;
+        w = update(&coef);
+    }
+    let sqrtw: Vec<f64> = w
+        .iter()
+        .map(|&wi| if wi > 0.0 { wi.sqrt() } else { 0.0 })
+        .collect();
+    let p = x.ncols();
+    let xw = Mat::from_fn(n, p, |i, j| x[(i, j)] * sqrtw[i]);
+    let yw: Vec<f64> = (0..n).map(|i| y[i] * sqrtw[i]).collect();
+    jackknife_fast(&xw, &yw, n_blocks)
+}
+
+/// Like [`irwls_jackknife`] but with explicit jackknife block separators (used
+/// by the two-step estimator).
+pub fn irwls_jackknife_with_separators<F>(
+    x: &Mat<f64>,
+    y: &[f64],
+    initial_w: &[f64],
+    mut update: F,
+    separators: &[usize],
+) -> Result<JackknifeResult>
+where
+    F: FnMut(&[f64]) -> Vec<f64>,
+{
+    let n = y.len();
+    if x.nrows() != n || initial_w.len() != n {
+        return Err(LdscError::DimensionMismatch(
+            "irwls_jackknife_with_separators: mismatch".into(),
+        ));
+    }
+    let mut w = initial_w.to_vec();
+    for _ in 0..2 {
+        let coef = wls(x.as_ref(), y, &w)?;
+        w = update(&coef);
+    }
+    let sqrtw: Vec<f64> = w
+        .iter()
+        .map(|&wi| if wi > 0.0 { wi.sqrt() } else { 0.0 })
+        .collect();
+    let p = x.ncols();
+    let xw = Mat::from_fn(n, p, |i, j| x[(i, j)] * sqrtw[i]);
+    let yw: Vec<f64> = (0..n).map(|i| y[i] * sqrtw[i]).collect();
+    crate::jackknife::jackknife_fast_with_separators(&xw, &yw, separators)
 }
 
 #[cfg(test)]
