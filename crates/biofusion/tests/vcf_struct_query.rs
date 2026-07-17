@@ -47,7 +47,9 @@ use oxbow::{CoordSystem, Select};
 
 /// Workspace-root fixture that triggers the failure (same file the agent used).
 fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures")
+        .join(name)
 }
 
 /// Name of the VCF sample (FORMAT/genotype) column that carries the nested
@@ -79,7 +81,11 @@ fn scan_dtype<R: std::io::BufRead + 'static>(
     let batch = batches.next().unwrap().unwrap();
     format!(
         "{:?} (batch_size={:?}, {} rows)",
-        batch.schema().field_with_name(SAMPLE_COL).unwrap().data_type(),
+        batch
+            .schema()
+            .field_with_name(SAMPLE_COL)
+            .unwrap()
+            .data_type(),
         batch_size,
         batch.num_rows()
     )
@@ -117,7 +123,10 @@ async fn read_vcf_struct_field_query_succeeds() {
     );
     eprintln!("[diag] dtype via noodles bgzf reader : {dtype_bgzf}");
     eprintln!("[diag] dtype via flate2 MultiGzDecoder : {dtype_flate2}");
-    eprintln!("[diag] decoders agree                 : {}", dtype_bgzf == dtype_flate2);
+    eprintln!(
+        "[diag] decoders agree                 : {}",
+        dtype_bgzf == dtype_flate2
+    );
 
     // ── diagnostic B2: does batch_size change the produced dtype? ──────────
     // biofusion's BioOpener passes batch_size=8192 (BioOptions::default);
@@ -190,10 +199,7 @@ async fn read_vcf_struct_field_query_succeeds() {
 
     // ── the target query: project a nested struct subfield via dot-notation ─
     let query = format!(r#"SELECT "{SAMPLE_COL}"."{SUBFIELD}" AS es FROM vcf LIMIT 10"#);
-    let planned = ctx
-        .sql(&query)
-        .await
-        .expect("struct-field SQL should plan");
+    let planned = ctx.sql(&query).await.expect("struct-field SQL should plan");
 
     // This `.collect()` is where the agent's run blew up. It MUST succeed
     // and return at least one row once the underlying issue is fixed.

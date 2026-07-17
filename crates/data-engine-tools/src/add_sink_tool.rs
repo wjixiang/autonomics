@@ -67,7 +67,12 @@ impl ToolFunction for AddSinkNodeTool {
         let mode = input.mode.as_deref().map(parse_sink_mode).transpose()?;
 
         self.client
-            .add_sink_node(input.id, sink, mode.unwrap_or_default(), self.datalake.clone())
+            .add_sink_node(
+                input.id,
+                sink,
+                mode.unwrap_or_default(),
+                self.datalake.clone(),
+            )
             .await
             .map_err(ExecError::from)?;
 
@@ -128,7 +133,10 @@ mod tests {
             parse_sink_format("Parquet"),
             Ok(SinkFormat::File(WriteFormat::Parquet))
         ));
-        assert!(matches!(parse_sink_format("Iceberg"), Ok(SinkFormat::Iceberg)));
+        assert!(matches!(
+            parse_sink_format("Iceberg"),
+            Ok(SinkFormat::Iceberg)
+        ));
         assert!(parse_sink_format("json").is_err());
     }
 

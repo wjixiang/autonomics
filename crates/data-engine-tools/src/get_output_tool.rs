@@ -4,14 +4,14 @@ use agentik_core::tools::{ToolError, ToolFunction};
 use agentik_proc::tool;
 use agentik_sdk::types::ToolResult;
 use arrow::datatypes::DataType;
-use arrow_array::{Array, OffsetSizeTrait, RecordBatch};
 use arrow_array::cast::AsArray;
 use arrow_array::types::{
-    Int8Type, Int16Type, Int32Type, Int64Type, UInt8Type, UInt16Type, UInt32Type, UInt64Type,
-    Float32Type, Float64Type, Date32Type, Date64Type,
+    Date32Type, Date64Type, Float32Type, Float64Type, Int8Type, Int16Type, Int32Type, Int64Type,
+    UInt8Type, UInt16Type, UInt32Type, UInt64Type,
 };
-use serde_json::json;
+use arrow_array::{Array, OffsetSizeTrait, RecordBatch};
 use datafusion::prelude::DataFrame;
+use serde_json::json;
 
 use crate::ExecError;
 use async_trait::async_trait;
@@ -95,9 +95,9 @@ fn cell_to_json(array: &dyn Array, row: usize) -> serde_json::Value {
             // Render the raw integer; callers can interpret per `unit`. Avoids
             // pulling a chrono dependency just for formatting.
             let v = match unit {
-                arrow::datatypes::TimeUnit::Second => {
-                    array.as_primitive::<arrow_array::types::TimestampSecondType>().value(row)
-                }
+                arrow::datatypes::TimeUnit::Second => array
+                    .as_primitive::<arrow_array::types::TimestampSecondType>()
+                    .value(row),
                 arrow::datatypes::TimeUnit::Millisecond => array
                     .as_primitive::<arrow_array::types::TimestampMillisecondType>()
                     .value(row),
@@ -267,11 +267,12 @@ impl ToolFunction for GetOutputTool {
             // the misleading `returned_rows: 0, total_rows: N` (obstacle #2).
             // Now we capture the error and report it in-band per output.
             let fetch = if unlimited { None } else { Some(limit) };
-            let queried = df.clone().limit(offset, fetch).map_err(|e| {
-                ToolError::ExecutionFailed {
-                    source: Box::new(e),
-                }
-            })?;
+            let queried =
+                df.clone()
+                    .limit(offset, fetch)
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
 
             let entry = match queried.collect().await {
                 Ok(batches) => {
@@ -334,13 +335,13 @@ impl ToolFunction for GetOutputTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::datatypes::{DataType, Field, Fields, Schema};
+    use arrow_array::types::{Float32Type, Int32Type};
     use arrow_array::{
-        builder::{ListBuilder, PrimitiveBuilder},
         ArrayRef, BooleanArray, DictionaryArray, Float32Array, Float64Array, Int32Array,
         RecordBatch, StringArray, StructArray,
+        builder::{ListBuilder, PrimitiveBuilder},
     };
-    use arrow_array::types::{Float32Type, Int32Type};
-    use arrow::datatypes::{DataType, Field, Fields, Schema};
     use std::sync::Arc;
 
     /// Build a one-row batch that exercises the nested types the VCF schema
@@ -372,8 +373,11 @@ mod tests {
             DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
             true,
         );
-        let info =
-            StructArray::new(vec![af_field].into(), vec![Arc::new(af_list) as ArrayRef], None);
+        let info = StructArray::new(
+            vec![af_field].into(),
+            vec![Arc::new(af_list) as ArrayRef],
+            None,
+        );
 
         let schema = Arc::new(Schema::new(vec![
             Field::new(
@@ -428,10 +432,7 @@ mod tests {
         assert_eq!(row["alt"], serde_json::json!(["A", "T"]));
 
         // Struct { AF: List(Float32) } → nested object with array.
-        assert_eq!(
-            row["info"],
-            serde_json::json!({"AF": [0.25, 0.75]})
-        );
+        assert_eq!(row["info"], serde_json::json!({"AF": [0.25, 0.75]}));
     }
 
     #[test]

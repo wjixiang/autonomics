@@ -31,7 +31,13 @@ impl DataEngineServer {
             DataEngineCmd::AddSqlNode { id, query, reply } => {
                 let _ = reply.send(self.engine.sql_node(id, query).map(|_| ()));
             }
-            DataEngineCmd::AddSinkNode { id, sink, mode, datalake, reply } => {
+            DataEngineCmd::AddSinkNode {
+                id,
+                sink,
+                mode,
+                datalake,
+                reply,
+            } => {
                 let _ = reply.send(self.engine.sink_node(id, sink, mode, datalake).map(|_| ()));
             }
             DataEngineCmd::AddLinearRegressionNode {

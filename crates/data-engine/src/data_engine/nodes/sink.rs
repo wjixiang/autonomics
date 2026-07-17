@@ -148,18 +148,16 @@ impl SinkNode {
             source: e,
         };
         let existing = match format {
-            WriteFormat::Csv => {
-                self.ctx
-                    .read_csv(path, CsvReadOptions::default())
-                    .await
-                    .map_err(read_err)?
-            }
-            WriteFormat::Parquet => {
-                self.ctx
-                    .read_parquet(path, ParquetReadOptions::default())
-                    .await
-                    .map_err(read_err)?
-            }
+            WriteFormat::Csv => self
+                .ctx
+                .read_csv(path, CsvReadOptions::default())
+                .await
+                .map_err(read_err)?,
+            WriteFormat::Parquet => self
+                .ctx
+                .read_parquet(path, ParquetReadOptions::default())
+                .await
+                .map_err(read_err)?,
         };
 
         // Cast each existing column to the new DataFrame's field type so the
@@ -237,9 +235,7 @@ impl DagNode for SinkNode {
 
                 let res = match format {
                     WriteFormat::Csv => {
-                        to_write
-                            .write_csv(&path, options, None::<CsvOptions>)
-                            .await
+                        to_write.write_csv(&path, options, None::<CsvOptions>).await
                     }
                     WriteFormat::Parquet => {
                         to_write
@@ -289,10 +285,8 @@ impl DagNode for SinkNode {
                         .get_catalog()
                         .await
                         .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?;
-                    let table_ident = iceberg::TableIdent::new(
-                        namespace.clone(),
-                        table_creation.name.clone(),
-                    );
+                    let table_ident =
+                        iceberg::TableIdent::new(namespace.clone(), table_creation.name.clone());
                     // Best-effort: a missing table is expected on first write.
                     let _ = catalog.drop_table(&table_ident).await;
                 }
@@ -483,10 +477,7 @@ mod tests {
     async fn test_sink_file_overwrite_replaces() {
         let ctx = SessionContext::new();
         let datalake = Arc::new(Datalake::default());
-        let path = format!(
-            "/tmp/sink_overwrite_{}.csv",
-            std::process::id(),
-        );
+        let path = format!("/tmp/sink_overwrite_{}.csv", std::process::id(),);
 
         let sink = |df: DataFrame, mode| {
             let mut node = SinkNode::new(

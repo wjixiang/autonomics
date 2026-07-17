@@ -422,12 +422,10 @@ mod tests {
     async fn fanout_concurrent() {
         // Fan-out under concurrency=2 — verifies no SessionContext registration
         // collision between concurrent consumers of the same source port.
-        let mut engine = DataEngine::builder()
-            .build()
-            .with_config(SchedulerConfig {
-                max_concurrency: 2,
-                ..SchedulerConfig::default()
-            });
+        let mut engine = DataEngine::builder().build().with_config(SchedulerConfig {
+            max_concurrency: 2,
+            ..SchedulerConfig::default()
+        });
         let iris = datasets_dir().join("Iris.csv");
 
         engine
@@ -603,12 +601,10 @@ mod tests {
     /// path works end-to-end.
     #[tokio::test]
     async fn vcf_source_computes_rows_when_opted_in() {
-        let mut engine = DataEngine::builder()
-            .build()
-            .with_config(SchedulerConfig {
-                compute_row_counts: true,
-                ..SchedulerConfig::default()
-            });
+        let mut engine = DataEngine::builder().build().with_config(SchedulerConfig {
+            compute_row_counts: true,
+            ..SchedulerConfig::default()
+        });
         let vcf = datasets_dir().join("sample.vcf.gz");
 
         engine

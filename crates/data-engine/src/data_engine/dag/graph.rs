@@ -262,7 +262,12 @@ impl DAG {
 
         // Build per-node reports for the agent-friendly result.
         let node_reports = self
-            .build_node_reports(&all_ids, &durations, &skipped_because, cfg.compute_row_counts)
+            .build_node_reports(
+                &all_ids,
+                &durations,
+                &skipped_because,
+                cfg.compute_row_counts,
+            )
             .await;
 
         Ok(RunReport {
@@ -387,10 +392,7 @@ impl DAG {
             };
             let owned = df.clone();
             let id_owned = id.clone();
-            pairs.push((
-                id_owned,
-                Box::pin(async move { owned.count().await }),
-            ));
+            pairs.push((id_owned, Box::pin(async move { owned.count().await })));
         }
 
         // Join all counts concurrently. If any future panics or returns an
@@ -406,7 +408,12 @@ impl DAG {
         let mut counts: HashMap<NodeId, usize> = HashMap::new();
         let mut result_iter = results.into_iter();
         for id in all_ids {
-            if self.outputs.get(id).and_then(|d| d.values().next()).is_some() {
+            if self
+                .outputs
+                .get(id)
+                .and_then(|d| d.values().next())
+                .is_some()
+            {
                 if let Some(res) = result_iter.next() {
                     counts.insert(id.clone(), res.unwrap_or(0));
                 }

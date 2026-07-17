@@ -219,7 +219,11 @@ async fn test_get_output_vcf_select_star_returns_correct_rows() {
     // 3. Edge + run.
     let res = toolset
         .execute(
-            &[build_tooluse("v3", "add_edge", json!({"from": "vcf_src", "to": "preview"}))],
+            &[build_tooluse(
+                "v3",
+                "add_edge",
+                json!({"from": "vcf_src", "to": "preview"}),
+            )],
             None,
             None,
         )
@@ -236,7 +240,11 @@ async fn test_get_output_vcf_select_star_returns_correct_rows() {
     // 4. get_output and parse the JSON envelope.
     let res = toolset
         .execute(
-            &[build_tooluse("v5", "get_output", json!({"id": "preview", "limit": 100}))],
+            &[build_tooluse(
+                "v5",
+                "get_output",
+                json!({"id": "preview", "limit": 100}),
+            )],
             None,
             None,
         )
@@ -297,7 +305,11 @@ async fn test_get_output_surfaces_collect_error_instead_of_swallowing() {
     let file_storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
     // 5 rows where `s` is non-numeric → cast(s as int) errors at execution.
     let csv = b"age,s\n1,abc\n2,def\n3,ghi\n4,jkl\n5,mno\n";
-    file_storage.op.write("/badcast.csv", csv.to_vec()).await.unwrap();
+    file_storage
+        .op
+        .write("/badcast.csv", csv.to_vec())
+        .await
+        .unwrap();
 
     let engine = DataEngine::builder()
         .register_opendal_fs(file_storage)
@@ -347,7 +359,11 @@ async fn test_get_output_surfaces_collect_error_instead_of_swallowing() {
 
     let res = toolset
         .execute(
-            &[build_tooluse("e3", "add_edge", json!({"from": "src", "to": "badcast"}))],
+            &[build_tooluse(
+                "e3",
+                "add_edge",
+                json!({"from": "src", "to": "badcast"}),
+            )],
             None,
             None,
         )
@@ -363,7 +379,11 @@ async fn test_get_output_surfaces_collect_error_instead_of_swallowing() {
 
     let res = toolset
         .execute(
-            &[build_tooluse("e5", "get_output", json!({"id": "badcast", "limit": 100}))],
+            &[build_tooluse(
+                "e5",
+                "get_output",
+                json!({"id": "badcast", "limit": 100}),
+            )],
             None,
             None,
         )
@@ -464,7 +484,11 @@ async fn test_get_output_synthetic_struct_column_baseline() {
 
     let res = toolset
         .execute(
-            &[build_tooluse("b3", "add_edge", json!({"from": "src", "to": "struct_node"}))],
+            &[build_tooluse(
+                "b3",
+                "add_edge",
+                json!({"from": "src", "to": "struct_node"}),
+            )],
             None,
             None,
         )
@@ -510,9 +534,8 @@ fn parse_tool_json(content: &agentik_sdk::types::tools::ToolResultContent) -> se
     use agentik_sdk::types::tools::{ToolResultBlock, ToolResultContent};
     match content {
         ToolResultContent::Json(v) => v.clone(),
-        ToolResultContent::Text(s) => serde_json::from_str(s).unwrap_or_else(|e| {
-            panic!("tool Text content wasn't valid JSON: {e}; body: {s}")
-        }),
+        ToolResultContent::Text(s) => serde_json::from_str(s)
+            .unwrap_or_else(|e| panic!("tool Text content wasn't valid JSON: {e}; body: {s}")),
         ToolResultContent::Blocks(blocks) => {
             let text: String = blocks
                 .iter()

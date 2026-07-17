@@ -18,8 +18,8 @@ use agentik_sdk::types::ToolResult;
                   all available tables and namespaces in the data lake. \
                   Returns results as JSON with windowed pagination via `offset` + `max_rows`. \
                   The response includes `total_available`, `offset`, `row_count`, and `has_more` \
-                  so you can page through large tables without re-running the query from scratch.
-
+                  so you can page through large tables without re-running the query from scratch. \
+\
         **IMPORTANT**: you need to add `iceberg` before the table ident (e.g. `SELECT * FROM iceberg.ns.tb`).
         "
 )]
@@ -101,14 +101,19 @@ impl QueryIcebergTool {
             .get_ctx()
             .await
             .map_err(|e| ToolError::ExecutionFailed {
-                source: format!("{e}").into(),
+                source: format!("Get ctx failed during executing SQL query: {e}").into(),
             })?;
 
         let df = ctx
             .sql(query)
             .await
             .map_err(|e| ToolError::ExecutionFailed {
-                source: format!("{e}").into(),
+                source: match e {
+                    datafusion::error::DataFusionError::External(error) => {
+                        format!("external error: {error}").into()
+                    }
+                    _ => e.to_string().into(),
+                },
             })?;
 
         let batches: Vec<RecordBatch> =
@@ -301,4 +306,22 @@ pub(crate) fn scalar_to_json(col: &dyn arrow_array::Array, row: usize) -> serde_
         }
         _ => serde_json::json!(format!("<{}>", col.data_type())),
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::QueryIcebergTool;
+    use datalake::datalake;
+    use std::sync::Arc;
+
+    // #[tokio::test]
+    // async fn test_sql_query() {
+    //     let dk = datalake::Datalake::default();
+    //     let tool = QueryIcebergTool::new(Arc::new(dk));
+    //     let df = tool
+    //         .run_sql("SELECT * FROM iceberg.gwas.test", 10, 0)
+    //         .await
+    //         .unwrap();
+    //     dbg!(df);
+    // }
 }

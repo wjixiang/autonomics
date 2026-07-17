@@ -34,10 +34,7 @@ impl WaitTaskTool {
     }
 
     /// Read the actual result of a completed task.
-    async fn read_result(
-        &self,
-        task_id: &str,
-    ) -> Result<AgentToolResult, ToolError> {
+    async fn read_result(&self, task_id: &str) -> Result<AgentToolResult, ToolError> {
         let tasks = self.tasks.read().await;
         let Some(task) = tasks.iter().find(|t| t.id() == task_id) else {
             return Ok(AgentToolResult::error(format!(
