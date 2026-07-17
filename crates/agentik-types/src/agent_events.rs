@@ -65,11 +65,7 @@ pub enum AgentEvent {
     ToolCallBackground { id: String, name: String },
 
     /// A background tool task completed with its real result.
-    ToolBackgroundComplete {
-        id: String,
-        ok: bool,
-        content: String,
-    },
+    ToolBackgroundComplete { id: String, ok: bool },
 
     /// Agent finished its workflow.
     Done,

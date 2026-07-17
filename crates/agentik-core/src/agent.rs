@@ -250,7 +250,6 @@ impl Agent {
                     self.send_event(agentik_sdk::types::AgentEvent::ToolBackgroundComplete {
                         id: id.clone(),
                         ok,
-                        content,
                     });
                     let note = if ok {
                         format!(
@@ -259,7 +258,7 @@ impl Agent {
                         )
                     } else {
                         format!(
-                            "Background task '{name}' (id={id}) finished with an error. \
+                            "Background task '{name}' (id={id}) finished with an error: {content}. \
                              Call `view_task_results` with task_id={id} to read the error."
                         )
                     };

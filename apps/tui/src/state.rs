@@ -363,8 +363,11 @@ pub fn apply_event(state: &mut AgentTabState, event: AgentEvent) {
             state.messages_version += 1;
             state.scroll_to_bottom();
         }
-        AgentEvent::ToolBackgroundComplete { id, ok, content } => {
-            state.messages.push(ChatLine::ToolResult { ok, content });
+        AgentEvent::ToolBackgroundComplete { id, ok } => {
+            state.messages.push(ChatLine::ToolResult {
+                ok,
+                content: format!("Background task `{id}` has completed"),
+            });
             if let Some(task) = state.tool_tasks.iter_mut().find(|t| t.id == id) {
                 task.status = ToolTaskStatus::Done { ok };
             }

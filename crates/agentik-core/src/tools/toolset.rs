@@ -254,16 +254,11 @@ impl Toolset {
         let tasks = self.tasks.read().await;
         let entry = tasks.iter().find(|t| t.id() == id)?;
         match entry.status() {
-            TaskStatus::Done(_) => {
-                let result = entry.tool_result();
-                let ok = result
-                    .as_ref()
-                    .map_or(true, |r| !r.is_error.unwrap_or(false));
-                let content = result
-                    .map(|r| r.text_content())
-                    .unwrap_or_else(|| "task finished".to_string());
-                Some((entry.name().to_string(), ok, content))
-            }
+            TaskStatus::Done(res) => Some((
+                entry.name().to_string(),
+                true,
+                format!("Task {0} finished successfully", res.tool_use_id),
+            )),
             TaskStatus::Failed(ref err) => Some((entry.name().to_string(), false, err.to_string())),
             TaskStatus::Running => None,
         }
