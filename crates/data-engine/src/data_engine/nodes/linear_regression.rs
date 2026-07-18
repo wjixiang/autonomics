@@ -12,10 +12,15 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
+use schemars::{schema_for, JsonSchema};
+use serde::Deserialize;
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
-use crate::data_engine::dag::{DagError, graph::PortOutputs};
+use crate::{
+    data_engine::dag::{DagError, graph::PortOutputs},
+    node_registry::registry::{NodeCtx, NodeFactory},
+};
 
 // =====================================================================
 // Error type
@@ -212,6 +217,46 @@ impl LinearRegressionNode {
             y_column,
             intercept,
         }
+    }
+}
+
+const LINEAR_REGRESSION_NODE_KIND: &str = "linear_regression";
+
+#[derive(Debug, JsonSchema, Deserialize)]
+pub struct LinearRegressionNodeSpec {
+    pub x_columns: Vec<String>,
+    pub y_column: String,
+    #[serde(default = "default_intercept")]
+    pub intercept: bool,
+}
+
+fn default_intercept() -> bool {
+    true
+}
+
+pub struct LinearRegressionNodeFactory {}
+
+impl NodeFactory for LinearRegressionNodeFactory {
+    fn kind(&self) -> &'static str {
+        LINEAR_REGRESSION_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(LinearRegressionNodeSpec)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        _node_ctx: NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let node_spec: LinearRegressionNodeSpec = serde_json::from_value(spec)?;
+        let node = LinearRegressionNode::new(
+            node_spec.x_columns,
+            node_spec.y_column,
+            node_spec.intercept,
+        );
+        Ok(Box::new(node))
     }
 }
 

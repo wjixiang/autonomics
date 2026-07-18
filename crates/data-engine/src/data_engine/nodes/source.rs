@@ -14,11 +14,15 @@ use datafusion::{
     common::HashMap,
     prelude::{CsvReadOptions, DataFrame, ParquetReadOptions, SessionContext},
 };
-use datalake::Datalake;
+use schemars::{schema_for, JsonSchema};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
-use crate::data_engine::dag::{DagError, graph::PortOutputs};
+use crate::{
+    data_engine::dag::{DagError, graph::PortOutputs},
+    node_registry::registry::{NodeCtx, NodeFactory},
+};
 
 /// Where a [`SourceNode`] reads from.
 #[derive(Debug, Clone)]
@@ -36,7 +40,8 @@ pub enum Source {
 
 /// Supported file formats. Tabular formats go through DataFusion natively;
 /// bioinformatics formats go through `biofusion`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum FileFormat {
     // DataFusion native
     Csv,
@@ -134,6 +139,48 @@ impl SourceNode {
         // A source has no inputs and a single output port.
         let meta = NodeMeta::new().add_output_port(None);
         Self { meta, source, ctx }
+    }
+}
+
+const SOURCE_NODE_KIND: &str = "source";
+
+#[derive(Debug, JsonSchema, Deserialize)]
+#[serde(tag = "type")]
+pub enum SourceNodeSpec {
+    #[serde(rename = "file")]
+    File {
+        path: String,
+        format: Option<FileFormat>,
+    },
+    #[serde(rename = "iceberg")]
+    Iceberg {
+        ident: String,
+    },
+}
+
+pub struct SourceNodeFactory {}
+
+impl NodeFactory for SourceNodeFactory {
+    fn kind(&self) -> &'static str {
+        SOURCE_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(SourceNodeSpec)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        node_ctx: NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let node_spec: SourceNodeSpec = serde_json::from_value(spec)?;
+        let source = match node_spec {
+            SourceNodeSpec::File { path, format } => Source::File { path, format },
+            SourceNodeSpec::Iceberg { ident } => Source::Iceberg { ident },
+        };
+        let node = SourceNode::new(source, node_ctx.session);
+        Ok(Box::new(node))
     }
 }
 

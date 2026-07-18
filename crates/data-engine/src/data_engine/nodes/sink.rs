@@ -15,12 +15,17 @@ use datafusion::prelude::SessionContext;
 use datalake::Datalake;
 use iceberg::arrow::arrow_schema_to_schema_auto_assign_ids;
 use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
+use schemars::{schema_for, JsonSchema};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
 use super::source::normalize_path;
-use crate::data_engine::dag::DagError;
-use crate::data_engine::dag::graph::PortOutputs;
+use crate::{
+    data_engine::dag::DagError,
+    data_engine::dag::graph::PortOutputs,
+    node_registry::registry::{NodeCtx, NodeFactory},
+};
 
 /// Where a [`SinkNode`] writes to.
 #[derive(Debug, Clone)]
@@ -32,13 +37,15 @@ pub enum Sink {
 }
 
 /// Supported on-disk write formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum WriteFormat {
     Csv,
     Parquet,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum SinkMode {
     /// Add the new rows after whatever is already at the destination.
     Append,
@@ -239,6 +246,56 @@ impl SinkNode {
     /// once that branch is wired up.
     pub fn datalake(&self) -> Arc<Datalake> {
         self.datalake.clone()
+    }
+}
+
+const SINK_NODE_KIND: &str = "sink";
+
+#[derive(Debug, JsonSchema, Deserialize)]
+#[serde(tag = "type")]
+pub enum SinkNodeSpec {
+    #[serde(rename = "file")]
+    File {
+        path: String,
+        format: WriteFormat,
+        #[serde(default)]
+        mode: SinkMode,
+    },
+    #[serde(rename = "iceberg")]
+    Iceberg {
+        ident: String,
+        #[serde(default)]
+        mode: SinkMode,
+    },
+}
+
+pub struct SinkNodeFactory {}
+
+impl NodeFactory for SinkNodeFactory {
+    fn kind(&self) -> &'static str {
+        SINK_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(SinkNodeSpec)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        node_ctx: NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let node_spec: SinkNodeSpec = serde_json::from_value(spec)?;
+        let (sink, mode) = match node_spec {
+            SinkNodeSpec::File { path, format, mode } => {
+                (Sink::File { path, format }, mode)
+            }
+            SinkNodeSpec::Iceberg { ident, mode } => {
+                (Sink::Iceberg { ident }, mode)
+            }
+        };
+        let node = SinkNode::new(sink, mode, node_ctx.session, node_ctx.datalake);
+        Ok(Box::new(node))
     }
 }
 

@@ -12,10 +12,15 @@ use arrow_array::{Float64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datalake::Datalake;
+use schemars::{schema_for, JsonSchema};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
-use crate::data_engine::dag::{DagError, graph::PortOutputs};
+use crate::{
+    data_engine::dag::{DagError, graph::PortOutputs},
+    node_registry::registry::{NodeCtx, NodeFactory},
+};
 
 // =====================================================================
 // Error type
@@ -154,7 +159,7 @@ pub struct LdscHsqNode {
 /// Bundles the three parameters that govern the LDSC regression itself.
 /// All other [`LdscHsqNode`] parameters (datalake, sumstats column names)
 /// are orthogonal and live on the node directly.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LdscHsqConfig {
     /// Per-annotation M: the number of SNPs in each LD score annotation
     /// category, in the same order as `HsqColumns::ref_ld`. M is the
@@ -187,6 +192,30 @@ impl LdscHsqConfig {
             n_blocks,
             intercept,
         }
+    }
+}
+
+const LDSC_HSQ_NODE_KIND: &str = "ldsc";
+
+pub struct LdscHsqNodeFactory {}
+
+impl NodeFactory for LdscHsqNodeFactory {
+    fn kind(&self) -> &'static str {
+        LDSC_HSQ_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(LdscHsqConfig)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        node_ctx: NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let config: LdscHsqConfig = serde_json::from_value(spec)?;
+        let node = LdscHsqNode::new(node_ctx.datalake, config);
+        Ok(Box::new(node))
     }
 }
 

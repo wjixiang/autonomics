@@ -9,6 +9,12 @@ pub enum Error {
 
     #[error("cannot found node factory for kind '{kind}'")]
     FactoryNotFound { kind: String },
+
+    #[error("cannot deserialize node spec: {source}")]
+    SpecDeserialize {
+        #[from]
+        source: serde_json::Error,
+    },
 }
 
 impl From<&str> for Error {

@@ -1,10 +1,15 @@
 use async_trait::async_trait;
 use datafusion::{common::HashMap, execution::SessionStateBuilder, prelude::SessionContext};
+use schemars::{JsonSchema, schema_for};
+use serde::Deserialize;
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
 
-use crate::data_engine::dag::{DagError, graph::PortOutputs};
+use crate::{
+    data_engine::dag::{DagError, graph::PortOutputs},
+    node_registry::registry::NodeFactory,
+};
 
 #[derive(Debug, Error)]
 pub enum SqlNodeError {
@@ -37,11 +42,38 @@ pub struct SqlNode {
     ctx: SessionContext,
 }
 
+#[derive(Debug, JsonSchema, Deserialize)]
+pub struct SqlNodeSpec {
+    sql_query: String,
+}
+
+const SQL_NODE_KIND: &str = "sql";
+
+pub struct SqlNodeFactory {}
+
+impl NodeFactory for SqlNodeFactory {
+    fn kind(&self) -> &'static str {
+        SQL_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(SqlNodeSpec)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        node_ctx: crate::node_registry::registry::NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let node_spec: SqlNodeSpec = serde_json::from_value(spec)?;
+        let sql_node = SqlNode::new(node_spec.sql_query, node_ctx.session);
+        Ok(Box::new(sql_node))
+    }
+}
+
 impl SqlNode {
     pub fn new(query: String, ctx: SessionContext) -> Self {
-        let meta = NodeMeta::new()
-            .add_output_port(None)
-            .set_fixed_input(false);
+        let meta = NodeMeta::new().add_output_port(None).set_fixed_input(false);
         Self {
             meta,
             sql_query: query,

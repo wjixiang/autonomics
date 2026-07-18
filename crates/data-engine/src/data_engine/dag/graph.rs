@@ -14,7 +14,6 @@ use tokio::sync::{Semaphore, mpsc};
 use tracing::{debug, warn};
 
 use crate::data_engine::dag::utils::{build_inputs, cascade_skip};
-use crate::node_registry::registry::NodeRegistry;
 
 use super::super::nodes::sink::SinkNode;
 use super::error::DagError;

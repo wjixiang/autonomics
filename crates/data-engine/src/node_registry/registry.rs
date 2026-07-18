@@ -5,16 +5,22 @@ use datalake::Datalake;
 
 use super::error::{Error, Result};
 
-use crate::data_engine::dag::DagNode;
-
-pub struct PortTopology {}
+use crate::data_engine::{
+    dag::DagNode,
+    nodes::{
+        ldsc_hsq::LdscHsqNodeFactory,
+        linear_regression::LinearRegressionNodeFactory,
+        mock_node::MockNodeFactory,
+        sink::SinkNodeFactory,
+        source::SourceNodeFactory,
+        sql_node::SqlNodeFactory,
+    },
+};
 
 pub trait NodeFactory: Send + Sync {
     fn kind(&self) -> &'static str;
     fn spec_schema(&self) -> schemars::Schema;
     fn build(&self, spec: serde_json::Value, node_ctx: NodeCtx) -> Result<Box<dyn DagNode>>;
-    fn input_topology(&self) -> PortTopology;
-    fn output_topology(&self) -> PortTopology;
 }
 
 /// Context dependencies for DagNodes
@@ -26,10 +32,6 @@ pub struct NodeCtx {
     /// consititude SessionContext, then let nodes to build their own ctx by need.
     pub session: SessionContext,
     pub datalake: Arc<Datalake>,
-}
-
-pub trait NodeSpec {
-    fn schema(&self) -> schemars::Schema;
 }
 
 /// The single source of truth of "which node kinds exist and how to build one from spec."
@@ -48,26 +50,39 @@ impl NodeRegistry {
             datalake,
         };
 
-        Self {
+        let mut registry = Self {
             node_ctx,
             nodes: Default::default(),
-        }
+        };
+        registry.register(Box::new(SqlNodeFactory {}));
+        registry.register(Box::new(SourceNodeFactory {}));
+        registry.register(Box::new(SinkNodeFactory {}));
+        registry.register(Box::new(LdscHsqNodeFactory {}));
+        registry.register(Box::new(LinearRegressionNodeFactory {}));
+        registry.register(Box::new(MockNodeFactory {}));
+        registry
     }
 
-    // pub fn get_node_factory(&self, node_kind: &str) -> Result<Box<dyn NodeFactory>> {
-    //     self.nodes
-    //         .get(node_kind)
-    //         .ok_or(Error::FactoryNotFound {
-    //             kind: node_kind.to_string(),
-    //         })
-    //         .cloned()
-    // }
+    pub fn register(&mut self, factory: Box<dyn NodeFactory>) {
+        self.nodes.insert(factory.kind().to_string(), factory);
+    }
+
+    fn get_node_factory(&self, node_kind: &str) -> Result<&dyn NodeFactory> {
+        self.nodes
+            .get(node_kind)
+            .map(|b| b.as_ref())
+            .ok_or(Error::FactoryNotFound {
+                kind: node_kind.to_string(),
+            })
+    }
 
     pub fn build_node(&self, node_kind: &str, spec: serde_json::Value) -> Result<Box<dyn DagNode>> {
-        let node_factory = self.nodes.get(node_kind).ok_or(Error::FactoryNotFound {
-            kind: node_kind.to_string(),
-        })?;
+        let node_factory = self.get_node_factory(node_kind)?;
         let node = node_factory.build(spec, self.node_ctx.clone())?;
         Ok(node)
+    }
+
+    pub fn get_node_spec(&self, node_kind: &str) -> Result<schemars::Schema> {
+        Ok(self.get_node_factory(node_kind)?.spec_schema())
     }
 }
