@@ -7,6 +7,7 @@ description = "Built-in primitive tools for agentik-core: bash, read, write, edi
 license.workspace = true
 
 [dependencies]
+schemars.workspace = true
 agentik-core = { path = "../agentik-core" }
 agentik-sdk = { path = "../agentik-sdk" }
 agentik-proc = { path = "../agentik-proc" }

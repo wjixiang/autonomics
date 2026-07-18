@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use schemars::JsonSchema;
 
 /// A struct that can describe its own tool definition.
 ///
@@ -58,6 +59,57 @@ pub struct ToolInputSchema {
     pub required: Vec<String>,
     #[serde(flatten)]
     pub additional: Map<String, Value>,
+}
+
+impl ToolInputSchema {
+    /// Build a [`ToolInputSchema`] from a JSON Schema describing the tool's
+    /// input struct (typically produced by `schemars`).
+    ///
+    /// The root schema is expected to be a JSON object. The well-known keys
+    /// `type` / `properties` / `required` are lifted into the typed fields;
+    /// everything else (e.g. `additionalProperties`) is preserved via the
+    /// `additional` flatten. The `"$schema"` meta-URI and generated `"title"`
+    /// are stripped — they are schemars bookkeeping that some provider APIs
+    /// reject.
+    pub fn from_root_schema(mut root: Value) -> Self {
+        let obj = match root.as_object_mut() {
+            Some(o) => o,
+            None => {
+                return Self {
+                    schema_type: "object".to_string(),
+                    properties: Map::new(),
+                    required: Vec::new(),
+                    additional: Map::new(),
+                }
+            }
+        };
+        obj.remove("$schema");
+        obj.remove("title");
+        let schema_type = obj
+            .remove("type")
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_else(|| "object".to_string());
+        let properties = obj
+            .remove("properties")
+            .and_then(|v| match v {
+                Value::Object(m) => Some(m),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let required = obj
+            .remove("required")
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+        Self {
+            schema_type,
+            properties,
+            required,
+            additional: obj
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -263,6 +315,68 @@ impl ToolDefinitionBuilder {
     }
 }
 
+/// Per-field override applied to a `schemars`-generated schema.
+///
+/// `description` and `default` are injected into the field's property schema
+/// after generation. This preserves the `#[desc = "..."]` / `#[default = ...]`
+/// attribute semantics of the `#[tool]` macro on top of schemars.
+#[derive(Debug, Clone)]
+pub struct FieldOverride {
+    pub name: &'static str,
+    pub description: Option<String>,
+    pub default: Option<Value>,
+}
+
+/// Build a [`ToolDefinition`] from a type's `schemars` JSON Schema.
+///
+/// This is the schemars-backed replacement for the hand-rolled type mapping
+/// that used to live in the `#[tool]` proc macro. It generates a full,
+/// inlined JSON Schema for `T` (so nested structs / enums / `serde_json::Value`
+/// / `Option<T>` / `Vec<T>` are all handled correctly), then applies the
+/// per-field [`FieldOverride`]s (descriptions and defaults declared via
+/// `#[desc]` / `#[default]`).
+///
+/// Subschemas are inlined (`inline_subschemas = true`) so the result contains
+/// no `$ref` / `$defs`, which several provider APIs do not resolve.
+pub fn tool_definition_from_schema<T: JsonSchema>(
+    name: &str,
+    description: &str,
+    overrides: &[FieldOverride],
+) -> ToolDefinition {
+    let mut settings = schemars::generate::SchemaSettings::default();
+    settings.inline_subschemas = true;
+    let schema = settings.into_generator().into_root_schema_for::<T>();
+    let mut root = serde_json::to_value(&schema)
+        .expect("schemars-generated schema must serialize to JSON");
+
+    // Apply per-field overrides on top of the generated properties.
+    if let Some(props) = root
+        .get_mut("properties")
+        .and_then(|v| v.as_object_mut())
+    {
+        for ov in overrides {
+            let Some(prop) = props.get_mut(ov.name).and_then(|v| v.as_object_mut()) else {
+                continue;
+            };
+            if let Some(desc) = &ov.description {
+                if !desc.is_empty() {
+                    prop.insert("description".to_string(), Value::String(desc.clone()));
+                }
+            }
+            if let Some(default) = &ov.default {
+                prop.insert("default".to_string(), default.clone());
+            }
+        }
+    }
+
+    let input_schema = ToolInputSchema::from_root_schema(root);
+    ToolDefinition {
+        name: name.to_string(),
+        description: description.to_string(),
+        input_schema,
+    }
+}
+
 impl ToolDefinition {
     pub fn builder() -> ToolDefinitionBuilder {
         ToolDefinitionBuilder {
@@ -273,7 +387,6 @@ impl ToolDefinition {
             additional: Map::new(),
         }
     }
-
     pub fn validate_input(&self, input: &Value) -> Result<(), ToolValidationError> {
         if let Value::Object(input_obj) = input {
             for required_field in &self.input_schema.required {

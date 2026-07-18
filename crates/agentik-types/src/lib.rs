@@ -27,9 +27,9 @@ pub use streaming::{
 };
 
 pub use tools::{
-    ImageSource as ToolImageSource, ServerTool, ToolDefinitionBuilder, ToolChoice, ToolDefinition, ToolInput,
-    ToolInputSchema, ToolResult, ToolResultBlock, ToolResultContent, ToolUse, ToolValidationError,
-    WebSearchParameters,
+    FieldOverride, ImageSource as ToolImageSource, ServerTool, ToolDefinitionBuilder, ToolChoice,
+    ToolDefinition, ToolInput, ToolInputSchema, ToolResult, ToolResultBlock, ToolResultContent,
+    ToolUse, ToolValidationError, WebSearchParameters, tool_definition_from_schema,
 };
 
 pub use agent_events::{AgentEvent, ContentBlockKind};

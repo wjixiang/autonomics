@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Agent tools for querying the Iceberg data lake."
 
 [dependencies]
+schemars.workspace = true
 agentik-core = { path = "../agentik-core" }
 agentik-proc = { path = "../agentik-proc" }
 agentik-sdk = { path = "../agentik-sdk" }

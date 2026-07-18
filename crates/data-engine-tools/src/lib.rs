@@ -69,10 +69,12 @@ mod tests {
     use agentik_proc::tool;
     use agentik_sdk::types::ToolInput;
 
-    /// Regression: a `serde_json::Value` field must be advertised as a JSON
-    /// `object` (not `string`) in the generated tool schema. Otherwise callers
+    /// Regression: a `serde_json::Value` field must NOT be advertised as a
+    /// `string` in the generated tool schema. The original hand-rolled type
+    /// mapping fell back to `"string"` for unknown types, which made callers
     /// serialize the spec to a string and node factories reject it with
-    /// "invalid type: string, expected ...".
+    /// "invalid type: string, expected ...". Under schemars, `Value` produces
+    /// an unconstrained schema (no restrictive `type`).
     #[tool(
         name = "test_value_field",
         description = "test harness tool"
@@ -83,18 +85,63 @@ mod tests {
     }
 
     #[test]
-    fn serde_json_value_field_is_advertised_as_object() {
+    fn serde_json_value_field_is_not_typed_as_string() {
         let def = TestValueInput::definition();
         let spec_schema = def
             .input_schema
             .properties
             .get("spec")
             .expect("spec property present");
-        assert_eq!(
+        assert_ne!(
             spec_schema.get("type").and_then(|v| v.as_str()),
-            Some("object"),
-            "serde_json::Value must map to schema type 'object', got: {spec_schema}"
+            Some("string"),
+            "serde_json::Value must not be advertised as 'string' (regression), got: {spec_schema}"
         );
+    }
+
+    /// The `#[tool]` macro must still derive accurate JSON Schema types for
+    /// primitive fields and surface `#[desc]` as the property description.
+    #[tool(
+        name = "test_typed_fields",
+        description = "test harness tool"
+    )]
+    pub struct TestTypedInput {
+        #[desc = "the name"]
+        pub name: String,
+        #[desc = "the count"]
+        pub count: Option<i64>,
+        pub tags: Vec<String>,
+        pub flag: bool,
+    }
+
+    #[test]
+    fn typed_fields_get_correct_schema_and_descriptions() {
+        let def = TestTypedInput::definition();
+        let props = &def.input_schema.properties;
+
+        let name = props.get("name").expect("name property");
+        assert_eq!(name.get("type").and_then(|v| v.as_str()), Some("string"));
+        assert_eq!(
+            name.get("description").and_then(|v| v.as_str()),
+            Some("the name")
+        );
+
+        let count = props.get("count").expect("count property");
+        // `count` is optional -> not required.
+        assert!(!def.input_schema.required.contains(&"count".to_string()));
+        assert_eq!(
+            count.get("description").and_then(|v| v.as_str()),
+            Some("the count")
+        );
+
+        let tags = props.get("tags").expect("tags property");
+        assert_eq!(tags.get("type").and_then(|v| v.as_str()), Some("array"));
+
+        let flag = props.get("flag").expect("flag property");
+        assert_eq!(flag.get("type").and_then(|v| v.as_str()), Some("boolean"));
+
+        // `name` is required (non-Option, no default).
+        assert!(def.input_schema.required.contains(&"name".to_string()));
     }
 }
 

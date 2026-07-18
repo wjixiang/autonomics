@@ -1,79 +1,22 @@
 use proc_macro::TokenStream;
 use quote::{ToTokens, quote};
 use syn::{
-    Expr, ExprLit, Fields, Ident, ItemStruct, Lit, LitStr, Meta, Token, Type, TypePath,
-    parse::Parse,
+    Expr, ExprLit, Fields, Ident, ItemStruct, Lit, LitStr, Meta, Token, parse::Parse,
 };
 
-/// 字段信息
+/// Per-field metadata collected at macro expansion time.
 struct FieldInfo {
     name: String,
-    type_str: String,
-    is_required: bool,
+    /// From `#[desc = "..."]`. Injected into the generated schema as the
+    /// property's `description`. Fields without `#[desc]` fall back to any
+    /// doc-comment description that `schemars` derives automatically.
     description: String,
-    has_default: bool,
+    /// From `#[default = ...]` (or `#[default(...)]`). Injected into the
+    /// generated schema as the property's `default`.
     default_tokens: Option<proc_macro2::TokenStream>,
 }
 
-/// 判断类型是否为 `Option<T>`，若是则返回内部 T；否则返回 None。
-fn extract_option_inner(ty: &Type) -> Option<&Type> {
-    if let Type::Path(TypePath { path, .. }) = ty {
-        let seg = path.segments.last()?;
-        if seg.ident == "Option" {
-            if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
-                if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
-                    return Some(inner);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn extract_vec_inner(ty: &Type) -> Option<&Type> {
-    if let Type::Path(TypePath { path, .. }) = ty {
-        let seg = path.segments.last()?;
-        if seg.ident == "Vec" {
-            if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
-                if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
-                    return Some(inner);
-                }
-            }
-        }
-    }
-    None
-}
-
-/// 从 Rust 类型映射到 JSON Schema 类型字符串
-fn rust_type_to_schema(ty: &syn::Type) -> String {
-    if let Some(inner) = extract_option_inner(ty) {
-        return rust_type_to_schema(inner);
-    }
-
-    // Parse `Vec<T>` field
-    if let Some(vec_inner) = extract_vec_inner(ty) {
-        return format!("array<{}>", rust_type_to_schema(vec_inner));
-    }
-
-    let type_str = quote!(#ty).to_string();
-    match type_str.as_str() {
-        "String" | "& str" | "str" => "string".to_string(),
-        "bool" => "boolean".to_string(),
-        "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize" => {
-            "integer".to_string()
-        }
-        "f32" | "f64" => "number".to_string(),
-        // `serde_json::Value` (及其别名 `Value`) 表达的是任意 JSON 值。
-        // 绝大多数场景下节点 spec 都是 JSON 对象,这里映射成 "object"
-        // 以避免被默认分支误判为 "string" —— 那会让调用方把对象序列化成
-        // 字符串传入,从而在 `from_value::<Spec>` 时报
-        // "invalid type: string, expected ..."。
-        s if s.ends_with("Value") => "object".to_string(),
-        _ => "string".to_string(),
-    }
-}
-
-/// 从 `#[desc = "..."]` 属性中提取参数描述
+/// Extract a doc/`#[desc]` description for a field.
 fn extract_desc(attrs: &[syn::Attribute]) -> String {
     for attr in attrs {
         if attr.path().is_ident("desc") {
@@ -90,17 +33,26 @@ fn extract_desc(attrs: &[syn::Attribute]) -> String {
     String::new()
 }
 
+/// Extract the value of a `#[default = EXPR]` (NameValue) or `#[default(EXPR)]`
+/// (List) attribute. Returns the raw token stream of the value.
 fn extract_default(attrs: &[syn::Attribute]) -> Option<proc_macro2::TokenStream> {
     for attr in attrs {
-        if attr.path().is_ident("default") {
-            let value: proc_macro2::TokenStream = attr.parse_args().ok()?;
-            return Some(value);
+        if !attr.path().is_ident("default") {
+            continue;
+        }
+        match &attr.meta {
+            // `#[default = 120]`
+            Meta::NameValue(nv) => return Some(nv.value.to_token_stream()),
+            // `#[default(120)]`
+            Meta::List(_) => return attr.parse_args().ok(),
+            // bare `#[default]` — no value to record
+            Meta::Path(_) => return None,
         }
     }
     None
 }
 
-/// 遍历 struct 的命名字段，收集每个字段的 FieldInfo。
+/// Collect [`FieldInfo`] for each named field of the struct.
 fn parse_fields_from_struct(input: &ItemStruct) -> syn::Result<Vec<FieldInfo>> {
     let fields = match &input.fields {
         Fields::Named(fields) => &fields.named,
@@ -115,20 +67,12 @@ fn parse_fields_from_struct(input: &ItemStruct) -> syn::Result<Vec<FieldInfo>> {
     let mut infos = Vec::new();
     for field in fields {
         let name = field.ident.as_ref().unwrap().to_string();
-        let type_str = rust_type_to_schema(&field.ty);
         let description = extract_desc(&field.attrs);
-        let (has_default, default_tokens) = match extract_default(&field.attrs) {
-            Some(tokens) => (true, Some(tokens)),
-            None => (false, None),
-        };
-        let is_required = extract_option_inner(&field.ty).is_none() && !has_default;
+        let default_tokens = extract_default(&field.attrs);
 
         infos.push(FieldInfo {
             name,
-            type_str,
-            is_required,
             description,
-            has_default,
             default_tokens,
         });
     }
@@ -139,8 +83,15 @@ fn parse_fields_from_struct(input: &ItemStruct) -> syn::Result<Vec<FieldInfo>> {
 /// Attribute macro: `#[tool(name = "...", description = "...")]` on a struct.
 ///
 /// Automatically injects `#[derive(serde::Serialize, serde::Deserialize)]` and
-/// generates `impl ToolInput`. Each field may carry `#[desc = "..."]` and
-/// `#[default = ...]`.
+/// `#[derive(schemars::JsonSchema)]`, then generates `impl ToolInput`. The tool
+/// definition's JSON Schema is produced by `schemars` (via
+/// [`agentik_types::tool_definition_from_schema`]) rather than a hand-rolled
+/// type mapping, so nested structs, enums, `Option<T>`, `Vec<T>`, and
+/// `serde_json::Value` are all handled correctly.
+///
+/// Each field may carry `#[desc = "..."]` and/or `#[default = ...]`; these are
+/// stripped before deriving and re-applied to the generated schema as the
+/// property's `description` / `default`.
 #[proc_macro_attribute]
 pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     let tool_attr = match syn::parse::<ToolAttr>(attr) {
@@ -148,7 +99,7 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(e) => return e.to_compile_error().into(),
     };
 
-    // 确认属性宏所标注的对象必须是struct, 并拿到匹配结果
+    // 确认属性宏所标注的对象必须是 struct, 并拿到匹配结果
     let mut input: syn::ItemStruct = match syn::parse(item) {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
@@ -163,8 +114,8 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // 剥离 struct 级别的 #[tool] 属性
     input.attrs.retain(|a| !a.path().is_ident("tool"));
-    // 剥离字段上的 #[desc]、#[default]（serde 的派生宏不认识这些 attribute，
-    // 留着会触发 unknown attribute 警告）
+    // 剥离字段上的 #[desc]、#[default]（serde/schemars 的派生宏不认识这些
+    // attribute，留着会触发 unknown attribute 警告）
     let field_known_attrs = ["desc", "default"];
     if let syn::Fields::Named(ref mut fields) = input.fields {
         for field in &mut fields.named {
@@ -175,14 +126,20 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     // 注入 Serialize + Deserialize（若尚不存在）
-    let needs_serde = !input.attrs.iter().any(|a| {
-        a.path().is_ident("derive") && a.meta.to_token_stream().to_string().contains("Serialize")
-    });
-    if needs_serde {
-        input.attrs.insert(
-            0,
-            syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]),
-        );
+    let derives_str = input
+        .attrs
+        .iter()
+        .filter(|a| a.path().is_ident("derive"))
+        .map(|a| a.meta.to_token_stream().to_string())
+        .collect::<String>();
+    if !derives_str.contains("Serialize") {
+        input
+            .attrs
+            .insert(0, syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]));
+    }
+    // 注入 JsonSchema（若尚不存在）
+    if !derives_str.contains("JsonSchema") {
+        input.attrs.insert(0, syn::parse_quote!(#[derive(schemars::JsonSchema)]));
     }
 
     // 生成 impl ToolInput
@@ -190,37 +147,39 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     let tool_name = tool_attr.name;
     let tool_desc = tool_attr.descrption;
 
-    let parameters: Vec<proc_macro2::TokenStream> = fields
+    // Per-field override literals.
+    let overrides: Vec<proc_macro2::TokenStream> = fields
         .iter()
         .map(|f| {
             let name = &f.name;
-            let type_str = &f.type_str;
-            let desc = &f.description;
-
-            if let Some(default) = &f.default_tokens {
-                quote! {
-                    .parameter(#name, #type_str, #desc)
-                    .default(#name, serde_json::json!(#default))
-                }
+            let desc_expr = if f.description.is_empty() {
+                quote! { ::core::option::Option::None }
             } else {
-                quote! { .parameter(#name, #type_str, #desc) }
+                let d = &f.description;
+                quote! { ::core::option::Option::Some(#d.to_string()) }
+            };
+            let default_expr = match &f.default_tokens {
+                Some(tokens) => quote! { ::core::option::Option::Some(serde_json::json!(#tokens)) },
+                None => quote! { ::core::option::Option::None },
+            };
+            quote! {
+                ::agentik_sdk::types::FieldOverride {
+                    name: #name,
+                    description: #desc_expr,
+                    default: #default_expr,
+                }
             }
         })
-        .collect();
-
-    let requireds: Vec<&str> = fields
-        .iter()
-        .filter(|f| f.is_required)
-        .map(|f| f.name.as_str())
         .collect();
 
     let impl_block = quote! {
         impl ::agentik_sdk::types::ToolInput for #struct_name {
             fn definition() -> ::agentik_sdk::types::ToolDefinition {
-                ::agentik_sdk::types::ToolDefinitionBuilder::new(#tool_name, #tool_desc)
-                    #(#parameters)*
-                    #(.required(#requireds))*
-                    .build()
+                ::agentik_sdk::types::tool_definition_from_schema::<#struct_name>(
+                    #tool_name,
+                    #tool_desc,
+                    &[#(#overrides),*],
+                )
             }
         }
     };
