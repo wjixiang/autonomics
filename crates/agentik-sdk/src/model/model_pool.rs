@@ -105,4 +105,49 @@ impl ModelPool {
             .map(|m| m.model_info.model_name.clone())
             .collect()
     }
+
+    /// Returns all models where `predicate` returns `true`.
+    pub fn find_by(&self, predicate: impl Fn(&ModelInfo) -> bool) -> Vec<Arc<Model>> {
+        self.model_list
+            .iter()
+            .filter(|m| predicate(&m.model_info))
+            .cloned()
+            .collect()
+    }
+
+    /// Returns models that support vision input.
+    pub fn find_with_vision(&self) -> Vec<Arc<Model>> {
+        self.find_by(|info| info.vision_ability)
+    }
+
+    /// Returns models that support function calling / tool use.
+    pub fn find_with_tool_use(&self) -> Vec<Arc<Model>> {
+        self.find_by(|info| info.supports_function_calling)
+    }
+
+    /// Returns models that support streaming responses.
+    pub fn find_streaming(&self) -> Vec<Arc<Model>> {
+        self.find_by(|info| info.supports_streaming)
+    }
+
+    /// Returns models that support extended thinking / reasoning.
+    pub fn find_with_thinking(&self) -> Vec<Arc<Model>> {
+        self.find_by(|info| info.supports_thinking)
+    }
+
+    /// Returns the first model matching `predicate`, falling back to round-robin
+    /// if nothing matches. Returns `EmptyPool` only when the pool has no models
+    /// at all.
+    pub fn get_or_fallback(
+        &self,
+        predicate: impl Fn(&ModelInfo) -> bool,
+    ) -> Result<Arc<Model>, ModelPoolError> {
+        self.model_list
+            .iter()
+            .find(|m| predicate(&m.model_info))
+            .cloned()
+            .ok_or(())
+            .or_else(|_| self.get_model_roundrobin().map_err(|_| ()))
+            .map_err(|_| ModelPoolError::EmptyPool)
+    }
 }

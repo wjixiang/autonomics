@@ -64,6 +64,40 @@ impl From<ExecError> for ToolError {
 /// Each tool sends commands to the [`DataEngineClient`] actor and awaits
 /// replies via oneshot channels. All node creation is done through the
 /// generic `add_node` tool (kind + JSON spec).
+#[cfg(test)]
+mod tests {
+    use agentik_proc::tool;
+    use agentik_sdk::types::ToolInput;
+
+    /// Regression: a `serde_json::Value` field must be advertised as a JSON
+    /// `object` (not `string`) in the generated tool schema. Otherwise callers
+    /// serialize the spec to a string and node factories reject it with
+    /// "invalid type: string, expected ...".
+    #[tool(
+        name = "test_value_field",
+        description = "test harness tool"
+    )]
+    pub struct TestValueInput {
+        /// arbitrary json
+        pub spec: serde_json::Value,
+    }
+
+    #[test]
+    fn serde_json_value_field_is_advertised_as_object() {
+        let def = TestValueInput::definition();
+        let spec_schema = def
+            .input_schema
+            .properties
+            .get("spec")
+            .expect("spec property present");
+        assert_eq!(
+            spec_schema.get("type").and_then(|v| v.as_str()),
+            Some("object"),
+            "serde_json::Value must map to schema type 'object', got: {spec_schema}"
+        );
+    }
+}
+
 pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
     vec![
         ToolRegistration::from(list_node_factories_tool::ListNodeFactoriesTool::new(

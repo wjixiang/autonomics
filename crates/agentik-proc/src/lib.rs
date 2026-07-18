@@ -63,6 +63,12 @@ fn rust_type_to_schema(ty: &syn::Type) -> String {
             "integer".to_string()
         }
         "f32" | "f64" => "number".to_string(),
+        // `serde_json::Value` (及其别名 `Value`) 表达的是任意 JSON 值。
+        // 绝大多数场景下节点 spec 都是 JSON 对象,这里映射成 "object"
+        // 以避免被默认分支误判为 "string" —— 那会让调用方把对象序列化成
+        // 字符串传入,从而在 `from_value::<Spec>` 时报
+        // "invalid type: string, expected ..."。
+        s if s.ends_with("Value") => "object".to_string(),
         _ => "string".to_string(),
     }
 }

@@ -1,14 +1,13 @@
+use crate::model::model_info::ModelInfoBuilder;
 use crate::model::ModelInfo;
 use crate::model::ProviderType;
+use crate::provider::ProviderPreset;
 
 pub const MODEL_MIMO_V2_5_PRO: &str = "mimo-v2.5-pro";
 pub const MODEL_MIMO_V2_PRO: &str = "mimo-v2-pro";
 pub const MODEL_MIMO_V2_5: &str = "mimo-v2.5";
 pub const MODEL_MIMO_V2_OMNI: &str = "mimo-v2-omni";
 pub const MODEL_MIMO_V2_FLASH: &str = "mimo-v2-flash";
-
-/// Provider type key used by `ProviderConfig::provider_type`.
-pub const PROVIDER_TYPE: ProviderType = ProviderType::Mimo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenPlanRegion {
@@ -48,77 +47,55 @@ impl Default for MimoEndpoint {
 
 pub struct MimoProvider;
 
+impl ProviderPreset for MimoProvider {
+    fn provider_type() -> ProviderType {
+        ProviderType::Mimo
+    }
+    fn preset_models() -> Vec<ModelInfo> {
+        Self::model_definitions()
+    }
+    fn default_base_url() -> &'static str {
+        // Default to the China token-plan endpoint.
+        MimoEndpoint::default().base_url()
+    }
+}
+
 impl MimoProvider {
     /// Preset model catalogue for the mimo provider type — metadata only.
     pub fn preset_models() -> Vec<ModelInfo> {
-        Self::model_definitions()
+        <Self as ProviderPreset>::preset_models()
     }
 
     fn model_definitions() -> Vec<ModelInfo> {
         vec![
             // Pro series — 1M context, 128K output
-            ModelInfo {
-                model_name: MODEL_MIMO_V2_5_PRO.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 1_000_000,
-                max_output_tokens: 131_072,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 1.0,
-                output_token_price: 3.0,
-            },
-            ModelInfo {
-                model_name: MODEL_MIMO_V2_PRO.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 1_000_000,
-                max_output_tokens: 131_072,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 1.0,
-                output_token_price: 3.0,
-            },
+            ModelInfoBuilder::new(MODEL_MIMO_V2_5_PRO)
+                .context(1_000_000, 131_072)
+                .capabilities(false, true, true, true)
+                .pricing(1.0, 3.0)
+                .build(),
+            ModelInfoBuilder::new(MODEL_MIMO_V2_PRO)
+                .context(1_000_000, 131_072)
+                .capabilities(false, true, true, true)
+                .pricing(1.0, 3.0)
+                .build(),
             // Omni series — multi-modal understanding
-            ModelInfo {
-                model_name: MODEL_MIMO_V2_5.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 1_000_000,
-                max_output_tokens: 131_072,
-                vision_ability: true,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 0.4,
-                output_token_price: 2.0,
-            },
-            ModelInfo {
-                model_name: MODEL_MIMO_V2_OMNI.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 262_144,
-                max_output_tokens: 131_072,
-                vision_ability: true,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 0.4,
-                output_token_price: 2.0,
-            },
+            ModelInfoBuilder::new(MODEL_MIMO_V2_5)
+                .context(1_000_000, 131_072)
+                .capabilities(true, true, true, true)
+                .pricing(0.4, 2.0)
+                .build(),
+            ModelInfoBuilder::new(MODEL_MIMO_V2_OMNI)
+                .context(262_144, 131_072)
+                .capabilities(true, true, true, true)
+                .pricing(0.4, 2.0)
+                .build(),
             // Flash series — lightweight, fast
-            ModelInfo {
-                model_name: MODEL_MIMO_V2_FLASH.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 262_144,
-                max_output_tokens: 65_536,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 0.1,
-                output_token_price: 0.3,
-            },
+            ModelInfoBuilder::new(MODEL_MIMO_V2_FLASH)
+                .context(262_144, 65_536)
+                .capabilities(false, true, true, true)
+                .pricing(0.1, 0.3)
+                .build(),
         ]
     }
 }

@@ -12,5 +12,27 @@ pub mod client;
 pub mod deepseek;
 pub mod mimo;
 pub mod minimax;
+pub mod registry;
 pub mod sensenova;
 pub mod zai;
+
+use crate::model::{ModelInfo, ProviderType};
+
+/// Implemented by each built-in provider module to expose its preset model
+/// catalogue and default connection endpoint.
+///
+/// All methods are associated functions (no `&self`) — the trait formalises the
+/// interface that every provider struct already follows ad-hoc.
+pub trait ProviderPreset {
+    /// The [`ProviderType`] variant this preset corresponds to.
+    fn provider_type() -> ProviderType;
+
+    /// Canonical preset models. All entries have `provider_id = Uuid::nil()`.
+    /// The caller assigns a real `provider_id` when binding to a `ProviderConfig`.
+    fn preset_models() -> Vec<ModelInfo>;
+
+    /// Default base URL for this provider type, if one exists.
+    /// Returns `""` for providers that require explicit configuration
+    /// (e.g. minimax).
+    fn default_base_url() -> &'static str;
+}

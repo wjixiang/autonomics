@@ -1,5 +1,7 @@
+use crate::model::model_info::ModelInfoBuilder;
 use crate::model::ModelInfo;
 use crate::model::ProviderType;
+use crate::provider::ProviderPreset;
 
 // ─── Model IDs ──────────────────────────────────────────────────────────────
 // Current generation
@@ -11,10 +13,19 @@ pub const MODEL_DEEPSEEK_REASONER: &str = "deepseek-reasoner";
 
 pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/anthropic";
 
-/// Provider type key used by `ProviderConfig::provider_type`.
-pub const PROVIDER_TYPE: ProviderType = ProviderType::Deepseek;
-
 pub struct DeepseekProvider;
+
+impl ProviderPreset for DeepseekProvider {
+    fn provider_type() -> ProviderType {
+        ProviderType::Deepseek
+    }
+    fn preset_models() -> Vec<ModelInfo> {
+        Self::model_definitions()
+    }
+    fn default_base_url() -> &'static str {
+        DEFAULT_BASE_URL
+    }
+}
 
 impl DeepseekProvider {
     /// Preset model catalogue for the deepseek provider type — metadata only.
@@ -22,65 +33,37 @@ impl DeepseekProvider {
     /// `provider_id` is left nil; the caller binds a model to a provider
     /// instance when persisting it.
     pub fn preset_models() -> Vec<ModelInfo> {
-        Self::model_definitions()
+        <Self as ProviderPreset>::preset_models()
     }
 
     fn model_definitions() -> Vec<ModelInfo> {
         vec![
             // ── Current generation ───────────────────────────────────────
             // V4 Pro — flagship reasoning model.
-            ModelInfo {
-                model_name: MODEL_DEEPSEEK_V4_PRO.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 128_000,
-                max_output_tokens: 32_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 0.5,
-                output_token_price: 2.0,
-            },
+            ModelInfoBuilder::new(MODEL_DEEPSEEK_V4_PRO)
+                .context(128_000, 32_000)
+                .capabilities(false, true, true, true)
+                .pricing(0.5, 2.0)
+                .build(),
             // V4 Flash — fast, low-cost, still supports thinking.
-            ModelInfo {
-                model_name: MODEL_DEEPSEEK_V4_FLASH.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 128_000,
-                max_output_tokens: 32_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 0.1,
-                output_token_price: 0.3,
-            },
+            ModelInfoBuilder::new(MODEL_DEEPSEEK_V4_FLASH)
+                .context(128_000, 32_000)
+                .capabilities(false, true, true, true)
+                .pricing(0.1, 0.3)
+                .build(),
             // ── Deprecated aliases (kept for backwards compatibility) ─────
             // deepseek-chat — non-thinking mode of v4-flash.
-            ModelInfo {
-                model_name: MODEL_DEEPSEEK_CHAT.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 64_000,
-                max_output_tokens: 8_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: false,
-                input_token_price: 0.1,
-                output_token_price: 0.3,
-            },
+            ModelInfoBuilder::new(MODEL_DEEPSEEK_CHAT)
+                .context(64_000, 8_000)
+                .capabilities(false, true, true, false)
+                .pricing(0.1, 0.3)
+                .build(),
             // deepseek-reasoner — thinking mode of v4-flash.
-            ModelInfo {
-                model_name: MODEL_DEEPSEEK_REASONER.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 64_000,
-                max_output_tokens: 8_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 0.1,
-                output_token_price: 0.3,
-            },
+            ModelInfoBuilder::new(MODEL_DEEPSEEK_REASONER)
+                .context(64_000, 8_000)
+                .capabilities(false, true, true, true)
+                .pricing(0.1, 0.3)
+                .build(),
         ]
     }
 }

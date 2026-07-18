@@ -1,5 +1,7 @@
+use crate::model::model_info::ModelInfoBuilder;
 use crate::model::ModelInfo;
 use crate::model::ProviderType;
+use crate::provider::ProviderPreset;
 
 // ─── Model IDs ──────────────────────────────────────────────────────────────
 // Flagship series
@@ -43,168 +45,94 @@ impl ZaiEndpoint {
     }
 }
 
-/// Provider type key used by `ProviderConfig::provider_type`.
-pub const PROVIDER_TYPE: ProviderType = ProviderType::Zai;
-
 pub struct ZaiProvider;
+
+impl ProviderPreset for ZaiProvider {
+    fn provider_type() -> ProviderType {
+        ProviderType::Zai
+    }
+    fn preset_models() -> Vec<ModelInfo> {
+        Self::model_definitions()
+    }
+    fn default_base_url() -> &'static str {
+        // Default to the token-plan endpoint (coding scenarios).
+        ZaiEndpoint::default().base_url()
+    }
+}
 
 impl ZaiProvider {
     /// Preset model catalogue for the zai provider type — metadata only.
     pub fn preset_models() -> Vec<ModelInfo> {
-        Self::model_definitions()
+        <Self as ProviderPreset>::preset_models()
     }
 
     fn model_definitions() -> Vec<ModelInfo> {
         vec![
             // ── Flagship series (200K context, 32K output) ───────────────
-            ModelInfo {
-                model_name: MODEL_GLM_5_1.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 200_000,
-                max_output_tokens: 32_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 2.0,
-                output_token_price: 8.0,
-            },
-            ModelInfo {
-                model_name: MODEL_GLM_5.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 200_000,
-                max_output_tokens: 32_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 2.0,
-                output_token_price: 8.0,
-            },
-            ModelInfo {
-                model_name: MODEL_GLM_5_TURBO.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 200_000,
-                max_output_tokens: 32_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: false,
-                input_token_price: 1.0,
-                output_token_price: 3.0,
-            },
+            ModelInfoBuilder::new(MODEL_GLM_5_1)
+                .context(200_000, 32_000)
+                .capabilities(false, true, true, true)
+                .pricing(2.0, 8.0)
+                .build(),
+            ModelInfoBuilder::new(MODEL_GLM_5)
+                .context(200_000, 32_000)
+                .capabilities(false, true, true, true)
+                .pricing(2.0, 8.0)
+                .build(),
+            ModelInfoBuilder::new(MODEL_GLM_5_TURBO)
+                .context(200_000, 32_000)
+                .capabilities(false, true, true, false)
+                .pricing(1.0, 3.0)
+                .build(),
             // ── 4.x flagship series (128K context, 16K output) ───────────
-            ModelInfo {
-                model_name: MODEL_GLM_4_7.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 128_000,
-                max_output_tokens: 16_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 2.0,
-                output_token_price: 8.0,
-            },
-            ModelInfo {
-                model_name: MODEL_GLM_4_6.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 128_000,
-                max_output_tokens: 16_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 1.0,
-                output_token_price: 4.0,
-            },
-            ModelInfo {
-                model_name: MODEL_GLM_4_5.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 128_000,
-                max_output_tokens: 16_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 1.0,
-                output_token_price: 4.0,
-            },
+            ModelInfoBuilder::new(MODEL_GLM_4_7)
+                .context(128_000, 16_000)
+                .capabilities(false, true, true, true)
+                .pricing(2.0, 8.0)
+                .build(),
+            ModelInfoBuilder::new(MODEL_GLM_4_6)
+                .context(128_000, 16_000)
+                .capabilities(false, true, true, true)
+                .pricing(1.0, 4.0)
+                .build(),
+            ModelInfoBuilder::new(MODEL_GLM_4_5)
+                .context(128_000, 16_000)
+                .capabilities(false, true, true, true)
+                .pricing(1.0, 4.0)
+                .build(),
             // ── Air / mid-tier ───────────────────────────────────────────
-            ModelInfo {
-                model_name: MODEL_GLM_4_5_AIR.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 128_000,
-                max_output_tokens: 16_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: false,
-                input_token_price: 0.3,
-                output_token_price: 1.2,
-            },
+            ModelInfoBuilder::new(MODEL_GLM_4_5_AIR)
+                .context(128_000, 16_000)
+                .capabilities(false, true, true, false)
+                .pricing(0.3, 1.2)
+                .build(),
             // ── Flash / lightweight ──────────────────────────────────────
-            ModelInfo {
-                model_name: MODEL_GLM_4_7_FLASH.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 128_000,
-                max_output_tokens: 16_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: false,
-                input_token_price: 0.1,
-                output_token_price: 0.1,
-            },
-            ModelInfo {
-                model_name: MODEL_GLM_4_FLASH.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 128_000,
-                max_output_tokens: 16_000,
-                vision_ability: false,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: false,
-                input_token_price: 0.1,
-                output_token_price: 0.1,
-            },
+            ModelInfoBuilder::new(MODEL_GLM_4_7_FLASH)
+                .context(128_000, 16_000)
+                .capabilities(false, true, true, false)
+                .pricing(0.1, 0.1)
+                .build(),
+            ModelInfoBuilder::new(MODEL_GLM_4_FLASH)
+                .context(128_000, 16_000)
+                .capabilities(false, true, true, false)
+                .pricing(0.1, 0.1)
+                .build(),
             // ── Vision series (64K context) ─────────────────────────────
-            ModelInfo {
-                model_name: MODEL_GLM_4_1V_THINKING_FLASH.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 64_000,
-                max_output_tokens: 8_000,
-                vision_ability: true,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: true,
-                input_token_price: 0.5,
-                output_token_price: 0.5,
-            },
-            ModelInfo {
-                model_name: MODEL_GLM_4_6V_FLASH.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 64_000,
-                max_output_tokens: 8_000,
-                vision_ability: true,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: false,
-                input_token_price: 0.5,
-                output_token_price: 0.5,
-            },
-            ModelInfo {
-                model_name: MODEL_GLM_4V_FLASH.to_string(),
-                provider_id: uuid::Uuid::nil(),
-                context_length: 64_000,
-                max_output_tokens: 8_000,
-                vision_ability: true,
-                supports_function_calling: true,
-                supports_streaming: true,
-                supports_thinking: false,
-                input_token_price: 0.1,
-                output_token_price: 0.1,
-            },
+            ModelInfoBuilder::new(MODEL_GLM_4_1V_THINKING_FLASH)
+                .context(64_000, 8_000)
+                .capabilities(true, true, true, true)
+                .pricing(0.5, 0.5)
+                .build(),
+            ModelInfoBuilder::new(MODEL_GLM_4_6V_FLASH)
+                .context(64_000, 8_000)
+                .capabilities(true, true, true, false)
+                .pricing(0.5, 0.5)
+                .build(),
+            ModelInfoBuilder::new(MODEL_GLM_4V_FLASH)
+                .context(64_000, 8_000)
+                .capabilities(true, true, true, false)
+                .pricing(0.1, 0.1)
+                .build(),
         ]
     }
 }
