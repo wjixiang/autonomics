@@ -38,7 +38,7 @@ impl MockNode {}
 impl Default for MockNode {
     fn default() -> Self {
         // A source-style mock: no inputs, one output port "iris".
-        let meta = NodeMeta::new("test_node");
+        let meta = NodeMeta::new();
         Self { meta }
     }
 }

@@ -195,7 +195,6 @@ impl LdscHsqNode {
     ///
     /// # Arguments
     ///
-    /// * `id` — DAG node id, used in plan output and to route outputs.
     /// * `datalake` — Iceberg data lake handle; the node queries the
     ///   LD score panel from `genetics.ld_score.*` through it.
     /// * `ldsc_hsq` — algorithm configuration; see [`LdscHsqConfig`].
@@ -203,7 +202,6 @@ impl LdscHsqNode {
     /// The upstream `DataFrame` must expose columns `Z` (Float64), `N`
     /// (Float64), and `rsid` (Utf8) — enforced by the input port schema.
     pub fn new(
-        id: impl Into<String>,
         datalake: Arc<Datalake>,
         ldsc_hsq: LdscHsqConfig,
     ) -> Self {
@@ -211,7 +209,7 @@ impl LdscHsqNode {
         // rsid) and a single output with the fixed h² summary schema.
         // Declaring the schemas lets the DAG validate edge compatibility
         // at `add_edge`/`validate` time.
-        let meta = NodeMeta::new(id)
+        let meta = NodeMeta::new()
             .add_input_port(Some(input_schema()))
             .add_output_port(Some(output_schema()));
         Self {
@@ -372,7 +370,6 @@ mod tests {
         // via a pre-joined path that doesn't touch the real catalog.
         // We test the join logic by verifying the node accepts the new input.
         let node = LdscHsqNode::new(
-            "ldsc_test",
             Arc::new(Datalake::new()),
             LdscHsqConfig::new(vec![20.0], 5, None),
         );
@@ -383,15 +380,13 @@ mod tests {
         // without a real catalog. Instead, verify the struct construction
         // and the input acceptance path.
         assert_eq!(node.node_type(), "ldsc");
-        assert_eq!(node.meta().id(), "ldsc_test");
     }
 
     #[tokio::test]
     async fn test_ld_panel_fetching_e2e() {
         let n = 20;
-        let datalake = Datalake::default();
+        let _datalake = Datalake::default();
         let mut node = LdscHsqNode::new(
-            "ldsc_test",
             Arc::new(Datalake::default()),
             LdscHsqConfig::new(vec![n as f64], 5, None),
         );

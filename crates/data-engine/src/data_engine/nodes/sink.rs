@@ -157,13 +157,12 @@ fn unique_column_name(base: &str, taken: &HashSet<String>) -> String {
 
 impl SinkNode {
     pub fn new(
-        id: impl Into<String>,
         sink: Sink,
         mode: SinkMode,
         ctx: SessionContext,
         datalake: Arc<Datalake>,
     ) -> Self {
-        let meta = NodeMeta::new(id).add_input_port(None);
+        let meta = NodeMeta::new().add_input_port(None);
         Self {
             meta,
             sink,
@@ -584,7 +583,6 @@ mod tests {
         let ctx = Datalake::default().get_ctx().await.unwrap();
         let datalake = Arc::new(Datalake::default());
         let mut node = SinkNode::new(
-            "test_id",
             Sink::Iceberg {
                 ident: "gwas.test4".to_string(),
             },
@@ -662,7 +660,6 @@ mod tests {
 
         let sink = |df: DataFrame, mode| {
             let mut node = SinkNode::new(
-                "ow",
                 Sink::File {
                     path: path.clone(),
                     format: WriteFormat::Csv,
@@ -695,7 +692,6 @@ mod tests {
 
         let write = |df: DataFrame| {
             let mut node = SinkNode::new(
-                "ap",
                 Sink::File {
                     path: path.clone(),
                     format: WriteFormat::Csv,

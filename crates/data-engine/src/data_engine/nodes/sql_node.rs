@@ -38,11 +38,8 @@ pub struct SqlNode {
 }
 
 impl SqlNode {
-    pub fn new(id: impl Into<String>, query: String, ctx: SessionContext) -> Self {
-        // Output port is named after the output DataFrame. Input ports are
-        // whatever the caller declared on the meta (default single "default").
-
-        let meta = NodeMeta::new(id)
+    pub fn new(query: String, ctx: SessionContext) -> Self {
+        let meta = NodeMeta::new()
             .add_output_port(None)
             .set_fixed_input(false);
         Self {
@@ -141,7 +138,7 @@ mod tests {
             RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();
         let df = ctx.read_batch(batch).unwrap();
         ctx.register_table("src", df.clone().into_view()).unwrap();
-        let node = SqlNode::new("sql", sql.into(), ctx.clone());
+        let node = SqlNode::new(sql.into(), ctx.clone());
         (ctx, node, df)
     }
 
@@ -259,7 +256,7 @@ mod tests {
                    FROM port_0 \
                    WHERE info['age'] > 28 \
                    ORDER BY id";
-        let mut node = SqlNode::new("sql", sql.into(), ctx.clone());
+        let mut node = SqlNode::new(sql.into(), ctx.clone());
         let input = NodeInput { port: 0, data: df };
         let outputs = node.execute(&[input]).await.unwrap();
         let batches = outputs.get(&0).unwrap().clone().collect().await.unwrap();

@@ -201,12 +201,11 @@ pub struct LinearRegressionNode {
 
 impl LinearRegressionNode {
     pub fn new(
-        id: impl Into<String>,
         x_columns: Vec<String>,
         y_column: String,
         intercept: bool,
     ) -> Self {
-        let meta = NodeMeta::new(id).add_output_port(None).add_input_port(None);
+        let meta = NodeMeta::new().add_output_port(None).add_input_port(None);
         Self {
             meta,
             x_columns,
@@ -307,7 +306,7 @@ mod tests {
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
         let mut node =
-            LinearRegressionNode::new("lr", vec!["x".to_string()], "y".to_string(), true);
+            LinearRegressionNode::new(vec!["x".to_string()], "y".to_string(), true);
         let input = super::super::meta::NodeInput {
             port: 0,
             // df_name: "src".to_string(),
@@ -368,7 +367,7 @@ mod tests {
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
         let mut node =
-            LinearRegressionNode::new("lr", vec!["x".to_string()], "y".to_string(), false);
+            LinearRegressionNode::new(vec!["x".to_string()], "y".to_string(), false);
         let input = super::super::meta::NodeInput {
             port: 0,
             // df_name: "src".to_string(),

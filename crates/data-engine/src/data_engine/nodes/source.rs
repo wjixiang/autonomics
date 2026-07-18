@@ -130,10 +130,9 @@ pub struct SourceNode {
 }
 
 impl SourceNode {
-    pub fn new(id: impl Into<String>, source: Source, ctx: SessionContext) -> Self {
+    pub fn new(source: Source, ctx: SessionContext) -> Self {
         // A source has no inputs and a single output port.
-        let meta = NodeMeta::new(id.into());
-        let meta = meta.add_output_port(None);
+        let meta = NodeMeta::new().add_output_port(None);
         Self { meta, source, ctx }
     }
 }
@@ -265,12 +264,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "e2e test"]
     async fn test_load_from_iceberg() {
         let ctx = Datalake::default().get_ctx().await.unwrap();
         let source = Source::Iceberg {
             ident: "gwas.gwas_study".to_string(),
         };
-        let mut node = SourceNode::new("test_id", source, ctx);
+        let mut node = SourceNode::new(source, ctx);
         let res = node.execute(&[]).await.unwrap();
         let df = res.get(&0).unwrap().clone();
         df.limit(0, Some(10)).unwrap().show().await.unwrap();

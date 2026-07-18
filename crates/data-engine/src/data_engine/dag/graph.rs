@@ -830,8 +830,8 @@ mod tests {
 
     use super::*;
 
-    fn dummy_meta(id: &str) -> super::super::NodeMeta {
-        super::super::NodeMeta::new(id)
+    fn dummy_meta() -> super::super::NodeMeta {
+        super::super::NodeMeta::new()
     }
 
     fn get_diamond_dag() -> DAG {
@@ -873,7 +873,7 @@ mod tests {
     }
 
     fn add(dag: &mut DAG, id: &str) {
-        dag.add_node(id.into(), Box::new(EchoNode(dummy_meta(id))))
+        dag.add_node(id.into(), Box::new(EchoNode(dummy_meta())))
             .unwrap();
     }
 
@@ -920,7 +920,7 @@ mod tests {
         ));
         // duplicate id
         assert!(matches!(
-            dag.add_node("a".into(), Box::new(EchoNode(dummy_meta("a")))),
+            dag.add_node("a".into(), Box::new(EchoNode(dummy_meta()))),
             Err(DagError::DuplicateNode(_))
         ));
     }
@@ -1052,14 +1052,14 @@ mod tests {
         dag.add_node(
             "src".into(),
             Box::new(PortedNode(
-                super::super::NodeMeta::new("src").add_output_port(Some(out_schema)),
+                super::super::NodeMeta::new().add_output_port(Some(out_schema)),
             )),
         )
         .unwrap();
         dag.add_node(
             "dst".into(),
             Box::new(PortedNode(
-                super::super::NodeMeta::new("dst").add_input_port(Some(in_schema)),
+                super::super::NodeMeta::new().add_input_port(Some(in_schema)),
             )),
         )
         .unwrap();
@@ -1103,9 +1103,9 @@ mod tests {
     #[test]
     fn one_to_multi_wiring_accept() {
         let mut dag = DAG::default();
-        let node_a_meta = NodeMeta::new("node_a_id").add_output_port(None);
-        let node_b_meta = NodeMeta::new("node_b_id").add_input_port(None);
-        let node_c_meta = NodeMeta::new("node_c_id").add_input_port(None);
+        let node_a_meta = NodeMeta::new().add_output_port(None);
+        let node_b_meta = NodeMeta::new().add_input_port(None);
+        let node_c_meta = NodeMeta::new().add_input_port(None);
 
         let node_a = PortedNode(node_a_meta);
         let node_b = PortedNode(node_b_meta);
@@ -1126,22 +1126,19 @@ mod tests {
     #[test]
     fn multi_to_one_wiring_reject() {
         let mut dag = DAG::default();
-        let node_a_meta = NodeMeta::new("node_a_id").add_output_port(None);
-        let node_b_meta = NodeMeta::new("node_b_id").add_input_port(None);
-        let node_c_meta = NodeMeta::new("node_c_id").add_output_port(None);
+        let node_a_meta = NodeMeta::new().add_output_port(None);
+        let node_b_meta = NodeMeta::new().add_input_port(None);
+        let node_c_meta = NodeMeta::new().add_output_port(None);
 
-        let node_a = PortedNode(node_a_meta);
-        let node_b = PortedNode(node_b_meta);
-        let node_c = PortedNode(node_c_meta);
+        dag.add_node("node_a_id".into(), Box::new(PortedNode(node_a_meta)))
+            .unwrap();
+        dag.add_node("node_b_id".into(), Box::new(PortedNode(node_b_meta)))
+            .unwrap();
+        dag.add_node("node_c_id".into(), Box::new(PortedNode(node_c_meta)))
+            .unwrap();
 
-        dag.add_node("node_a_id".into(), Box::new(node_a)).unwrap();
-        dag.add_node("node_b_id".into(), Box::new(node_b)).unwrap();
-        dag.add_node("node_c_id".into(), Box::new(node_c)).unwrap();
-
-        // Fan-out: node_a's single output 0 feeds both node_b and node_c.
-        // Each input port must end up with exactly one incoming edge.
+        // Two edges to the same declared input port 0 — rejected at add_edge.
         dag.add_edge("node_a_id", "node_b_id", 0, 0).unwrap();
-        // Second edge to node_b_id's declared input port 0 — rejected at add_edge.
         let err = dag.add_edge("node_c_id", "node_b_id", 0, 0).unwrap_err();
         assert_matches!(
             err,
@@ -1156,9 +1153,9 @@ mod tests {
         // time. Two nodes (a, c) both trying to connect to b's declared input
         // port 0 — the second `add_edge` must reject immediately.
         let mut dag = DAG::default();
-        let node_a_meta = NodeMeta::new("node_a_id").add_output_port(None);
-        let node_b_meta = NodeMeta::new("node_b_id").add_input_port(None);
-        let node_c_meta = NodeMeta::new("node_c_id").add_output_port(None);
+        let node_a_meta = NodeMeta::new().add_output_port(None);
+        let node_b_meta = NodeMeta::new().add_input_port(None);
+        let node_c_meta = NodeMeta::new().add_output_port(None);
 
         dag.add_node("node_a_id".into(), Box::new(PortedNode(node_a_meta)))
             .unwrap();

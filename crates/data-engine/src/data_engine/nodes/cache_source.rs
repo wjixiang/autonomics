@@ -93,14 +93,13 @@ pub struct CacheSourceNode<R: Catalog> {
 
 impl<R: Catalog> CacheSourceNode<R> {
     pub fn new(
-        id: impl Into<String>,
         file_path: String,
         format: FileFormat,
         ctx: SessionContext,
         cache_table_ident: String,
         catalog: Arc<R>,
     ) -> Self {
-        let meta = NodeMeta::new(id).add_output_port(None);
+        let meta = NodeMeta::new().add_output_port(None);
         Self {
             meta,
             file_path,
