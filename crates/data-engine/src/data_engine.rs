@@ -849,4 +849,310 @@ mod tests {
             }
         }
     }
+
+    // ── Registry-based node creation tests ──────────────────────────
+
+    /// All node kinds must be discoverable via list_nodes.
+    #[tokio::test]
+    async fn list_nodes_returns_all_registered_kinds() {
+        let engine = DataEngine::builder().build();
+        let nodes = engine.list_nodes();
+        let kinds: Vec<&str> = nodes.iter().map(|n| n.kind.as_str()).collect();
+        for expected in [
+            "sql",
+            "source",
+            "sink",
+            "ldsc",
+            "linear_regression",
+            "mock",
+        ] {
+            assert!(
+                kinds.contains(&expected),
+                "missing kind '{expected}'; got {kinds:?}"
+            );
+        }
+    }
+
+    /// Each registered kind must have a non-null JSON Schema.
+    #[tokio::test]
+    async fn get_node_spec_returns_schema_for_every_kind() {
+        let engine = DataEngine::builder().build();
+        for kind in [
+            "sql",
+            "source",
+            "sink",
+            "ldsc",
+            "linear_regression",
+            "mock",
+        ] {
+            let schema = engine
+                .get_node_spec(kind)
+                .unwrap_or_else(|e| panic!("get_node_spec({kind}) failed: {e}"));
+            let raw = serde_json::to_value(&schema).unwrap();
+            assert!(
+                raw.is_object(),
+                "schema for {kind} should be a JSON object; got {raw}"
+            );
+        }
+    }
+
+    /// Unknown kind → FactoryNotFound
+    #[tokio::test]
+    async fn add_node_via_registry_unknown_kind() {
+        let mut engine = DataEngine::builder().build();
+        let err = engine
+            .add_node_from_registry("n", "nonexistent_kind_42", serde_json::json!({}))
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("nonexistent_kind_42"),
+            "error should mention the kind; got: {msg}"
+        );
+    }
+
+    /// Malformed spec → SpecDeserialize
+    #[tokio::test]
+    async fn add_node_via_registry_bad_spec() {
+        let mut engine = DataEngine::builder().build();
+
+        // sql requires { sql_query: String }; passing an empty object fails.
+        let err = engine
+            .add_node_from_registry("n", "sql", serde_json::json!({}))
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("sql_query") || msg.contains("missing field"),
+            "sql with empty spec should fail deserialization; got: {msg}"
+        );
+
+        // source requires { type: "file"|"iceberg" }; passing junk fails.
+        let err = engine
+            .add_node_from_registry("n", "source", serde_json::json!({"type": "ftp"}))
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.to_lowercase().contains("unknown variant"),
+            "source with unknown type should fail deserialization; got: {msg}"
+        );
+    }
+
+    // ── Per-kind smoke tests: create via registry + run a minimal DAG ──
+
+    /// sql node: create via registry, wire to a source, run.
+    #[tokio::test]
+    async fn registry_sql_node_runs() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+
+        engine
+            .source_node(
+                "src",
+                Source::File {
+                    path: csv.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "agg",
+                "sql",
+                serde_json::json!({"sql_query": "SELECT region, CAST(AVG(charges) AS BIGINT) AS avg_chg FROM port_0 GROUP BY region"}),
+            )
+            .unwrap();
+
+        engine.add_edge("src", "agg", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("agg"), Some(RuntimeStatus::Success));
+    }
+
+    /// source node (file): create via registry, run.
+    #[tokio::test]
+    async fn registry_source_node_file_runs() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+
+        engine
+            .add_node_from_registry(
+                "src",
+                "source",
+                serde_json::json!({"type": "file", "path": csv.to_str().unwrap()}),
+            )
+            .unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("src"), Some(RuntimeStatus::Success));
+    }
+
+    /// sink node (file): create via registry, wire source→sink, run.
+    #[tokio::test]
+    async fn registry_sink_node_file_runs() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+        let out = "/tmp/dag_registry_sink_test.csv";
+        let _ = std::fs::remove_file(out);
+
+        engine
+            .source_node(
+                "src",
+                Source::File {
+                    path: csv.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "out",
+                "sink",
+                serde_json::json!({"type": "file", "path": out, "format": "csv"}),
+            )
+            .unwrap();
+
+        engine.add_edge("src", "out", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("out"), Some(RuntimeStatus::Success));
+        assert!(std::path::Path::new(out).exists());
+    }
+
+    /// linear_regression node: create via registry, succeeds execution.
+    #[tokio::test]
+    async fn registry_linear_regression_node_runs() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+
+        engine
+            .source_node(
+                "src",
+                Source::File {
+                    path: csv.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "lr",
+                "linear_regression",
+                serde_json::json!({"x_columns": ["age"], "y_column": "charges"}),
+            )
+            .unwrap();
+
+        engine.add_edge("src", "lr", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("lr"), Some(RuntimeStatus::Success));
+    }
+
+    /// linear_regression with intercept defaulting to true.
+    #[tokio::test]
+    async fn registry_linear_regression_default_intercept() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+
+        engine
+            .source_node(
+                "src",
+                Source::File {
+                    path: csv.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        // omit intercept → defaults to true.
+        engine
+            .add_node_from_registry(
+                "lr",
+                "linear_regression",
+                serde_json::json!({"x_columns": ["bmi"], "y_column": "charges"}),
+            )
+            .unwrap();
+
+        engine.add_edge("src", "lr", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("lr"), Some(RuntimeStatus::Success));
+    }
+
+    /// mock node: creates with empty spec, returns Iris dataset.
+    #[tokio::test]
+    async fn registry_mock_node_runs() {
+        let mut engine = DataEngine::builder().build();
+
+        engine
+            .add_node_from_registry("m", "mock", serde_json::json!({}))
+            .unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("m"), Some(RuntimeStatus::Success));
+    }
+
+    /// Multiple registry-created nodes wired together end-to-end.
+    #[tokio::test]
+    async fn registry_full_pipeline() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+        let out = "/tmp/dag_registry_full_pipeline.csv";
+        let _ = std::fs::remove_file(out);
+
+        engine
+            .add_node_from_registry(
+                "src",
+                "source",
+                serde_json::json!({"type": "file", "path": csv.to_str().unwrap()}),
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "filter",
+                "sql",
+                serde_json::json!({"sql_query": "SELECT * FROM port_0 WHERE age > 30"}),
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "lr",
+                "linear_regression",
+                serde_json::json!({"x_columns": ["age", "bmi"], "y_column": "charges"}),
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "out",
+                "sink",
+                serde_json::json!({"type": "file", "path": out, "format": "csv"}),
+            )
+            .unwrap();
+
+        // src → filter → lr → out
+        engine.add_edge("src", "filter", 0, 0).unwrap();
+        engine.add_edge("filter", "lr", 0, 0).unwrap();
+        engine.add_edge("lr", "out", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok, "full pipeline failed: {:?}", report.statuses);
+        for n in ["src", "filter", "lr", "out"] {
+            assert_eq!(
+                report.status(n),
+                Some(RuntimeStatus::Success),
+                "node {n} should succeed"
+            );
+        }
+        assert!(std::path::Path::new(out).exists());
+    }
 }
