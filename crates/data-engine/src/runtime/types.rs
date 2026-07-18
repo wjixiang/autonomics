@@ -4,43 +4,12 @@ use schemars;
 use crate::data_engine::dag::RunReport;
 use crate::data_engine::dag::graph::PortOutputs;
 use crate::data_engine::error::Result as EngineResult;
-use crate::data_engine::{LdscHsqConfig, Sink, SinkMode, Source};
 
 pub enum DataEngineCmd {
-    AddSourceNode {
-        id: String,
-        source: Source,
-        reply: oneshot::Sender<EngineResult<()>>,
-    },
     AddNode {
         id: String,
         kind: String,
         spec: serde_json::Value,
-        reply: oneshot::Sender<EngineResult<()>>,
-    },
-    AddSqlNode {
-        id: String,
-        query: String,
-        reply: oneshot::Sender<EngineResult<()>>,
-    },
-    AddSinkNode {
-        id: String,
-        sink: Sink,
-        mode: SinkMode,
-        datalake: std::sync::Arc<datalake::Datalake>,
-        reply: oneshot::Sender<EngineResult<()>>,
-    },
-    AddLinearRegressionNode {
-        id: String,
-        x_columns: Vec<String>,
-        y_column: String,
-        intercept: bool,
-        reply: oneshot::Sender<EngineResult<()>>,
-    },
-    AddLdscNode {
-        id: String,
-        datalake: std::sync::Arc<datalake::Datalake>,
-        ldsc: LdscHsqConfig,
         reply: oneshot::Sender<EngineResult<()>>,
     },
     AddEdge {
