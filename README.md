@@ -4,27 +4,35 @@
 
 The Agent SDK originated as a hard fork of [dimichgh/anthropic-sdk-rust](https://github.com/dimichgh/anthropic-sdk-rust). The repository has since grown into a broader analysis platform.
 
+## Demo
+
+### Article Retrieve
+
+![pubmed query](docs/pubmed.gif)
+
 ## Architecture
 
 ```text
-phloem-tui
+tui
   └── runtime + agentik-core
-        └── data-engine-tools
+        └── data-engine-tools + datalake-tools
               └── data-engine (DataFusion DAG scheduler)
                     ├── biofusion (genomics file readers)
-                    └── datalake (Iceberg catalog and storage)
+                    ├── datalake (Iceberg catalog and storage)
+                    └── bio_crates (ldsc, mr — statistical genetics)
 ```
 
 An agent receives tools from `agentik-core`. The data-engine tools communicate with one serialized `DataEngineServer` through channels, so a conversation can create, inspect, run, and clear a data-processing DAG without sharing mutable engine state directly. The DAG reads data into DataFusion `DataFrame`s, transforms it, and can persist file outputs.
 
 ## Workspace
 
-| Area | Members | Responsibility |
-| --- | --- | --- |
-| Agent platform | `agentik-types`, `agentik-sdk`, `agentik-proc`, `agentik-core`, `agentik-tools`, `runtime` | API types and clients, declarative tool schemas, agent lifecycle/memory, tool implementations, and sync-to-async hosting. |
-| Data analysis | `data-engine`, `data-engine-tools`, `stat-primitives`, `fs`, `datalake`, `biofusion`, `biofusion-cache` | DAG execution, Agent-exposed DAG operations, statistics, OpenDAL files, Iceberg, and biological-format ingestion. |
-| Scientific data clients | `eutils`, `opengwas`, `gwascatalog-sdk` | Clients for NCBI E-utilities, OpenGWAS, and the GWAS Catalog. |
-| User interface and rendering | `phloem-tui` | Terminal Agent UI. |
+| Area                         | Members                                                                                                                   | Responsibility                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent platform               | `agentik-types`, `agentik-sdk`, `agentik-proc`, `agentik-core`, `agentik-tools`, `runtime`                                | API types and clients, declarative tool schemas, agent lifecycle/memory, tool implementations, and sync-to-async hosting.                 |
+| Data analysis                | `data-engine`, `data-engine-tools`, `stat-primitives`, `fs`, `datalake`, `datalake-tools`, `biofusion`, `biofusion-cache` | DAG execution, Agent-exposed DAG operations, statistics, OpenDAL files, Iceberg storage and query tools, and biological-format ingestion. |
+| Statistical genetics         | `ldsc`, `mr`                                                                                                              | Pure-Rust ports of LD Score Regression (h²/rg/cts) and TwoSampleMR (Mendelian randomization), built on `faer`.                            |
+| Scientific data clients      | `eutils`, `opengwas`, `gwascatalog-sdk`                                                                                   | Clients for NCBI E-utilities, OpenGWAS, and the GWAS Catalog.                                                                             |
+| User interface and rendering | `tui`                                                                                                                     | Terminal Agent UI.                                                                                                                        |
 
 `fixtures/` contains representative and malformed genomics files used by reader and integration tests.
 
@@ -40,7 +48,7 @@ Requirements:
 CARGO_TARGET_DIR=/tmp/autonomics-target cargo test --workspace --no-run
 
 # Run the terminal UI. Configure a provider and model in its Config tab.
-CARGO_TARGET_DIR=/tmp/autonomics-target cargo run -p phloem-tui
+CARGO_TARGET_DIR=/tmp/autonomics-target cargo run -p tui
 ```
 
 For direct SDK use, copy `.env.example` to `.env` and provide only the credentials for the provider you intend to use.
@@ -85,6 +93,11 @@ For direct SDK use, copy `.env.example` to `.env` and provide only the credentia
 ### Proc macros (`agentik-proc`)
 
 - **`#[derive(ToolInput)]`** — Generates `impl ToolInput` from a struct, including the `ToolBuilder` chain, required vs. optional fields (via `Option<T>` or `#[default = ...]`), and `#[desc = "..."]` per-field descriptions. Pair with `#[tool(name = "...", description = "...")]` on the struct.
+
+### Statistical genetics (`ldsc`, `mr`)
+
+- **`ldsc`** — A faithful, library-only pure-Rust port of [LD Score Regression](https://github.com/bulik/ldsc) (Bulik-Sullivan & Finucane): SNP-heritability (h²), genetic correlation (rg), cell-type-specific analysis, LD-score computation from PLINK genotypes, summary-statistic munging, and annotation building. Numerics run on [`faer`](https://github.com/sarah-ek/faer) (no LAPACK/MKL). Point estimates are cross-checked against the Python reference's own test suite and golden fixtures. The `estimate_h2` DataFrame entry point is wired into the data-engine (`data-engine/nodes/ldsc_hsq.rs`).
+- **`mr`** — A pure-Rust port of [TwoSampleMR](https://github.com/MRCIEU/TwoSampleMR)'s algorithm API (no IO/plotting) for the DAG engine: Wald ratio, the IVW family, MR-Egger, median and mode estimators, `harmonise_data`, Steiger filtering, and heterogeneity/pleiotropy tests. Built on `faer` + `statrs`, with point estimates validated bit-for-bit against R golden fixtures.
 
 ## Quick Start
 
@@ -249,14 +262,24 @@ let client = Anthropic::with_config(config)?;
 
 ### Environment variables
 
-Copy `.env.example` to `.env`:
+Copy `.env.example` to `.env` and fill in only what you need. Keys are grouped by concern:
 
 ```env
-ANTHROPIC_API_KEY="your-api-key-here"
-DEEPSEEK_API_KEY="your-api-key-here"
-SENSENOVA_API_KEY="your-api-key-here"
-ZAI_API_KEY="your-api-key-here"
-MIMO_API_KEY="your-api-key-here"
+# LLM providers (set the ones you use)
+MIMO_API_KEY=
+SENSENOVA_API_KEY=
+MINIMAX_API_KEY=        # MiniMax provider
+DEEPSEEK_API_KEY=
+ZAI_API_KEY=
+
+# Iceberg data lake (datalake crate)
+ICEBERG_REST_URI=
+ICEBERG_S3_ACCESS_KEY_ID=
+ICEBERG_S3_SECRET_ACCESS_KEY=
+
+# Scientific data clients
+OPENGWAS_TOKEN=         # OpenGWAS / GWAS Catalog bearer token
+EUTILS_API_KEY=         # optional; raises NCBI rate limit 3→10 req/s
 ```
 
 ## API Resources (SDK)
@@ -280,19 +303,24 @@ MIMO_API_KEY="your-api-key-here"
 ```
 autonomics/
 ├── apps/
-│   └── phloem-tui/          # Ratatui terminal application
+│   └── tui/                 # Ratatui terminal application
 ├── crates/
 │   ├── agentik-*/           # LLM API client, type system, macros, and Agent runtime
 │   ├── data-engine/         # DataFusion DAG model, nodes, and scheduler
 │   ├── data-engine-tools/   # ToolFunction adapters for data-engine operations
 │   ├── biofusion/           # DataFusion readers for genomics file formats
+│   ├── biofusion-cache/     # Caching layer for biofusion readers
 │   ├── datalake/            # Iceberg REST catalog and DataFusion integration
+│   ├── datalake-tools/      # Agent tools for querying and describing Iceberg tables
 │   ├── fs/                  # OpenDAL-backed file storage and file tools
 │   ├── eutils/              # NCBI E-utilities client
 │   ├── opengwas/            # OpenGWAS client
 │   ├── gwascatalog-sdk/     # GWAS Catalog client
 │   ├── stat-primitives/     # Descriptive statistics, distributions, regression
 │   ├── runtime/             # Synchronous host bridge for Agentik
+├── bio_crates/
+│   ├── ldsc/                # Pure-Rust LD Score Regression (h²/rg/cts) port
+│   └── mr/                  # Pure-Rust TwoSampleMR (Mendelian randomization) port
 ├── fixtures/                # Valid and malformed genomics input fixtures
 ├── Cargo.toml               # Workspace manifest
 └── .cargo/config.toml       # Default Cargo target directory
@@ -306,6 +334,8 @@ Run an individual package while iterating on it:
 CARGO_TARGET_DIR=/tmp/autonomics-target cargo test -p data-engine
 CARGO_TARGET_DIR=/tmp/autonomics-target cargo test -p biofusion
 CARGO_TARGET_DIR=/tmp/autonomics-target cargo test -p agentik-core
+CARGO_TARGET_DIR=/tmp/autonomics-target cargo test -p ldsc
+CARGO_TARGET_DIR=/tmp/autonomics-target cargo test -p mr
 ```
 
 Some integration tests call external public APIs or require provider credentials. Treat those as opt-in when running in CI or offline environments.

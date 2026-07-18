@@ -39,3 +39,22 @@ impl ToolFunction for GwasinfoByIdTool {
         )))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use agentik_sdk::types::ToolInput;
+    use serde::Serialize;
+
+    use crate::tools::gwasinfo_by_id::GwasinfoByIdInput;
+
+    #[tokio::test]
+    async fn query_gwas_info() {
+        let input = GwasinfoByIdInput {
+            id: vec!["test_id".to_string()],
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        let df = GwasinfoByIdInput::definition();
+        dbg!(df);
+    }
+}

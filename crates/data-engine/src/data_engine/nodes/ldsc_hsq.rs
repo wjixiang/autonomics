@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use arrow_array::{Float64Array, RecordBatch, StringArray};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datalake::Datalake;
 use thiserror::Error;
@@ -52,13 +52,16 @@ impl From<datalake::error::Error> for LdscNodeError {
 // Output DataFrame construction
 // =====================================================================
 
-/// Build a single-row summary `RecordBatch` from the LDSC result.
+/// The fixed output schema of the LDSC h² summary `DataFrame`.
 ///
 /// Columns: `h2`, `h2_se`, `intercept`, `intercept_se`, `ratio`,
 /// `ratio_se`, `mean_chisq`, `lambda_gc`, `n_snp` (Float64),
 /// `coef`, `coef_se` (Utf8 — JSON arrays).
-fn build_result_batch(r: &ldsc::hsq::HsqResult) -> Result<RecordBatch, LdscNodeError> {
-    let schema = Arc::new(Schema::new(vec![
+///
+/// This is the single source of truth shared by the node's declared output
+/// port (so the DAG can validate downstream edges) and [`build_result_batch`].
+fn output_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
         Field::new("h2", DataType::Float64, false),
         Field::new("h2_se", DataType::Float64, false),
         Field::new("intercept", DataType::Float64, true),
@@ -70,7 +73,25 @@ fn build_result_batch(r: &ldsc::hsq::HsqResult) -> Result<RecordBatch, LdscNodeE
         Field::new("n_snp", DataType::Float64, false),
         Field::new("coef", DataType::Utf8, false),
         Field::new("coef_se", DataType::Utf8, false),
-    ]));
+    ]))
+}
+
+/// Build the input port schema from the configured upstream sumstats column
+/// names: the per-SNP Z-score and sample-size columns (Float64) plus the
+/// rsid join key (Utf8). These are exactly the columns the internal SQL join
+/// reads, so typing the input port lets the DAG reject misshaped upstream
+/// edges at `add_edge` time.
+fn input_schema(z_column: &str, n_column: &str, rsid_column: &str) -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new(z_column, DataType::Float64, true),
+        Field::new(n_column, DataType::Float64, true),
+        Field::new(rsid_column, DataType::Utf8, false),
+    ]))
+}
+
+/// Build a single-row summary `RecordBatch` from the LDSC result.
+fn build_result_batch(r: &ldsc::hsq::HsqResult) -> Result<RecordBatch, LdscNodeError> {
+    let schema = output_schema();
 
     let coef_json = serde_json::to_string(&r.coef)
         .map_err(|e| LdscNodeError::Ldsc(ldsc::LdscError::InvalidInput(e.to_string())))?;
@@ -191,7 +212,13 @@ impl LdscHsqNode {
         rsid_column: String,
         ldsc_hsq: LdscHsqConfig,
     ) -> Self {
-        let meta = NodeMeta::new(id).add_output_port(None).add_input_port(None);
+        // Fixed, typed ports: a single input carrying GWAS sumstats (Z, N,
+        // rsid under the configured column names) and a single output with
+        // the fixed h² summary schema. Declaring the schemas lets the DAG
+        // validate edge compatibility at `add_edge`/`validate` time.
+        let meta = NodeMeta::new(id)
+            .add_input_port(Some(input_schema(&z_column, &n_column, &rsid_column)))
+            .add_output_port(Some(output_schema()));
         Self {
             meta,
             datalake,
@@ -267,8 +294,6 @@ impl DagNode for LdscHsqNode {
 
         // 4. Execute the join and collect the result.
         let joined_df = ctx.sql(&sql).await.map_err(LdscNodeError::ReadBatch)?;
-
-        joined_df.clone().show().await.unwrap();
 
         // 5. Build the LDSC column-name descriptor.
         let cols = ldsc::hsq::HsqColumns {

@@ -1,6 +1,9 @@
 //! Runtime of Data Engine based on tokio runtime
 //!
 
+use std::panic::AssertUnwindSafe;
+
+use futures::FutureExt;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::data_engine::IcebergDataEngine;
@@ -19,7 +22,9 @@ impl DataEngineServer {
     /// Main event loop. Exits when all senders are dropped.
     pub async fn run(mut self) {
         while let Some(cmd) = self.rx.recv().await {
-            self.handle(cmd).await;
+            if let Err(panic) = AssertUnwindSafe(self.handle(cmd)).catch_unwind().await {
+                tracing::error!("data engine handler panicked: {:?}", panic);
+            }
         }
     }
 

@@ -30,10 +30,29 @@ fn extract_option_inner(ty: &Type) -> Option<&Type> {
     None
 }
 
+fn extract_vec_inner(ty: &Type) -> Option<&Type> {
+    if let Type::Path(TypePath { path, .. }) = ty {
+        let seg = path.segments.last()?;
+        if seg.ident == "Vec" {
+            if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                if let Some(syn::GenericArgument::Type(inner)) = args.args.first() {
+                    return Some(inner);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// 从 Rust 类型映射到 JSON Schema 类型字符串
 fn rust_type_to_schema(ty: &syn::Type) -> String {
     if let Some(inner) = extract_option_inner(ty) {
         return rust_type_to_schema(inner);
+    }
+
+    // Parse `Vec<T>` field
+    if let Some(vec_inner) = extract_vec_inner(ty) {
+        return format!("array<{}>", rust_type_to_schema(vec_inner));
     }
 
     let type_str = quote!(#ty).to_string();
@@ -44,7 +63,6 @@ fn rust_type_to_schema(ty: &syn::Type) -> String {
             "integer".to_string()
         }
         "f32" | "f64" => "number".to_string(),
-        t if t.starts_with("Vec <") || t.starts_with("Vec<") => "array".to_string(),
         _ => "string".to_string(),
     }
 }
@@ -128,8 +146,17 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(e) => return e.to_compile_error().into(),
     };
 
-    // 剥离 struct 级别的 #[tool] 属性（#[desc]、#[default] 只出现在字段上）
+    // 收集字段信息 —— 必须在剥离 #[desc]/#[default] 之前完成，
+    // 否则 extract_desc/extract_default 拿不到这些属性。
+    let fields = match parse_fields_from_struct(&input) {
+        Ok(v) => v,
+        Err(e) => return e.to_compile_error().into(),
+    };
+
+    // 剥离 struct 级别的 #[tool] 属性
     input.attrs.retain(|a| !a.path().is_ident("tool"));
+    // 剥离字段上的 #[desc]、#[default]（serde 的派生宏不认识这些 attribute，
+    // 留着会触发 unknown attribute 警告）
     let field_known_attrs = ["desc", "default"];
     if let syn::Fields::Named(ref mut fields) = input.fields {
         for field in &mut fields.named {
@@ -149,12 +176,6 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
             syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]),
         );
     }
-
-    // 收集字段信息
-    let fields = match parse_fields_from_struct(&input) {
-        Ok(v) => v,
-        Err(e) => return e.to_compile_error().into(),
-    };
 
     // 生成 impl ToolInput
     let struct_name = &input.ident;
