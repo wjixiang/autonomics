@@ -14,6 +14,7 @@ use tokio::sync::{Semaphore, mpsc};
 use tracing::{debug, warn};
 
 use crate::data_engine::dag::utils::{build_inputs, cascade_skip};
+use crate::node_registry::registry::NodeRegistry;
 
 use super::super::nodes::sink::SinkNode;
 use super::error::DagError;
@@ -413,10 +414,9 @@ impl DAG {
                 .get(id)
                 .and_then(|d| d.values().next())
                 .is_some()
+                && let Some(res) = result_iter.next()
             {
-                if let Some(res) = result_iter.next() {
-                    counts.insert(id.clone(), res.unwrap_or(0));
-                }
+                counts.insert(id.clone(), res.unwrap_or(0));
             }
         }
         counts

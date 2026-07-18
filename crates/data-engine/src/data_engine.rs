@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
-use iceberg::Catalog;
-use iceberg_catalog_rest::RestCatalog;
 
 use crate::data_engine::dag::{DAG, RunReport, SchedulerConfig};
 use crate::data_engine::error::{Error, Result};
 use crate::data_engine::nodes::DagNode;
+use crate::node_registry::registry::NodeRegistry;
 use datalake::Datalake;
 
 pub mod dag;
@@ -19,43 +18,46 @@ pub use nodes::{
     SourceNode, SqlNode, WriteFormat,
 };
 
-/// Convenience alias for the default engine backed by a REST Iceberg catalog.
-pub type IcebergDataEngine = DataEngine<RestCatalog>;
-
 /// `DataEngine` is the core object that implements the data analysis engine.
 /// It orchestrates ingestion, transformation, and querying of datasets via a
 /// [`DAG`] of nodes executed by an async scheduler.
-pub struct DataEngine<R: Catalog> {
+pub struct DataEngine {
     ctx: SessionContext,
-    catalog: Option<Arc<R>>,
+    datalake: Option<Arc<Datalake>>,
     dag: DAG,
+    node_registry: NodeRegistry,
     config: SchedulerConfig,
 }
 
-impl<R: Catalog> DataEngine<R> {
-    pub fn new(ctx: SessionContext, catalog: Option<Arc<R>>) -> Self {
+impl DataEngine {
+    pub fn new(ctx: SessionContext, datalake: Option<Arc<Datalake>>) -> Self {
+        let node_registry = NodeRegistry::new(
+            ctx.clone(),
+            datalake
+                .clone()
+                .unwrap_or_else(|| Arc::new(Datalake::default())),
+        );
         Self {
             ctx,
+            datalake,
             dag: DAG::default(),
+            node_registry,
             config: SchedulerConfig::default(),
-            catalog,
         }
     }
 
-    /// Returns the Iceberg catalog, if registered.
-    pub fn catalog(&self) -> Option<Arc<R>> {
-        self.catalog.clone()
+    /// Returns the Iceberg catalog, if a datalake is registered.
+    pub async fn catalog(&self) -> Option<Arc<iceberg_catalog_rest::RestCatalog>> {
+        match &self.datalake {
+            Some(dl) => dl.get_catalog().await.ok(),
+            None => None,
+        }
     }
-}
 
-// builder() lives in a concrete impl so callers don't need to specify <R>.
-impl DataEngine<RestCatalog> {
     pub fn builder() -> DataEngineBuilder {
         DataEngineBuilder::default()
     }
-}
 
-impl<R: Catalog> DataEngine<R> {
     /// Returns the shared session context (object stores, catalogs, …).
     pub fn ctx(&self) -> SessionContext {
         self.ctx.clone()
@@ -79,6 +81,19 @@ impl<R: Catalog> DataEngine<R> {
     ) -> Result<&mut Self> {
         self.dag.add_node(id.into(), Box::new(node))?;
         Ok(self)
+    }
+
+    /// TODO: this method will replace add_node. The only path to create node is through
+    /// NodeRegistry in future (all `add_*_node` will be eradicated)
+    pub fn add_node_from_registry(
+        &mut self,
+        node_id: impl Into<String>,
+        kind: &str,
+        spec: serde_json::Value,
+    ) -> Result<()> {
+        let node = self.node_registry.build_node(kind, spec)?;
+        self.dag.add_node(node_id.into(), node)?;
+        Ok(())
     }
 
     pub fn remove_node(&mut self, id: impl Into<String>) -> Result<&mut Self> {
@@ -165,30 +180,19 @@ impl<R: Catalog> DataEngine<R> {
     /// Convenience: add a [`LdscHsqNode`] (chaining-safe).
     ///
     /// Runs LD Score Regression for SNP-heritability (h2). Accepts raw GWAS
-    /// summary statistics as input, queries the Iceberg data lake for LD score
-    /// panel data (`genetics.ld_score.{ld_score_table}`), joins on rsid, and
-    /// runs LDSC internally.
+    /// summary statistics with columns `Z`, `N`, `rsid` as input, queries
+    /// the Iceberg data lake for LD score panel data
+    /// (`genetics.ld_score.{ld_score_table}`), joins on rsid, and runs LDSC
+    /// internally.
     pub fn ldsc_node(
         &mut self,
         id: impl Into<String>,
         datalake: Arc<Datalake>,
-        z_column: String,
-        n_column: String,
-        rsid_column: String,
         ldsc: LdscHsqConfig,
     ) -> Result<&mut Self> {
         let id = id.into();
-        self.dag.add_node(
-            id.clone(),
-            Box::new(LdscHsqNode::new(
-                id,
-                datalake,
-                z_column,
-                n_column,
-                rsid_column,
-                ldsc,
-            )),
-        )?;
+        self.dag
+            .add_node(id.clone(), Box::new(LdscHsqNode::new(id, datalake, ldsc)))?;
         Ok(self)
     }
 
@@ -239,14 +243,14 @@ impl<R: Catalog> DataEngine<R> {
 
 pub struct DataEngineBuilder {
     ctx: SessionContext,
-    catalog: Option<Arc<RestCatalog>>,
+    datalake: Option<Arc<Datalake>>,
 }
 
 impl Default for DataEngineBuilder {
     fn default() -> Self {
         Self {
             ctx: SessionContext::new(),
-            catalog: None,
+            datalake: None,
         }
     }
 }
@@ -261,16 +265,16 @@ impl DataEngineBuilder {
     }
 
     pub async fn register_iceberg(mut self) -> Result<Self> {
-        let datalake = Datalake::default();
+        let datalake = Arc::new(Datalake::default());
         let provider = datalake.get_provider().await?;
         self.ctx.register_catalog("iceberg", Arc::new(provider));
-        self.catalog = Some(datalake.get_catalog().await?);
+        self.datalake = Some(datalake);
 
         Ok(self)
     }
 
-    pub fn build(self) -> IcebergDataEngine {
-        DataEngine::new(self.ctx, self.catalog)
+    pub fn build(self) -> DataEngine {
+        DataEngine::new(self.ctx, self.datalake)
     }
 }
 

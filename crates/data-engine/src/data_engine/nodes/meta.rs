@@ -44,20 +44,23 @@ impl Port {
         }
     }
 
-    /// Convenience: the unnamed default port.
-    #[deprecated]
-    pub fn default_port() -> Self {
-        Self::new(0, None)
-    }
+    // /// Convenience: the unnamed default port.
+    // #[deprecated]
+    // pub fn default_port() -> Self {
+    //     Self::new(0, None)
+    // }
 
     pub fn get_code(&self) -> String {
         format!("port_{0}", self.index.clone())
     }
 }
 
+/// Data interface group of DagNode, grouped by dataflow direction (input / output)
 #[derive(Clone)]
 pub struct Ports {
     ports: HashMap<u8, Port>,
+    /// Whether the number of the port is fixed. If `false`, DataEngine will not validate
+    /// `OverConnected` / `UnderConnected` edge situations.
     is_fixed: bool,
 }
 impl Default for Ports {

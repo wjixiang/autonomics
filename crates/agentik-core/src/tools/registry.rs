@@ -45,7 +45,7 @@ impl ToolRegistry {
     ///
     /// # Example
     /// ```rust
-    /// use agentik_core::tools::{ToolRegistry, ToolFunction, ToolBuilder, ToolResult};
+    /// use agentik_core::tools::{ToolRegistry, ToolFunction, ToolDefinitionBuilder, ToolResult};
     /// use agentik_core::tools::ToolError;
     /// use serde::Deserialize;
     /// use async_trait::async_trait;
@@ -64,7 +64,7 @@ impl ToolRegistry {
     /// }
     ///
     /// let mut registry = ToolRegistry::new();
-    /// let tool_def = ToolBuilder::new("get_weather", "Get weather information")
+    /// let tool_def = ToolDefinitionBuilder::new("get_weather", "Get weather information")
     ///     .parameter("location", "string", "Location to get weather for")
     ///     .required("location")
     ///     .build();
@@ -258,7 +258,7 @@ pub type SharedToolRegistry = Arc<ToolRegistry>;
 
 #[cfg(test)]
 mod tests {
-    use super::super::{ToolBuilder, ToolFunction, ToolResultContent};
+    use super::super::{ToolDefinitionBuilder, ToolFunction, ToolResultContent};
     use super::*;
     use async_trait::async_trait;
     use serde_json::json;
@@ -292,7 +292,7 @@ mod tests {
     fn test_tool_registration() {
         let mut registry = ToolRegistry::new();
 
-        let tool_def = ToolBuilder::new("echo", "Echo a message")
+        let tool_def = ToolDefinitionBuilder::new("echo", "Echo a message")
             .parameter("message", "string", "Message to echo")
             .required("message")
             .build();
@@ -307,7 +307,7 @@ mod tests {
     fn test_duplicate_tool_registration() {
         let mut registry = ToolRegistry::new();
 
-        let tool_def = ToolBuilder::new("echo", "Echo a message").build();
+        let tool_def = ToolDefinitionBuilder::new("echo", "Echo a message").build();
 
         registry
             .register("echo", tool_def.clone(), Box::new(TestEchoTool))
@@ -322,7 +322,7 @@ mod tests {
     async fn test_tool_execution() {
         let mut registry = ToolRegistry::new();
 
-        let tool_def = ToolBuilder::new("echo", "Echo a message")
+        let tool_def = ToolDefinitionBuilder::new("echo", "Echo a message")
             .parameter("message", "string", "Message to echo")
             .required("message")
             .build();
@@ -372,7 +372,7 @@ mod tests {
     async fn test_parallel_execution() {
         let mut registry = ToolRegistry::new();
 
-        let tool_def = ToolBuilder::new("echo", "Echo a message").build();
+        let tool_def = ToolDefinitionBuilder::new("echo", "Echo a message").build();
 
         registry
             .register("echo", tool_def, Box::new(TestEchoTool))
@@ -402,8 +402,8 @@ mod tests {
     fn test_get_tool_definitions() {
         let mut registry = ToolRegistry::new();
 
-        let tool1 = ToolBuilder::new("tool1", "First tool").build();
-        let tool2 = ToolBuilder::new("tool2", "Second tool").build();
+        let tool1 = ToolDefinitionBuilder::new("tool1", "First tool").build();
+        let tool2 = ToolDefinitionBuilder::new("tool2", "Second tool").build();
 
         registry
             .register("tool1", tool1, Box::new(TestEchoTool))
@@ -424,9 +424,9 @@ mod tests {
     fn test_get_specific_tools() {
         let mut registry = ToolRegistry::new();
 
-        let tool1 = ToolBuilder::new("tool1", "First tool").build();
-        let tool2 = ToolBuilder::new("tool2", "Second tool").build();
-        let tool3 = ToolBuilder::new("tool3", "Third tool").build();
+        let tool1 = ToolDefinitionBuilder::new("tool1", "First tool").build();
+        let tool2 = ToolDefinitionBuilder::new("tool2", "Second tool").build();
+        let tool3 = ToolDefinitionBuilder::new("tool3", "Third tool").build();
 
         registry
             .register("tool1", tool1, Box::new(TestEchoTool))

@@ -25,12 +25,6 @@ use crate::ExecError;
 pub struct AddLdscNodeInput {
     #[desc = "Unique identifier for this node in the DAG"]
     pub id: String,
-    #[desc = "Name of the Z-score column in the input sumstats DataFrame"]
-    pub z_column: String,
-    #[desc = "Name of the per-SNP sample size column in the input sumstats DataFrame"]
-    pub n_column: String,
-    #[desc = "Name of the rsid (SNP identifier) column used for the join. Defaults to 'rsid'."]
-    pub rsid_column: Option<String>,
     // #[desc = "LD Score panel table name under the genetics.ld_score namespace (e.g. 'panel'). Defaults to 'panel'."]
     // pub ld_score_table: Option<String>,
     #[desc = "Per-annotation L2-summed M values (one per annotation; baseline LDSC uses a single value)"]
@@ -61,17 +55,9 @@ impl ToolFunction for AddLdscNodeTool {
             return Ok(ToolResult::error("m must contain at least one value"));
         }
         let n_blocks = input.n_blocks.unwrap_or(200);
-        let rsid_column = input.rsid_column.unwrap_or_else(|| "rsid".to_string());
         let ldsc = LdscHsqConfig::new(input.m, n_blocks, input.intercept);
         self.client
-            .add_ldsc_node(
-                input.id,
-                self.datalake.clone(),
-                input.z_column,
-                input.n_column,
-                rsid_column,
-                ldsc,
-            )
+            .add_ldsc_node(input.id, self.datalake.clone(), ldsc)
             .await
             .map_err(ExecError::from)?;
 

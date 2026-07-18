@@ -21,7 +21,7 @@ pub use agentik_types::{
     Message, MessageBatch, MessageContent, MessageCreateBuilder, MessageCreateParams, MessageDelta,
     MessageDeltaUsage, MessageParam, MessageStreamEvent, Model, ModelList, ModelListParams,
     ModelObject, RequestId, Result, Role, ServerTool, StopReason, StorageInfo, TextCitation,
-    ToolBuilder, ToolChoice, ToolDefinition, ToolResult, ToolResultContent, ToolUse,
+    ToolDefinitionBuilder, ToolChoice, ToolDefinition, ToolResult, ToolResultContent, ToolUse,
     ToolValidationError, UploadProgress, Usage, WebSearchParameters,
 };
 pub use client::Anthropic;

@@ -27,7 +27,7 @@ pub use streaming::{
 };
 
 pub use tools::{
-    ImageSource as ToolImageSource, ServerTool, ToolBuilder, ToolChoice, ToolDefinition, ToolInput,
+    ImageSource as ToolImageSource, ServerTool, ToolDefinitionBuilder, ToolChoice, ToolDefinition, ToolInput,
     ToolInputSchema, ToolResult, ToolResultBlock, ToolResultContent, ToolUse, ToolValidationError,
     WebSearchParameters,
 };

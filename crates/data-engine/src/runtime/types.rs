@@ -11,6 +11,11 @@ pub enum DataEngineCmd {
         source: Source,
         reply: oneshot::Sender<EngineResult<()>>,
     },
+    AddNode {
+        kind: String,
+        spec: serde_json::Value,
+        reply: oneshot::Sender<EngineResult<()>>,
+    },
     AddSqlNode {
         id: String,
         query: String,
@@ -33,9 +38,6 @@ pub enum DataEngineCmd {
     AddLdscNode {
         id: String,
         datalake: std::sync::Arc<datalake::Datalake>,
-        z_column: String,
-        n_column: String,
-        rsid_column: String,
         ldsc: LdscHsqConfig,
         reply: oneshot::Sender<EngineResult<()>>,
     },

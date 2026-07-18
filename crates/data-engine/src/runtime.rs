@@ -6,15 +6,16 @@ use std::panic::AssertUnwindSafe;
 use futures::FutureExt;
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::data_engine::IcebergDataEngine;
+use crate::data_engine::DataEngine;
 use crate::runtime::error::Result;
 use crate::runtime::types::DataEngineCmd;
 
 pub mod error;
 pub mod types;
 
+/// DataEngineServer -> DataEngine -> graph
 pub struct DataEngineServer {
-    engine: IcebergDataEngine,
+    engine: DataEngine,
     rx: mpsc::UnboundedReceiver<DataEngineCmd>,
 }
 
@@ -61,17 +62,10 @@ impl DataEngineServer {
             DataEngineCmd::AddLdscNode {
                 id,
                 datalake,
-                z_column,
-                n_column,
-                rsid_column,
                 ldsc,
                 reply,
             } => {
-                let _ = reply.send(
-                    self.engine
-                        .ldsc_node(id, datalake, z_column, n_column, rsid_column, ldsc)
-                        .map(|_| ()),
-                );
+                let _ = reply.send(self.engine.ldsc_node(id, datalake, ldsc).map(|_| ()));
             }
             DataEngineCmd::AddEdge {
                 from,
@@ -105,6 +99,7 @@ impl DataEngineServer {
             DataEngineCmd::ClearDag { reply } => {
                 let _ = reply.send(self.engine.clear_dag().map(|_| ()));
             }
+            DataEngineCmd::AddNode { kind, reply, spec } => todo!(),
         }
     }
 }
@@ -207,9 +202,6 @@ impl DataEngineClient {
         &self,
         id: String,
         datalake: std::sync::Arc<datalake::Datalake>,
-        z_column: String,
-        n_column: String,
-        rsid_column: String,
         ldsc: crate::data_engine::LdscHsqConfig,
     ) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
@@ -217,9 +209,6 @@ impl DataEngineClient {
             DataEngineCmd::AddLdscNode {
                 id,
                 datalake,
-                z_column,
-                n_column,
-                rsid_column,
                 ldsc,
                 reply: reply_tx,
             },
@@ -315,7 +304,7 @@ impl DataEngineClient {
 pub fn spawn_engine() {}
 
 /// Spawn server through dependency injection, good for test purpose.
-pub fn spawn_with_engine(engine: IcebergDataEngine) -> (DataEngineClient, JoinHandle<()>) {
+pub fn spawn_with_engine(engine: DataEngine) -> (DataEngineClient, JoinHandle<()>) {
     let (tx, rx) = mpsc::unbounded_channel::<DataEngineCmd>();
     let server = DataEngineServer { engine, rx };
     let client = DataEngineClient { tx };

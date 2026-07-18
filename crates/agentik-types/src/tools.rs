@@ -140,7 +140,7 @@ impl ToolResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct ToolBuilder {
+pub struct ToolDefinitionBuilder {
     name: String,
     description: String,
     properties: Map<String, Value>,
@@ -148,7 +148,7 @@ pub struct ToolBuilder {
     additional: Map<String, Value>,
 }
 
-impl ToolBuilder {
+impl ToolDefinitionBuilder {
     pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -264,8 +264,8 @@ impl ToolBuilder {
 }
 
 impl ToolDefinition {
-    pub fn builder() -> ToolBuilder {
-        ToolBuilder {
+    pub fn builder() -> ToolDefinitionBuilder {
+        ToolDefinitionBuilder {
             name: String::new(),
             description: String::new(),
             properties: Map::new(),
@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_tool_builder() {
-        let tool = ToolBuilder::new("get_weather", "Get the current weather")
+        let tool = ToolDefinitionBuilder::new("get_weather", "Get the current weather")
             .parameter("location", "string", "The location to get weather for")
             .parameter("unit", "string", "Temperature unit")
             .enum_parameter(
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn test_tool_validation() {
-        let tool = ToolBuilder::new("test_tool", "Test tool")
+        let tool = ToolDefinitionBuilder::new("test_tool", "Test tool")
             .parameter("required_field", "string", "Required field")
             .parameter("optional_field", "number", "Optional field")
             .required("required_field")
@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn test_tool_serialization() {
-        let tool = ToolBuilder::new("calculate", "Perform mathematical calculations")
+        let tool = ToolDefinitionBuilder::new("calculate", "Perform mathematical calculations")
             .parameter(
                 "expression",
                 "string",
