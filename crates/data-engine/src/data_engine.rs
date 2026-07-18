@@ -96,6 +96,16 @@ impl DataEngine {
         Ok(())
     }
 
+    /// Query the JSON Schema of a registered node kind.
+    pub fn get_node_spec(&self, kind: &str) -> Result<schemars::Schema> {
+        Ok(self.node_registry.get_node_spec(kind)?)
+    }
+
+    /// List metadata of every registered node kind (kind + JSON Schema).
+    pub fn list_nodes(&self) -> Vec<crate::node_registry::NodeInfo> {
+        self.node_registry.list_nodes()
+    }
+
     pub fn remove_node(&mut self, id: impl Into<String>) -> Result<&mut Self> {
         let id = id.into();
         self.dag.delete_node(&id)?;

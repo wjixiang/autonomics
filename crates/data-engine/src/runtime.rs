@@ -99,7 +99,20 @@ impl DataEngineServer {
             DataEngineCmd::ClearDag { reply } => {
                 let _ = reply.send(self.engine.clear_dag().map(|_| ()));
             }
-            DataEngineCmd::AddNode { kind, reply, spec } => todo!(),
+            DataEngineCmd::GetNodeSpec { kind, reply } => {
+                let _ = reply.send(self.engine.get_node_spec(&kind));
+            }
+            DataEngineCmd::ListNodeFactories { reply } => {
+                let _ = reply.send(Ok(self.engine.list_nodes()));
+            }
+            DataEngineCmd::AddNode {
+                id,
+                kind,
+                spec,
+                reply,
+            } => {
+                let _ = reply.send(self.engine.add_node_from_registry(id, &kind, spec));
+            }
         }
     }
 }
@@ -292,6 +305,38 @@ impl DataEngineClient {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(DataEngineCmd::ViewDag { reply: reply_tx }, reply_rx)
             .await
+    }
+
+    pub async fn list_node_factories(&self) -> Result<Vec<crate::node_registry::NodeInfo>> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(DataEngineCmd::ListNodeFactories { reply: reply_tx }, reply_rx)
+            .await
+    }
+
+    pub async fn get_node_spec(&self, kind: String) -> Result<schemars::Schema> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::GetNodeSpec {
+                kind,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
+    }
+
+    pub async fn add_node(&self, id: String, kind: String, spec: serde_json::Value) -> Result<()> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::AddNode {
+                id,
+                kind,
+                spec,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
     }
 
     pub async fn clear_dag(&self) -> Result<()> {

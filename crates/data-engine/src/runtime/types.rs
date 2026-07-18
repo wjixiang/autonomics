@@ -1,5 +1,6 @@
 use tokio::sync::oneshot;
 
+use schemars;
 use crate::data_engine::dag::RunReport;
 use crate::data_engine::dag::graph::PortOutputs;
 use crate::data_engine::error::Result as EngineResult;
@@ -12,6 +13,7 @@ pub enum DataEngineCmd {
         reply: oneshot::Sender<EngineResult<()>>,
     },
     AddNode {
+        id: String,
         kind: String,
         spec: serde_json::Value,
         reply: oneshot::Sender<EngineResult<()>>,
@@ -64,5 +66,12 @@ pub enum DataEngineCmd {
     },
     ClearDag {
         reply: oneshot::Sender<EngineResult<()>>,
+    },
+    GetNodeSpec {
+        kind: String,
+        reply: oneshot::Sender<EngineResult<schemars::Schema>>,
+    },
+    ListNodeFactories {
+        reply: oneshot::Sender<EngineResult<Vec<crate::node_registry::NodeInfo>>>,
     },
 }

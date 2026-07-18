@@ -3,6 +3,8 @@ use std::sync::Arc;
 use datafusion::{common::HashMap, prelude::SessionContext};
 use datalake::Datalake;
 
+use serde::Serialize;
+
 use super::error::{Error, Result};
 
 use crate::data_engine::{
@@ -32,6 +34,13 @@ pub struct NodeCtx {
     /// consititude SessionContext, then let nodes to build their own ctx by need.
     pub session: SessionContext,
     pub datalake: Arc<Datalake>,
+}
+
+/// Summary of a registered node kind returned by [`NodeRegistry::list_nodes`].
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeInfo {
+    pub kind: String,
+    pub schema: schemars::Schema,
 }
 
 /// The single source of truth of "which node kinds exist and how to build one from spec."
@@ -84,5 +93,16 @@ impl NodeRegistry {
 
     pub fn get_node_spec(&self, node_kind: &str) -> Result<schemars::Schema> {
         Ok(self.get_node_factory(node_kind)?.spec_schema())
+    }
+
+    /// Return metadata of every registered node kind (kind + JSON Schema).
+    pub fn list_nodes(&self) -> Vec<NodeInfo> {
+        self.nodes
+            .iter()
+            .map(|(kind, factory)| NodeInfo {
+                kind: kind.clone(),
+                schema: factory.spec_schema(),
+            })
+            .collect()
     }
 }
