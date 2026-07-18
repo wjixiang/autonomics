@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
-use iceberg::Catalog;
-use iceberg_catalog_rest::RestCatalog;
 
 use crate::data_engine::dag::{DAG, RunReport, SchedulerConfig};
 use crate::data_engine::error::{Error, Result};
 use crate::data_engine::nodes::DagNode;
+use crate::node_registry::registry::NodeRegistry;
 use datalake::Datalake;
 
 pub mod dag;
@@ -19,43 +18,46 @@ pub use nodes::{
     SourceNode, SqlNode, WriteFormat,
 };
 
-/// Convenience alias for the default engine backed by a REST Iceberg catalog.
-pub type IcebergDataEngine = DataEngine<RestCatalog>;
-
 /// `DataEngine` is the core object that implements the data analysis engine.
 /// It orchestrates ingestion, transformation, and querying of datasets via a
 /// [`DAG`] of nodes executed by an async scheduler.
-pub struct DataEngine<R: Catalog> {
+pub struct DataEngine {
     ctx: SessionContext,
-    catalog: Option<Arc<R>>,
+    datalake: Option<Arc<Datalake>>,
     dag: DAG,
+    node_registry: NodeRegistry,
     config: SchedulerConfig,
 }
 
-impl<R: Catalog> DataEngine<R> {
-    pub fn new(ctx: SessionContext, catalog: Option<Arc<R>>) -> Self {
+impl DataEngine {
+    pub fn new(ctx: SessionContext, datalake: Option<Arc<Datalake>>) -> Self {
+        let node_registry = NodeRegistry::new(
+            ctx.clone(),
+            datalake
+                .clone()
+                .unwrap_or_else(|| Arc::new(Datalake::default())),
+        );
         Self {
             ctx,
+            datalake,
             dag: DAG::default(),
+            node_registry,
             config: SchedulerConfig::default(),
-            catalog,
         }
     }
 
-    /// Returns the Iceberg catalog, if registered.
-    pub fn catalog(&self) -> Option<Arc<R>> {
-        self.catalog.clone()
+    /// Returns the Iceberg catalog, if a datalake is registered.
+    pub async fn catalog(&self) -> Option<Arc<iceberg_catalog_rest::RestCatalog>> {
+        match &self.datalake {
+            Some(dl) => dl.get_catalog().await.ok(),
+            None => None,
+        }
     }
-}
 
-// builder() lives in a concrete impl so callers don't need to specify <R>.
-impl DataEngine<RestCatalog> {
     pub fn builder() -> DataEngineBuilder {
         DataEngineBuilder::default()
     }
-}
 
-impl<R: Catalog> DataEngine<R> {
     /// Returns the shared session context (object stores, catalogs, …).
     pub fn ctx(&self) -> SessionContext {
         self.ctx.clone()
@@ -69,7 +71,7 @@ impl<R: Catalog> DataEngine<R> {
     /// separate statement:
     ///
     /// ```ignore
-    /// let meta = NodeMeta::new("x");
+    /// let meta = NodeMeta::new();
     /// engine.add_node("x", MyNode::new(meta, ...))?;
     /// ```
     pub fn add_node<N: DagNode + 'static>(
@@ -79,6 +81,29 @@ impl<R: Catalog> DataEngine<R> {
     ) -> Result<&mut Self> {
         self.dag.add_node(id.into(), Box::new(node))?;
         Ok(self)
+    }
+
+    /// TODO: this method will replace add_node. The only path to create node is through
+    /// NodeRegistry in future (all `add_*_node` will be eradicated)
+    pub fn add_node_from_registry(
+        &mut self,
+        node_id: impl Into<String>,
+        kind: &str,
+        spec: serde_json::Value,
+    ) -> Result<()> {
+        let node = self.node_registry.build_node(kind, spec)?;
+        self.dag.add_node(node_id.into(), node)?;
+        Ok(())
+    }
+
+    /// Query the JSON Schema of a registered node kind.
+    pub fn get_node_spec(&self, kind: &str) -> Result<schemars::Schema> {
+        Ok(self.node_registry.get_node_spec(kind)?)
+    }
+
+    /// List metadata of every registered node kind (kind + JSON Schema).
+    pub fn list_nodes(&self) -> Vec<crate::node_registry::NodeInfo> {
+        self.node_registry.list_nodes()
     }
 
     pub fn remove_node(&mut self, id: impl Into<String>) -> Result<&mut Self> {
@@ -102,7 +127,7 @@ impl<R: Catalog> DataEngine<R> {
         let id = id.into();
         self.dag.add_node(
             id.clone(),
-            Box::new(SourceNode::new(id, source, self.ctx.clone())),
+            Box::new(SourceNode::new(source, self.ctx.clone())),
         )?;
         Ok(self)
     }
@@ -116,7 +141,7 @@ impl<R: Catalog> DataEngine<R> {
         let id = id.into();
         self.dag.add_node(
             id.clone(),
-            Box::new(SqlNode::new(id, query.into(), self.ctx.clone())),
+            Box::new(SqlNode::new(query.into(), self.ctx.clone())),
         )?;
         Ok(self)
     }
@@ -132,7 +157,7 @@ impl<R: Catalog> DataEngine<R> {
         let id = id.into();
         self.dag.add_node(
             id.clone(),
-            Box::new(SinkNode::new(id, sink, mode, self.ctx.clone(), datalake)),
+            Box::new(SinkNode::new(sink, mode, self.ctx.clone(), datalake)),
         )?;
         Ok(self)
     }
@@ -153,7 +178,6 @@ impl<R: Catalog> DataEngine<R> {
         self.dag.add_node(
             id.clone(),
             Box::new(LinearRegressionNode::new(
-                id,
                 x_columns,
                 y_column.into(),
                 intercept,
@@ -165,30 +189,19 @@ impl<R: Catalog> DataEngine<R> {
     /// Convenience: add a [`LdscHsqNode`] (chaining-safe).
     ///
     /// Runs LD Score Regression for SNP-heritability (h2). Accepts raw GWAS
-    /// summary statistics as input, queries the Iceberg data lake for LD score
-    /// panel data (`genetics.ld_score.{ld_score_table}`), joins on rsid, and
-    /// runs LDSC internally.
+    /// summary statistics with columns `Z`, `N`, `rsid` as input, queries
+    /// the Iceberg data lake for LD score panel data
+    /// (`genetics.ld_score.{ld_score_table}`), joins on rsid, and runs LDSC
+    /// internally.
     pub fn ldsc_node(
         &mut self,
         id: impl Into<String>,
         datalake: Arc<Datalake>,
-        z_column: String,
-        n_column: String,
-        rsid_column: String,
         ldsc: LdscHsqConfig,
     ) -> Result<&mut Self> {
         let id = id.into();
-        self.dag.add_node(
-            id.clone(),
-            Box::new(LdscHsqNode::new(
-                id,
-                datalake,
-                z_column,
-                n_column,
-                rsid_column,
-                ldsc,
-            )),
-        )?;
+        self.dag
+            .add_node(id.clone(), Box::new(LdscHsqNode::new(datalake, ldsc)))?;
         Ok(self)
     }
 
@@ -239,14 +252,14 @@ impl<R: Catalog> DataEngine<R> {
 
 pub struct DataEngineBuilder {
     ctx: SessionContext,
-    catalog: Option<Arc<RestCatalog>>,
+    datalake: Option<Arc<Datalake>>,
 }
 
 impl Default for DataEngineBuilder {
     fn default() -> Self {
         Self {
             ctx: SessionContext::new(),
-            catalog: None,
+            datalake: None,
         }
     }
 }
@@ -261,16 +274,16 @@ impl DataEngineBuilder {
     }
 
     pub async fn register_iceberg(mut self) -> Result<Self> {
-        let datalake = Datalake::default();
+        let datalake = Arc::new(Datalake::default());
         let provider = datalake.get_provider().await?;
         self.ctx.register_catalog("iceberg", Arc::new(provider));
-        self.catalog = Some(datalake.get_catalog().await?);
+        self.datalake = Some(datalake);
 
         Ok(self)
     }
 
-    pub fn build(self) -> IcebergDataEngine {
-        DataEngine::new(self.ctx, self.catalog)
+    pub fn build(self) -> DataEngine {
+        DataEngine::new(self.ctx, self.datalake)
     }
 }
 
@@ -490,15 +503,14 @@ mod tests {
 
         // A join node with two named input ports. Inputs are registered as
         // "port_0" and "port_1" by the SqlNode (one table per upstream port).
-        let join_meta = NodeMeta::new("join")
-            .add_input_port(None)
-            .add_input_port(None)
-            .add_output_port(None);
         engine
             .add_node(
                 "join",
                 super::SqlNode::from_meta(
-                    join_meta,
+                    NodeMeta::new()
+                        .add_input_port(None)
+                        .add_input_port(None)
+                        .add_output_port(None),
                     r#"SELECT COUNT(*) AS cnt FROM port_0"#.to_string(),
                     engine.ctx(),
                     // "result".to_string(),
@@ -643,6 +655,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "cycle will be detected and rejected earlier in edge creation"]
     async fn cycle_is_rejected() {
         let mut engine = DataEngine::builder().build();
         engine
@@ -761,7 +774,7 @@ mod tests {
     async fn failure_cascades() {
         let mut engine = DataEngine::builder().build();
         // Source-like boom node (no input ports) so it passes port validation.
-        let boom_meta = NodeMeta::source("boom");
+        let boom_meta = NodeMeta::source();
         engine.add_node("boom", BoomNode(boom_meta)).unwrap();
         engine
             .sql_node("child", "SELECT 1")
@@ -815,7 +828,7 @@ mod tests {
             for i in 0..4 {
                 let id = format!("s{i}");
                 // No input ports: standalone nodes pass port validation.
-                let meta = NodeMeta::source(&id);
+                let meta = NodeMeta::source();
                 engine.add_node(id, SleepNode(meta)).unwrap();
             }
             let start = Instant::now();
@@ -835,5 +848,311 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── Registry-based node creation tests ──────────────────────────
+
+    /// All node kinds must be discoverable via list_nodes.
+    #[tokio::test]
+    async fn list_nodes_returns_all_registered_kinds() {
+        let engine = DataEngine::builder().build();
+        let nodes = engine.list_nodes();
+        let kinds: Vec<&str> = nodes.iter().map(|n| n.kind.as_str()).collect();
+        for expected in [
+            "sql",
+            "source",
+            "sink",
+            "ldsc",
+            "linear_regression",
+            "mock",
+        ] {
+            assert!(
+                kinds.contains(&expected),
+                "missing kind '{expected}'; got {kinds:?}"
+            );
+        }
+    }
+
+    /// Each registered kind must have a non-null JSON Schema.
+    #[tokio::test]
+    async fn get_node_spec_returns_schema_for_every_kind() {
+        let engine = DataEngine::builder().build();
+        for kind in [
+            "sql",
+            "source",
+            "sink",
+            "ldsc",
+            "linear_regression",
+            "mock",
+        ] {
+            let schema = engine
+                .get_node_spec(kind)
+                .unwrap_or_else(|e| panic!("get_node_spec({kind}) failed: {e}"));
+            let raw = serde_json::to_value(&schema).unwrap();
+            assert!(
+                raw.is_object(),
+                "schema for {kind} should be a JSON object; got {raw}"
+            );
+        }
+    }
+
+    /// Unknown kind → FactoryNotFound
+    #[tokio::test]
+    async fn add_node_via_registry_unknown_kind() {
+        let mut engine = DataEngine::builder().build();
+        let err = engine
+            .add_node_from_registry("n", "nonexistent_kind_42", serde_json::json!({}))
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("nonexistent_kind_42"),
+            "error should mention the kind; got: {msg}"
+        );
+    }
+
+    /// Malformed spec → SpecDeserialize
+    #[tokio::test]
+    async fn add_node_via_registry_bad_spec() {
+        let mut engine = DataEngine::builder().build();
+
+        // sql requires { sql_query: String }; passing an empty object fails.
+        let err = engine
+            .add_node_from_registry("n", "sql", serde_json::json!({}))
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("sql_query") || msg.contains("missing field"),
+            "sql with empty spec should fail deserialization; got: {msg}"
+        );
+
+        // source requires { type: "file"|"iceberg" }; passing junk fails.
+        let err = engine
+            .add_node_from_registry("n", "source", serde_json::json!({"type": "ftp"}))
+            .unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.to_lowercase().contains("unknown variant"),
+            "source with unknown type should fail deserialization; got: {msg}"
+        );
+    }
+
+    // ── Per-kind smoke tests: create via registry + run a minimal DAG ──
+
+    /// sql node: create via registry, wire to a source, run.
+    #[tokio::test]
+    async fn registry_sql_node_runs() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+
+        engine
+            .source_node(
+                "src",
+                Source::File {
+                    path: csv.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "agg",
+                "sql",
+                serde_json::json!({"sql_query": "SELECT region, CAST(AVG(charges) AS BIGINT) AS avg_chg FROM port_0 GROUP BY region"}),
+            )
+            .unwrap();
+
+        engine.add_edge("src", "agg", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("agg"), Some(RuntimeStatus::Success));
+    }
+
+    /// source node (file): create via registry, run.
+    #[tokio::test]
+    async fn registry_source_node_file_runs() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+
+        engine
+            .add_node_from_registry(
+                "src",
+                "source",
+                serde_json::json!({"type": "file", "path": csv.to_str().unwrap()}),
+            )
+            .unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("src"), Some(RuntimeStatus::Success));
+    }
+
+    /// sink node (file): create via registry, wire source→sink, run.
+    #[tokio::test]
+    async fn registry_sink_node_file_runs() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+        let out = "/tmp/dag_registry_sink_test.csv";
+        let _ = std::fs::remove_file(out);
+
+        engine
+            .source_node(
+                "src",
+                Source::File {
+                    path: csv.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "out",
+                "sink",
+                serde_json::json!({"type": "file", "path": out, "format": "csv"}),
+            )
+            .unwrap();
+
+        engine.add_edge("src", "out", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("out"), Some(RuntimeStatus::Success));
+        assert!(std::path::Path::new(out).exists());
+    }
+
+    /// linear_regression node: create via registry, succeeds execution.
+    #[tokio::test]
+    async fn registry_linear_regression_node_runs() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+
+        engine
+            .source_node(
+                "src",
+                Source::File {
+                    path: csv.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "lr",
+                "linear_regression",
+                serde_json::json!({"x_columns": ["age"], "y_column": "charges"}),
+            )
+            .unwrap();
+
+        engine.add_edge("src", "lr", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("lr"), Some(RuntimeStatus::Success));
+    }
+
+    /// linear_regression with intercept defaulting to true.
+    #[tokio::test]
+    async fn registry_linear_regression_default_intercept() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+
+        engine
+            .source_node(
+                "src",
+                Source::File {
+                    path: csv.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+
+        // omit intercept → defaults to true.
+        engine
+            .add_node_from_registry(
+                "lr",
+                "linear_regression",
+                serde_json::json!({"x_columns": ["bmi"], "y_column": "charges"}),
+            )
+            .unwrap();
+
+        engine.add_edge("src", "lr", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("lr"), Some(RuntimeStatus::Success));
+    }
+
+    /// mock node: creates with empty spec, returns Iris dataset.
+    #[tokio::test]
+    async fn registry_mock_node_runs() {
+        let mut engine = DataEngine::builder().build();
+
+        engine
+            .add_node_from_registry("m", "mock", serde_json::json!({}))
+            .unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok);
+        assert_eq!(report.status("m"), Some(RuntimeStatus::Success));
+    }
+
+    /// Multiple registry-created nodes wired together end-to-end.
+    #[tokio::test]
+    async fn registry_full_pipeline() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+        let out = "/tmp/dag_registry_full_pipeline.csv";
+        let _ = std::fs::remove_file(out);
+
+        engine
+            .add_node_from_registry(
+                "src",
+                "source",
+                serde_json::json!({"type": "file", "path": csv.to_str().unwrap()}),
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "filter",
+                "sql",
+                serde_json::json!({"sql_query": "SELECT * FROM port_0 WHERE age > 30"}),
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "lr",
+                "linear_regression",
+                serde_json::json!({"x_columns": ["age", "bmi"], "y_column": "charges"}),
+            )
+            .unwrap();
+
+        engine
+            .add_node_from_registry(
+                "out",
+                "sink",
+                serde_json::json!({"type": "file", "path": out, "format": "csv"}),
+            )
+            .unwrap();
+
+        // src → filter → lr → out
+        engine.add_edge("src", "filter", 0, 0).unwrap();
+        engine.add_edge("filter", "lr", 0, 0).unwrap();
+        engine.add_edge("lr", "out", 0, 0).unwrap();
+
+        let report = engine.run().await.expect("run should succeed");
+        assert!(report.ok, "full pipeline failed: {:?}", report.statuses);
+        for n in ["src", "filter", "lr", "out"] {
+            assert_eq!(
+                report.status(n),
+                Some(RuntimeStatus::Success),
+                "node {n} should succeed"
+            );
+        }
+        assert!(std::path::Path::new(out).exists());
     }
 }

@@ -2,10 +2,13 @@ use std::fmt::Display;
 
 use async_trait::async_trait;
 use datafusion::common::HashMap;
+use schemars::{schema_for, JsonSchema};
+use serde::Deserialize;
 
 use crate::{
     data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::PortOutputs},
     dataset::{BuiltinDataset, get_builtin_dataset},
+    node_registry::registry::{NodeCtx, NodeFactory},
 };
 
 #[derive(Clone)]
@@ -34,11 +37,37 @@ impl From<&str> for MockNodeError {
     }
 }
 
+const MOCK_NODE_KIND: &str = "mock";
+
+#[derive(Debug, JsonSchema, Deserialize)]
+pub struct MockNodeSpec {}
+
+pub struct MockNodeFactory {}
+
+impl NodeFactory for MockNodeFactory {
+    fn kind(&self) -> &'static str {
+        MOCK_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(MockNodeSpec)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        _node_ctx: NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let _node_spec: MockNodeSpec = serde_json::from_value(spec)?;
+        Ok(Box::new(MockNode::default()))
+    }
+}
+
 impl MockNode {}
 impl Default for MockNode {
     fn default() -> Self {
         // A source-style mock: no inputs, one output port "iris".
-        let meta = NodeMeta::new("test_node");
+        let meta = NodeMeta::new();
         Self { meta }
     }
 }

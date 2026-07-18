@@ -12,10 +12,15 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
+use schemars::{schema_for, JsonSchema};
+use serde::Deserialize;
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
-use crate::data_engine::dag::{DagError, graph::PortOutputs};
+use crate::{
+    data_engine::dag::{DagError, graph::PortOutputs},
+    node_registry::registry::{NodeCtx, NodeFactory},
+};
 
 // =====================================================================
 // Error type
@@ -201,18 +206,57 @@ pub struct LinearRegressionNode {
 
 impl LinearRegressionNode {
     pub fn new(
-        id: impl Into<String>,
         x_columns: Vec<String>,
         y_column: String,
         intercept: bool,
     ) -> Self {
-        let meta = NodeMeta::new(id).add_output_port(None).add_input_port(None);
+        let meta = NodeMeta::new().add_output_port(None).add_input_port(None);
         Self {
             meta,
             x_columns,
             y_column,
             intercept,
         }
+    }
+}
+
+const LINEAR_REGRESSION_NODE_KIND: &str = "linear_regression";
+
+#[derive(Debug, JsonSchema, Deserialize)]
+pub struct LinearRegressionNodeSpec {
+    pub x_columns: Vec<String>,
+    pub y_column: String,
+    #[serde(default = "default_intercept")]
+    pub intercept: bool,
+}
+
+fn default_intercept() -> bool {
+    true
+}
+
+pub struct LinearRegressionNodeFactory {}
+
+impl NodeFactory for LinearRegressionNodeFactory {
+    fn kind(&self) -> &'static str {
+        LINEAR_REGRESSION_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(LinearRegressionNodeSpec)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        _node_ctx: NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let node_spec: LinearRegressionNodeSpec = serde_json::from_value(spec)?;
+        let node = LinearRegressionNode::new(
+            node_spec.x_columns,
+            node_spec.y_column,
+            node_spec.intercept,
+        );
+        Ok(Box::new(node))
     }
 }
 
@@ -307,7 +351,7 @@ mod tests {
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
         let mut node =
-            LinearRegressionNode::new("lr", vec!["x".to_string()], "y".to_string(), true);
+            LinearRegressionNode::new(vec!["x".to_string()], "y".to_string(), true);
         let input = super::super::meta::NodeInput {
             port: 0,
             // df_name: "src".to_string(),
@@ -368,7 +412,7 @@ mod tests {
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
         let mut node =
-            LinearRegressionNode::new("lr", vec!["x".to_string()], "y".to_string(), false);
+            LinearRegressionNode::new(vec!["x".to_string()], "y".to_string(), false);
         let input = super::super::meta::NodeInput {
             port: 0,
             // df_name: "src".to_string(),

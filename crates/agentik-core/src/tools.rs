@@ -24,7 +24,7 @@ pub use tool_provider::ToolProviderRegistry;
 pub use toolset::{ToolRegistration, Toolset};
 
 pub use agentik_sdk::types::{
-    ToolBuilder, ToolChoice, ToolDefinition, ToolResult, ToolResultContent, ToolUse,
+    ToolDefinitionBuilder, ToolChoice, ToolDefinition, ToolResult, ToolResultContent, ToolUse,
     ToolValidationError,
 };
 

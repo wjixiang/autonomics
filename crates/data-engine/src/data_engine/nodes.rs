@@ -4,7 +4,6 @@
 //! the contract every node fulfils. Concrete implementations live in
 //! [`source`], [`sql_node`], and [`sink`].
 
-pub mod cache_source;
 pub mod ldsc_hsq;
 pub mod linear_regression;
 pub mod meta;
@@ -13,9 +12,10 @@ pub mod sink;
 pub mod source;
 pub mod sql_node;
 
-pub use ldsc_hsq::{LdscHsqConfig, LdscHsqNode};
-pub use linear_regression::LinearRegressionNode;
+pub use ldsc_hsq::{LdscHsqConfig, LdscHsqNode, LdscHsqNodeFactory};
+pub use linear_regression::{LinearRegressionNode, LinearRegressionNodeFactory, LinearRegressionNodeSpec};
 pub use meta::{DEFAULT_PORT, DagNode, NodeId, NodeInput, NodeMeta, Port};
-pub use sink::{Sink, SinkMode, SinkNode, WriteFormat};
-pub use source::{FileFormat, Source, SourceNode};
-pub use sql_node::SqlNode;
+pub use mock_node::{MockNodeFactory, MockNodeSpec};
+pub use sink::{Sink, SinkMode, SinkNode, SinkNodeFactory, SinkNodeSpec, WriteFormat};
+pub use source::{FileFormat, Source, SourceNode, SourceNodeFactory, SourceNodeSpec};
+pub use sql_node::{SqlNode, SqlNodeFactory, SqlNodeSpec};

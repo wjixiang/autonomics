@@ -1,10 +1,15 @@
 use async_trait::async_trait;
 use datafusion::{common::HashMap, execution::SessionStateBuilder, prelude::SessionContext};
+use schemars::{JsonSchema, schema_for};
+use serde::Deserialize;
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
 
-use crate::data_engine::dag::{DagError, graph::PortOutputs};
+use crate::{
+    data_engine::dag::{DagError, graph::PortOutputs},
+    node_registry::registry::NodeFactory,
+};
 
 #[derive(Debug, Error)]
 pub enum SqlNodeError {
@@ -37,14 +42,38 @@ pub struct SqlNode {
     ctx: SessionContext,
 }
 
-impl SqlNode {
-    pub fn new(id: impl Into<String>, query: String, ctx: SessionContext) -> Self {
-        // Output port is named after the output DataFrame. Input ports are
-        // whatever the caller declared on the meta (default single "default").
+#[derive(Debug, JsonSchema, Deserialize)]
+pub struct SqlNodeSpec {
+    sql_query: String,
+}
 
-        let meta = NodeMeta::new(id)
-            .add_output_port(None)
-            .set_fixed_input(false);
+const SQL_NODE_KIND: &str = "sql";
+
+pub struct SqlNodeFactory {}
+
+impl NodeFactory for SqlNodeFactory {
+    fn kind(&self) -> &'static str {
+        SQL_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(SqlNodeSpec)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        node_ctx: crate::node_registry::registry::NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let node_spec: SqlNodeSpec = serde_json::from_value(spec)?;
+        let sql_node = SqlNode::new(node_spec.sql_query, node_ctx.session);
+        Ok(Box::new(sql_node))
+    }
+}
+
+impl SqlNode {
+    pub fn new(query: String, ctx: SessionContext) -> Self {
+        let meta = NodeMeta::new().add_output_port(None).set_fixed_input(false);
         Self {
             meta,
             sql_query: query,
@@ -141,7 +170,7 @@ mod tests {
             RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();
         let df = ctx.read_batch(batch).unwrap();
         ctx.register_table("src", df.clone().into_view()).unwrap();
-        let node = SqlNode::new("sql", sql.into(), ctx.clone());
+        let node = SqlNode::new(sql.into(), ctx.clone());
         (ctx, node, df)
     }
 
@@ -259,7 +288,7 @@ mod tests {
                    FROM port_0 \
                    WHERE info['age'] > 28 \
                    ORDER BY id";
-        let mut node = SqlNode::new("sql", sql.into(), ctx.clone());
+        let mut node = SqlNode::new(sql.into(), ctx.clone());
         let input = NodeInput { port: 0, data: df };
         let outputs = node.execute(&[input]).await.unwrap();
         let batches = outputs.get(&0).unwrap().clone().collect().await.unwrap();

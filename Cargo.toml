@@ -20,7 +20,8 @@ members = [
   "crates/data-engine-tools",
 
   "crates/biofusion-cache",
-  "bio_crates/ldsc", "bio_crates/mr",
+  "bio_crates/ldsc",
+  "bio_crates/mr",
 ]
 
 [workspace.package]
@@ -39,6 +40,7 @@ async-trait = "0.1"
 derive_more = { version = "2.1.1", features = ["from"] }
 rayon = "1.12.0"
 futures = "0.3"
+schemars = "1.2.1"
 
 unicode-width = "0.2"
 

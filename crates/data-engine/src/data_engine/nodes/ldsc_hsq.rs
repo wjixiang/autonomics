@@ -12,10 +12,15 @@ use arrow_array::{Float64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datalake::Datalake;
+use schemars::{schema_for, JsonSchema};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
-use crate::data_engine::dag::{DagError, graph::PortOutputs};
+use crate::{
+    data_engine::dag::{DagError, graph::PortOutputs},
+    node_registry::registry::{NodeCtx, NodeFactory},
+};
 
 // =====================================================================
 // Error type
@@ -76,16 +81,23 @@ fn output_schema() -> SchemaRef {
     ]))
 }
 
-/// Build the input port schema from the configured upstream sumstats column
-/// names: the per-SNP Z-score and sample-size columns (Float64) plus the
-/// rsid join key (Utf8). These are exactly the columns the internal SQL join
+/// The fixed input column names for the upstream GWAS sumstats `DataFrame`.
+/// All upstream data must use these exact column names; they are enforced by
+/// [`input_schema`] so the DAG rejects misshaped edges at `add_edge` time.
+const INPUT_Z_COL: &str = "Z";
+const INPUT_N_COL: &str = "N";
+const INPUT_RSID_COL: &str = "rsid";
+
+/// Build the input port schema with the fixed upstream sumstats column names:
+/// per-SNP Z-score (`Z`, Float64), sample size (`N`, Float64), and rsid join
+/// key (`rsid`, Utf8). These are exactly the columns the internal SQL join
 /// reads, so typing the input port lets the DAG reject misshaped upstream
 /// edges at `add_edge` time.
-fn input_schema(z_column: &str, n_column: &str, rsid_column: &str) -> SchemaRef {
+fn input_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
-        Field::new(z_column, DataType::Float64, true),
-        Field::new(n_column, DataType::Float64, true),
-        Field::new(rsid_column, DataType::Utf8, false),
+        Field::new(INPUT_Z_COL, DataType::Float64, true),
+        Field::new(INPUT_N_COL, DataType::Float64, true),
+        Field::new(INPUT_RSID_COL, DataType::Utf8, false),
     ]))
 }
 
@@ -126,6 +138,9 @@ fn build_result_batch(r: &ldsc::hsq::HsqResult) -> Result<RecordBatch, LdscNodeE
 ///
 /// Accepts raw GWAS summary statistics as input, queries the Iceberg data lake
 /// for LD score panel data, performs the join internally, and runs LDSC.
+///
+/// The upstream `DataFrame` must have columns named exactly `Z` (Float64),
+/// `N` (Float64), and `rsid` (Utf8) — enforced by the node's input port schema.
 #[derive(Clone)]
 pub struct LdscHsqNode {
     /// DAG node metadata (id, ports).
@@ -133,16 +148,6 @@ pub struct LdscHsqNode {
     /// Iceberg data lake handle, used to fetch the LD score panel
     /// (`iceberg.ld_score.*`) for the join against upstream sumstats.
     datalake: Arc<Datalake>,
-    /// Upstream sumstats column carrying per-SNP Z-scores. Aliased to `Z`
-    /// in the inner SQL before being passed to
-    /// [`ldsc::hsq::estimate_h2`].
-    z_column: String,
-    /// Upstream sumstats column carrying per-SNP sample sizes. Aliased
-    /// to `N` in the inner SQL.
-    n_column: String,
-    /// Upstream sumstats column carrying SNP identifiers; used as the
-    /// join key against `iceberg.ld_score.*.rsid`.
-    rsid_column: String,
     /// Configuration for the LDSC h² estimation algorithm itself
     /// (per-annotation M, jackknife blocks, optional fixed intercept).
     /// See [`LdscHsqConfig`].
@@ -154,7 +159,7 @@ pub struct LdscHsqNode {
 /// Bundles the three parameters that govern the LDSC regression itself.
 /// All other [`LdscHsqNode`] parameters (datalake, sumstats column names)
 /// are orthogonal and live on the node directly.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LdscHsqConfig {
     /// Per-annotation M: the number of SNPs in each LD score annotation
     /// category, in the same order as `HsqColumns::ref_ld`. M is the
@@ -190,41 +195,55 @@ impl LdscHsqConfig {
     }
 }
 
+const LDSC_HSQ_NODE_KIND: &str = "ldsc";
+
+pub struct LdscHsqNodeFactory {}
+
+impl NodeFactory for LdscHsqNodeFactory {
+    fn kind(&self) -> &'static str {
+        LDSC_HSQ_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(LdscHsqConfig)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        node_ctx: NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let config: LdscHsqConfig = serde_json::from_value(spec)?;
+        let node = LdscHsqNode::new(node_ctx.datalake, config);
+        Ok(Box::new(node))
+    }
+}
+
 impl LdscHsqNode {
     /// Construct an [`LdscHsqNode`].
     ///
     /// # Arguments
     ///
-    /// * `id` — DAG node id, used in plan output and to route outputs.
     /// * `datalake` — Iceberg data lake handle; the node queries the
     ///   LD score panel from `genetics.ld_score.*` through it.
-    /// * `z_column` — upstream sumstats column name for Z-scores.
-    /// * `n_column` — upstream sumstats column name for per-SNP sample
-    ///   sizes.
-    /// * `rsid_column` — upstream sumstats column name for SNP ids; used
-    ///   as the join key against the LD score panel.
     /// * `ldsc_hsq` — algorithm configuration; see [`LdscHsqConfig`].
+    ///
+    /// The upstream `DataFrame` must expose columns `Z` (Float64), `N`
+    /// (Float64), and `rsid` (Utf8) — enforced by the input port schema.
     pub fn new(
-        id: impl Into<String>,
         datalake: Arc<Datalake>,
-        z_column: String,
-        n_column: String,
-        rsid_column: String,
         ldsc_hsq: LdscHsqConfig,
     ) -> Self {
         // Fixed, typed ports: a single input carrying GWAS sumstats (Z, N,
-        // rsid under the configured column names) and a single output with
-        // the fixed h² summary schema. Declaring the schemas lets the DAG
-        // validate edge compatibility at `add_edge`/`validate` time.
-        let meta = NodeMeta::new(id)
-            .add_input_port(Some(input_schema(&z_column, &n_column, &rsid_column)))
+        // rsid) and a single output with the fixed h² summary schema.
+        // Declaring the schemas lets the DAG validate edge compatibility
+        // at `add_edge`/`validate` time.
+        let meta = NodeMeta::new()
+            .add_input_port(Some(input_schema()))
             .add_output_port(Some(output_schema()));
         Self {
             meta,
             datalake,
-            z_column,
-            n_column,
-            rsid_column,
             ldsc_hsq,
         }
     }
@@ -282,9 +301,9 @@ impl DagNode for LdscHsqNode {
                INNER JOIN iceberg.ld_score.{table} AS l
                ON s."{rsid}" = l.rsid
                ORDER BY l.locus.position"#,
-            z = self.z_column,
-            n = self.n_column,
-            rsid = self.rsid_column,
+            z = INPUT_Z_COL,
+            n = INPUT_N_COL,
+            rsid = INPUT_RSID_COL,
             table = ld_score_table,
             Z = LD_Z_COL,
             N = LD_N_COL,
@@ -380,11 +399,7 @@ mod tests {
         // via a pre-joined path that doesn't touch the real catalog.
         // We test the join logic by verifying the node accepts the new input.
         let node = LdscHsqNode::new(
-            "ldsc_test",
             Arc::new(Datalake::new()),
-            "Z".to_string(),
-            "N".to_string(),
-            "rsid".to_string(),
             LdscHsqConfig::new(vec![20.0], 5, None),
         );
 
@@ -394,19 +409,14 @@ mod tests {
         // without a real catalog. Instead, verify the struct construction
         // and the input acceptance path.
         assert_eq!(node.node_type(), "ldsc");
-        assert_eq!(node.meta().id(), "ldsc_test");
     }
 
     #[tokio::test]
     async fn test_ld_panel_fetching_e2e() {
         let n = 20;
-        let datalake = Datalake::default();
+        let _datalake = Datalake::default();
         let mut node = LdscHsqNode::new(
-            "ldsc_test",
             Arc::new(Datalake::default()),
-            "Z".to_string(),
-            "N".to_string(),
-            "rsid".to_string(),
             LdscHsqConfig::new(vec![n as f64], 5, None),
         );
         let input = make_test_input(n);

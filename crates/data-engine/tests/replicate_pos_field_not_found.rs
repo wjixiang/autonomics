@@ -111,7 +111,6 @@ async fn write_to_iceberg(
     df: datafusion::prelude::DataFrame,
 ) {
     let mut sink_node = SinkNode::new(
-        "sink",
         Sink::Iceberg {
             ident: ident.to_string(),
         },

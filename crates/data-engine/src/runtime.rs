@@ -6,15 +6,16 @@ use std::panic::AssertUnwindSafe;
 use futures::FutureExt;
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::data_engine::IcebergDataEngine;
+use crate::data_engine::DataEngine;
 use crate::runtime::error::Result;
 use crate::runtime::types::DataEngineCmd;
 
 pub mod error;
 pub mod types;
 
+/// DataEngineServer -> DataEngine -> graph
 pub struct DataEngineServer {
-    engine: IcebergDataEngine,
+    engine: DataEngine,
     rx: mpsc::UnboundedReceiver<DataEngineCmd>,
 }
 
@@ -30,49 +31,6 @@ impl DataEngineServer {
 
     async fn handle(&mut self, cmd: DataEngineCmd) {
         match cmd {
-            DataEngineCmd::AddSourceNode { id, source, reply } => {
-                let _ = reply.send(self.engine.source_node(id, source).map(|_| ()));
-            }
-            DataEngineCmd::AddSqlNode { id, query, reply } => {
-                let _ = reply.send(self.engine.sql_node(id, query).map(|_| ()));
-            }
-            DataEngineCmd::AddSinkNode {
-                id,
-                sink,
-                mode,
-                datalake,
-                reply,
-            } => {
-                let _ = reply.send(self.engine.sink_node(id, sink, mode, datalake).map(|_| ()));
-            }
-            DataEngineCmd::AddLinearRegressionNode {
-                id,
-                x_columns,
-                y_column,
-                intercept,
-                reply,
-            } => {
-                let _ = reply.send(
-                    self.engine
-                        .linear_regression_node(id, x_columns, y_column, intercept)
-                        .map(|_| ()),
-                );
-            }
-            DataEngineCmd::AddLdscNode {
-                id,
-                datalake,
-                z_column,
-                n_column,
-                rsid_column,
-                ldsc,
-                reply,
-            } => {
-                let _ = reply.send(
-                    self.engine
-                        .ldsc_node(id, datalake, z_column, n_column, rsid_column, ldsc)
-                        .map(|_| ()),
-                );
-            }
             DataEngineCmd::AddEdge {
                 from,
                 from_port,
@@ -105,6 +63,20 @@ impl DataEngineServer {
             DataEngineCmd::ClearDag { reply } => {
                 let _ = reply.send(self.engine.clear_dag().map(|_| ()));
             }
+            DataEngineCmd::GetNodeSpec { kind, reply } => {
+                let _ = reply.send(self.engine.get_node_spec(&kind));
+            }
+            DataEngineCmd::ListNodeFactories { reply } => {
+                let _ = reply.send(Ok(self.engine.list_nodes()));
+            }
+            DataEngineCmd::AddNode {
+                id,
+                kind,
+                spec,
+                reply,
+            } => {
+                let _ = reply.send(self.engine.add_node_from_registry(id, &kind, spec));
+            }
         }
     }
 }
@@ -129,103 +101,6 @@ impl DataEngineClient {
             .await
             .map_err(|_| ClientError::ServerClosed)?
             .map_err(Into::into)
-    }
-
-    pub async fn add_source_node(
-        &self,
-        id: String,
-        source: crate::data_engine::Source,
-    ) -> Result<()> {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        self.request(
-            DataEngineCmd::AddSourceNode {
-                id,
-                source,
-                reply: reply_tx,
-            },
-            reply_rx,
-        )
-        .await
-    }
-
-    pub async fn add_sql_node(&self, id: String, query: String) -> Result<()> {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        self.request(
-            DataEngineCmd::AddSqlNode {
-                id,
-                query,
-                reply: reply_tx,
-            },
-            reply_rx,
-        )
-        .await
-    }
-
-    pub async fn add_sink_node(
-        &self,
-        id: String,
-        sink: crate::data_engine::Sink,
-        mode: crate::data_engine::SinkMode,
-        datalake: std::sync::Arc<datalake::Datalake>,
-    ) -> Result<()> {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        self.request(
-            DataEngineCmd::AddSinkNode {
-                id,
-                sink,
-                mode,
-                datalake,
-                reply: reply_tx,
-            },
-            reply_rx,
-        )
-        .await
-    }
-
-    pub async fn add_linear_regression_node(
-        &self,
-        id: String,
-        x_columns: Vec<String>,
-        y_column: String,
-        intercept: bool,
-    ) -> Result<()> {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        self.request(
-            DataEngineCmd::AddLinearRegressionNode {
-                id,
-                x_columns,
-                y_column,
-                intercept,
-                reply: reply_tx,
-            },
-            reply_rx,
-        )
-        .await
-    }
-
-    pub async fn add_ldsc_node(
-        &self,
-        id: String,
-        datalake: std::sync::Arc<datalake::Datalake>,
-        z_column: String,
-        n_column: String,
-        rsid_column: String,
-        ldsc: crate::data_engine::LdscHsqConfig,
-    ) -> Result<()> {
-        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        self.request(
-            DataEngineCmd::AddLdscNode {
-                id,
-                datalake,
-                z_column,
-                n_column,
-                rsid_column,
-                ldsc,
-                reply: reply_tx,
-            },
-            reply_rx,
-        )
-        .await
     }
 
     /// Connect two nodes using their default (single) ports.
@@ -305,6 +180,38 @@ impl DataEngineClient {
             .await
     }
 
+    pub async fn list_node_factories(&self) -> Result<Vec<crate::node_registry::NodeInfo>> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(DataEngineCmd::ListNodeFactories { reply: reply_tx }, reply_rx)
+            .await
+    }
+
+    pub async fn get_node_spec(&self, kind: String) -> Result<schemars::Schema> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::GetNodeSpec {
+                kind,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
+    }
+
+    pub async fn add_node(&self, id: String, kind: String, spec: serde_json::Value) -> Result<()> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::AddNode {
+                id,
+                kind,
+                spec,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
+    }
+
     pub async fn clear_dag(&self) -> Result<()> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(DataEngineCmd::ClearDag { reply: reply_tx }, reply_rx)
@@ -315,7 +222,7 @@ impl DataEngineClient {
 pub fn spawn_engine() {}
 
 /// Spawn server through dependency injection, good for test purpose.
-pub fn spawn_with_engine(engine: IcebergDataEngine) -> (DataEngineClient, JoinHandle<()>) {
+pub fn spawn_with_engine(engine: DataEngine) -> (DataEngineClient, JoinHandle<()>) {
     let (tx, rx) = mpsc::unbounded_channel::<DataEngineCmd>();
     let server = DataEngineServer { engine, rx };
     let client = DataEngineClient { tx };

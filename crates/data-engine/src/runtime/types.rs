@@ -1,42 +1,15 @@
 use tokio::sync::oneshot;
 
+use schemars;
 use crate::data_engine::dag::RunReport;
 use crate::data_engine::dag::graph::PortOutputs;
 use crate::data_engine::error::Result as EngineResult;
-use crate::data_engine::{LdscHsqConfig, Sink, SinkMode, Source};
 
 pub enum DataEngineCmd {
-    AddSourceNode {
+    AddNode {
         id: String,
-        source: Source,
-        reply: oneshot::Sender<EngineResult<()>>,
-    },
-    AddSqlNode {
-        id: String,
-        query: String,
-        reply: oneshot::Sender<EngineResult<()>>,
-    },
-    AddSinkNode {
-        id: String,
-        sink: Sink,
-        mode: SinkMode,
-        datalake: std::sync::Arc<datalake::Datalake>,
-        reply: oneshot::Sender<EngineResult<()>>,
-    },
-    AddLinearRegressionNode {
-        id: String,
-        x_columns: Vec<String>,
-        y_column: String,
-        intercept: bool,
-        reply: oneshot::Sender<EngineResult<()>>,
-    },
-    AddLdscNode {
-        id: String,
-        datalake: std::sync::Arc<datalake::Datalake>,
-        z_column: String,
-        n_column: String,
-        rsid_column: String,
-        ldsc: LdscHsqConfig,
+        kind: String,
+        spec: serde_json::Value,
         reply: oneshot::Sender<EngineResult<()>>,
     },
     AddEdge {
@@ -62,5 +35,12 @@ pub enum DataEngineCmd {
     },
     ClearDag {
         reply: oneshot::Sender<EngineResult<()>>,
+    },
+    GetNodeSpec {
+        kind: String,
+        reply: oneshot::Sender<EngineResult<schemars::Schema>>,
+    },
+    ListNodeFactories {
+        reply: oneshot::Sender<EngineResult<Vec<crate::node_registry::NodeInfo>>>,
     },
 }

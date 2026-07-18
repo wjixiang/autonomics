@@ -141,6 +141,8 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
     };
+
+    // 确认属性宏所标注的对象必须是struct, 并拿到匹配结果
     let mut input: syn::ItemStruct = match syn::parse(item) {
         Ok(v) => v,
         Err(e) => return e.to_compile_error().into(),
@@ -209,7 +211,7 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     let impl_block = quote! {
         impl ::agentik_sdk::types::ToolInput for #struct_name {
             fn definition() -> ::agentik_sdk::types::ToolDefinition {
-                ::agentik_sdk::types::ToolBuilder::new(#tool_name, #tool_desc)
+                ::agentik_sdk::types::ToolDefinitionBuilder::new(#tool_name, #tool_desc)
                     #(#parameters)*
                     #(.required(#requireds))*
                     .build()

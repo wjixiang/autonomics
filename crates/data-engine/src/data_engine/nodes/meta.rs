@@ -44,20 +44,23 @@ impl Port {
         }
     }
 
-    /// Convenience: the unnamed default port.
-    #[deprecated]
-    pub fn default_port() -> Self {
-        Self::new(0, None)
-    }
+    // /// Convenience: the unnamed default port.
+    // #[deprecated]
+    // pub fn default_port() -> Self {
+    //     Self::new(0, None)
+    // }
 
     pub fn get_code(&self) -> String {
         format!("port_{0}", self.index.clone())
     }
 }
 
+/// Data interface group of DagNode, grouped by dataflow direction (input / output)
 #[derive(Clone)]
 pub struct Ports {
     ports: HashMap<u8, Port>,
+    /// Whether the number of the port is fixed. If `false`, DataEngine will not validate
+    /// `OverConnected` / `UnderConnected` edge situations.
     is_fixed: bool,
 }
 impl Default for Ports {
@@ -123,29 +126,26 @@ pub struct NodeInput {
     pub data: DataFrame,
 }
 
-/// Static per-node metadata: identity plus declared input/output ports.
+/// Static per-node metadata: declared input/output ports.
 #[derive(Clone)]
 pub struct NodeMeta {
-    id: NodeId,
     input_ports: Ports,
     output_ports: Ports,
 }
 
 impl NodeMeta {
     /// A transform node with a single default input port and a single default output
-    /// port — the backward-compatible shape for `SqlNode` and friends.
-    pub fn new(id: impl Into<String>) -> Self {
+    /// port.
+    pub fn new() -> Self {
         Self {
-            id: id.into(),
             input_ports: Ports::default(),
             output_ports: Ports::default(),
         }
     }
 
     /// A source node: no inputs, a single default output port.
-    pub fn source(id: impl Into<String>) -> Self {
+    pub fn source() -> Self {
         Self {
-            id: id.into(),
             input_ports: Ports::default(),
             output_ports: Ports::default(),
         }
@@ -153,9 +153,8 @@ impl NodeMeta {
     }
 
     /// A sink node: a single default input port, no outputs.
-    pub fn sink(id: impl Into<String>) -> Self {
+    pub fn sink() -> Self {
         Self {
-            id: id.into(),
             input_ports: Ports::default(),
             output_ports: Ports::default(),
         }
@@ -175,10 +174,6 @@ impl NodeMeta {
     pub fn add_input_port(mut self, schema: Option<SchemaRef>) -> Self {
         self.input_ports.add_port(schema);
         self
-    }
-
-    pub fn id(&self) -> &str {
-        &self.id
     }
 
     pub fn input_ports(&self) -> &Ports {
