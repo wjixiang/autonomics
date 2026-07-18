@@ -1,12 +1,9 @@
-mod add_datalake_sink_tool;
 mod add_edge_tool;
-mod add_file_sink_tool;
-mod add_ldsc_tool;
-mod add_linear_regression_tool;
-mod add_source_tool;
-mod add_sql_tool;
+mod add_node_tool;
 mod clear_dag_tool;
+mod get_node_spec_tool;
 mod get_output_tool;
+mod list_node_factories_tool;
 mod remove_node_tool;
 mod run_dag_tool;
 mod view_dag_tool;
@@ -15,7 +12,6 @@ use std::sync::Arc;
 
 use agentik_core::tools::{ToolError, ToolRegistration};
 use data_engine::runtime::DataEngineClient;
-use datalake::Datalake;
 
 /// Shared tool execution error — replaces `anyhow` with typed variants
 /// so each error source is identifiable without string matching.
@@ -66,30 +62,15 @@ impl From<ExecError> for ToolError {
 /// Build the default set of data-engine DAG tools.
 ///
 /// Each tool sends commands to the [`DataEngineClient`] actor and awaits
-/// replies via oneshot channels. `datalake` is shared with tools that need
-/// direct Iceberg catalog access (e.g. the LDSC node queries LD scores).
-pub fn registrations(
-    client: Arc<DataEngineClient>,
-    datalake: Arc<Datalake>,
-) -> Vec<ToolRegistration> {
+/// replies via oneshot channels. All node creation is done through the
+/// generic `add_node` tool (kind + JSON spec).
+pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
     vec![
-        ToolRegistration::from(add_source_tool::AddSourceNodeTool::new(client.clone())),
-        ToolRegistration::from(add_sql_tool::AddSqlNodeTool::new(client.clone())),
-        ToolRegistration::from(add_file_sink_tool::AddFileSinkNodeTool::new(
+        ToolRegistration::from(list_node_factories_tool::ListNodeFactoriesTool::new(
             client.clone(),
-            datalake.clone(),
         )),
-        ToolRegistration::from(add_datalake_sink_tool::AddDatalakeSinkNodeTool::new(
-            client.clone(),
-            datalake.clone(),
-        )),
-        ToolRegistration::from(
-            add_linear_regression_tool::AddLinearRegressionNodeTool::new(client.clone()),
-        ),
-        ToolRegistration::from(add_ldsc_tool::AddLdscNodeTool::new(
-            client.clone(),
-            datalake,
-        )),
+        ToolRegistration::from(get_node_spec_tool::GetNodeSpecTool::new(client.clone())),
+        ToolRegistration::from(add_node_tool::AddNodeTool::new(client.clone())),
         ToolRegistration::from(add_edge_tool::AddEdgeTool::new(client.clone())),
         ToolRegistration::from(run_dag_tool::RunDagTool::new(client.clone())),
         ToolRegistration::from(get_output_tool::GetOutputTool::new(client.clone())),

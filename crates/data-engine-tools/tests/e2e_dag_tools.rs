@@ -44,21 +44,18 @@ async fn test_add_source_sql_run_dag() {
         .build();
     let (client, _handle) = spawn_with_engine(engine);
 
-    // 3. Register tools
-    let tools = data_engine_tools::registrations(
-        Arc::new(client.clone()),
-        Arc::new(datalake::Datalake::new()),
-    );
+    // 3. Register tools (no more datalake param)
+    let tools = data_engine_tools::registrations(Arc::new(client.clone()));
     let mut toolset = Toolset::new(None);
     toolset.register_all(tools).unwrap();
 
-    // 4. Add source node
+    // 4. Add source node via generic add_node
     let results = toolset
         .execute(
             &[build_tooluse(
                 "tc1",
-                "add_source_node",
-                json!({"id": "src", "path": "/insurance.csv"}),
+                "add_node",
+                json!({"id": "src", "kind": "source", "spec": {"type": "file", "path": "/insurance.csv"}}),
             )],
             None,
             None,
@@ -66,17 +63,18 @@ async fn test_add_source_sql_run_dag() {
         .await
         .unwrap();
     assert_eq!(results.len(), 1);
-    check_ok(&results[0], "add_source_node");
+    check_ok(&results[0], "add_node source");
 
-    // 5. Add SQL node
+    // 5. Add SQL node via generic add_node
     let results = toolset
         .execute(
             &[build_tooluse(
                 "tc2",
-                "add_sql_node",
+                "add_node",
                 json!({
                     "id": "sql",
-                    "query": "SELECT age, charges FROM sql__default WHERE age > 30 LIMIT 5"
+                    "kind": "sql",
+                    "spec": {"sql_query": "SELECT age, charges FROM port_0 WHERE age > 30 LIMIT 5"}
                 }),
             )],
             None,
@@ -85,7 +83,7 @@ async fn test_add_source_sql_run_dag() {
         .await
         .unwrap();
     assert_eq!(results.len(), 1);
-    check_ok(&results[0], "add_sql_node");
+    check_ok(&results[0], "add_node sql");
 
     // 6. Add edge (src -> sql) via tool
     let results = toolset
@@ -103,16 +101,16 @@ async fn test_add_source_sql_run_dag() {
     assert_eq!(results.len(), 1);
     check_ok(&results[0], "add_edge");
 
-    // 7. Add file sink node
+    // 7. Add file sink node via generic add_node
     let results = toolset
         .execute(
             &[build_tooluse(
                 "tc4",
-                "add_file_sink_node",
+                "add_node",
                 json!({
                     "id": "sink",
-                    "path": "/output.csv",
-                    "format": "csv"
+                    "kind": "sink",
+                    "spec": {"type": "file", "path": "/output.csv", "format": "csv", "mode": "overwrite"}
                 }),
             )],
             None,
@@ -121,7 +119,7 @@ async fn test_add_source_sql_run_dag() {
         .await
         .unwrap();
     assert_eq!(results.len(), 1);
-    check_ok(&results[0], "add_file_sink_node");
+    check_ok(&results[0], "add_node file_sink");
 
     // 8. Edge (sql -> sink) via tool
     let results = toolset
@@ -145,10 +143,11 @@ async fn test_add_source_sql_run_dag() {
         .execute(
             &[build_tooluse(
                 "tc6",
-                "add_datalake_sink_node",
+                "add_node",
                 json!({
                     "id": "sink_lake",
-                    "table": "gwas.iris_test"
+                    "kind": "sink",
+                    "spec": {"type": "iceberg", "ident": "gwas.iris_test", "mode": "overwrite"}
                 }),
             )],
             None,
@@ -157,7 +156,7 @@ async fn test_add_source_sql_run_dag() {
         .await
         .unwrap();
     assert_eq!(results.len(), 1);
-    check_ok(&results[0], "add_datalake_sink_node");
+    check_ok(&results[0], "add_node datalake_sink");
 }
 
 /// Regression: when a SqlNode output contains a Struct-typed column,
@@ -194,10 +193,7 @@ async fn test_get_output_vcf_select_star_returns_correct_rows() {
         .unwrap()
         .build();
     let (client, _handle) = spawn_with_engine(engine);
-    let tools = data_engine_tools::registrations(
-        Arc::new(client.clone()),
-        Arc::new(datalake::Datalake::new()),
-    );
+    let tools = data_engine_tools::registrations(Arc::new(client.clone()));
     let mut toolset = Toolset::new(None);
     toolset.register_all(tools).unwrap();
 
@@ -206,15 +202,15 @@ async fn test_get_output_vcf_select_star_returns_correct_rows() {
         .execute(
             &[build_tooluse(
                 "v1",
-                "add_source_node",
-                json!({"id": "vcf_src", "path": "/sample.vcf.gz"}),
+                "add_node",
+                json!({"id": "vcf_src", "kind": "source", "spec": {"type": "file", "path": "/sample.vcf.gz"}}),
             )],
             None,
             None,
         )
         .await
         .unwrap();
-    check_ok(&res[0], "add_source_node (vcf)");
+    check_ok(&res[0], "add_node source (vcf)");
 
     // 2. `SELECT * FROM port_0 LIMIT 5` — the exact query from the agent's
     //    obstacle #2 report. Forces the VCF (Struct + Dictionary/List info
@@ -223,10 +219,11 @@ async fn test_get_output_vcf_select_star_returns_correct_rows() {
         .execute(
             &[build_tooluse(
                 "v2",
-                "add_sql_node",
+                "add_node",
                 json!({
                     "id": "preview",
-                    "query": "SELECT * FROM port_0 LIMIT 5"
+                    "kind": "sql",
+                    "spec": {"sql_query": "SELECT * FROM port_0 LIMIT 5"}
                 }),
             )],
             None,
@@ -234,7 +231,7 @@ async fn test_get_output_vcf_select_star_returns_correct_rows() {
         )
         .await
         .unwrap();
-    check_ok(&res[0], "add_sql_node (SELECT * LIMIT 5)");
+    check_ok(&res[0], "add_node sql (SELECT * LIMIT 5)");
 
     // 3. Edge + run.
     let res = toolset
@@ -336,10 +333,7 @@ async fn test_get_output_surfaces_collect_error_instead_of_swallowing() {
         .unwrap()
         .build();
     let (client, _handle) = spawn_with_engine(engine);
-    let tools = data_engine_tools::registrations(
-        Arc::new(client.clone()),
-        Arc::new(datalake::Datalake::new()),
-    );
+    let tools = data_engine_tools::registrations(Arc::new(client.clone()));
     let mut toolset = Toolset::new(None);
     toolset.register_all(tools).unwrap();
 
@@ -347,15 +341,15 @@ async fn test_get_output_surfaces_collect_error_instead_of_swallowing() {
         .execute(
             &[build_tooluse(
                 "e1",
-                "add_source_node",
-                json!({"id": "src", "path": "/badcast.csv"}),
+                "add_node",
+                json!({"id": "src", "kind": "source", "spec": {"type": "file", "path": "/badcast.csv"}}),
             )],
             None,
             None,
         )
         .await
         .unwrap();
-    check_ok(&res[0], "add_source_node");
+    check_ok(&res[0], "add_node source");
 
     // Runtime-erroring projection. `count(*)` over this typically eliminates
     // the cast (column unused), so it returns 5; `SELECT *` must materialize
@@ -364,10 +358,11 @@ async fn test_get_output_surfaces_collect_error_instead_of_swallowing() {
         .execute(
             &[build_tooluse(
                 "e2",
-                "add_sql_node",
+                "add_node",
                 json!({
                     "id": "badcast",
-                    "query": "SELECT cast(s as int) AS n FROM port_0"
+                    "kind": "sql",
+                    "spec": {"sql_query": "SELECT cast(s as int) AS n FROM port_0"}
                 }),
             )],
             None,
@@ -375,7 +370,7 @@ async fn test_get_output_surfaces_collect_error_instead_of_swallowing() {
         )
         .await
         .unwrap();
-    check_ok(&res[0], "add_sql_node (badcast)");
+    check_ok(&res[0], "add_node sql (badcast)");
 
     let res = toolset
         .execute(
@@ -461,10 +456,7 @@ async fn test_get_output_synthetic_struct_column_baseline() {
         .unwrap()
         .build();
     let (client, _handle) = spawn_with_engine(engine);
-    let tools = data_engine_tools::registrations(
-        Arc::new(client.clone()),
-        Arc::new(datalake::Datalake::new()),
-    );
+    let tools = data_engine_tools::registrations(Arc::new(client.clone()));
     let mut toolset = Toolset::new(None);
     toolset.register_all(tools).unwrap();
 
@@ -472,15 +464,15 @@ async fn test_get_output_synthetic_struct_column_baseline() {
         .execute(
             &[build_tooluse(
                 "b1",
-                "add_source_node",
-                json!({"id": "src", "path": "/insurance.csv"}),
+                "add_node",
+                json!({"id": "src", "kind": "source", "spec": {"type": "file", "path": "/insurance.csv"}}),
             )],
             None,
             None,
         )
         .await
         .unwrap();
-    check_ok(&res[0], "add_source_node");
+    check_ok(&res[0], "add_node source");
 
     // Struct column via named_struct — plain Struct(Float64, Float64), no
     // Dictionary/List encoding. Baseline that should always work.
@@ -488,11 +480,11 @@ async fn test_get_output_synthetic_struct_column_baseline() {
         .execute(
             &[build_tooluse(
                 "b2",
-                "add_sql_node",
+                "add_node",
                 json!({
                     "id": "struct_node",
-                    "query": "SELECT age, named_struct('lo', 0.0, 'hi', charges) AS bounds \
-                              FROM port_0 WHERE age > 30 LIMIT 5"
+                    "kind": "sql",
+                    "spec": {"sql_query": "SELECT age, named_struct('lo', 0.0, 'hi', charges) AS bounds FROM port_0 WHERE age > 30 LIMIT 5"}
                 }),
             )],
             None,
@@ -500,7 +492,7 @@ async fn test_get_output_synthetic_struct_column_baseline() {
         )
         .await
         .unwrap();
-    check_ok(&res[0], "add_sql_node (synthetic struct)");
+    check_ok(&res[0], "add_node sql (synthetic struct)");
 
     let res = toolset
         .execute(
