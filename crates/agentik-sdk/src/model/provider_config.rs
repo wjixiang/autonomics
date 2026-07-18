@@ -3,6 +3,63 @@ use uuid::Uuid;
 
 use crate::http::auth::AuthMethod;
 
+/// Known provider type — used to resolve model presets and protocol adapters.
+///
+/// Serde round-trips via lowercase strings (e.g. `"deepseek"`, `"mimo"`).
+/// Unknown strings deserialize to [`ProviderType::Custom`] so the database never
+/// rejects a value — even a future one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderType {
+    Deepseek,
+    Mimo,
+    Minimax,
+    Zai,
+    Sensenova,
+    /// A user-defined or externally-registered provider type.
+    Custom(String),
+}
+
+impl ProviderType {
+    /// The canonical lowercase name (e.g. `"deepseek"`, `"mimo"`).
+    /// For `Custom(s)` returns `s` unchanged.
+    pub fn as_str(&self) -> &str {
+        match self {
+            ProviderType::Deepseek => "deepseek",
+            ProviderType::Mimo => "mimo",
+            ProviderType::Minimax => "minimax",
+            ProviderType::Zai => "zai",
+            ProviderType::Sensenova => "sensenova",
+            ProviderType::Custom(s) => s.as_str(),
+        }
+    }
+}
+
+impl std::fmt::Display for ProviderType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl From<&str> for ProviderType {
+    fn from(s: &str) -> Self {
+        match s.trim().to_lowercase().as_str() {
+            "deepseek" => ProviderType::Deepseek,
+            "mimo" => ProviderType::Mimo,
+            "minimax" => ProviderType::Minimax,
+            "zai" => ProviderType::Zai,
+            "sensenova" => ProviderType::Sensenova,
+            custom => ProviderType::Custom(custom.to_string()),
+        }
+    }
+}
+
+impl From<String> for ProviderType {
+    fn from(s: String) -> Self {
+        ProviderType::from(s.as_str())
+    }
+}
+
 /// A user-configured provider **instance** — the "master" side of the
 /// provider→model relationship.
 ///
@@ -22,8 +79,8 @@ pub struct ProviderConfig {
     /// Human-readable label, e.g. `"deepseek-prod"` or `"mimo-cn"`.
     pub name: String,
     /// Provider type key — matches a known preset (`deepseek`, `mimo`, `zai`, …).
-    /// Used to resolve model presets and default behavior.
-    pub provider_type: String,
+    /// Used to resolve model presets and protocol adapters.
+    pub provider_type: ProviderType,
     pub base_url: String,
     pub api_key: String,
     pub auth_method: AuthMethod,
@@ -33,7 +90,7 @@ impl ProviderConfig {
     /// Create a new instance with a freshly generated id.
     pub fn new(
         name: impl Into<String>,
-        provider_type: impl Into<String>,
+        provider_type: impl Into<ProviderType>,
         base_url: impl Into<String>,
         api_key: impl Into<String>,
         auth_method: AuthMethod,
@@ -54,7 +111,7 @@ impl Default for ProviderConfig {
         Self {
             id: Uuid::nil(),
             name: String::new(),
-            provider_type: String::new(),
+            provider_type: ProviderType::Custom(String::new()),
             base_url: String::new(),
             api_key: String::new(),
             auth_method: AuthMethod::default(),

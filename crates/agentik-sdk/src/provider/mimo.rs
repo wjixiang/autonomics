@@ -1,4 +1,5 @@
 use crate::model::ModelInfo;
+use crate::model::ProviderType;
 
 pub const MODEL_MIMO_V2_5_PRO: &str = "mimo-v2.5-pro";
 pub const MODEL_MIMO_V2_PRO: &str = "mimo-v2-pro";
@@ -7,7 +8,7 @@ pub const MODEL_MIMO_V2_OMNI: &str = "mimo-v2-omni";
 pub const MODEL_MIMO_V2_FLASH: &str = "mimo-v2-flash";
 
 /// Provider type key used by `ProviderConfig::provider_type`.
-pub const PROVIDER_TYPE: &str = "mimo";
+pub const PROVIDER_TYPE: ProviderType = ProviderType::Mimo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenPlanRegion {

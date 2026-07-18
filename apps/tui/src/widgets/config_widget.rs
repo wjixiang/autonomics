@@ -210,7 +210,12 @@ fn render_provider_form(form: &ProviderForm, message: &str, area: Rect, buf: &mu
         .split(inner);
 
     for (i, label) in ProviderForm::FIELDS.iter().enumerate() {
-        render_field_line(rows[i], label, &form.fields()[i], i == form.focus, buf);
+        if i == 3 {
+            // API Key field: masked rendering
+            render_masked_field_line(rows[i], label, &form.fields()[i], i == form.focus, buf);
+        } else {
+            render_field_line(rows[i], label, &form.fields()[i], i == form.focus, buf);
+        }
     }
 }
 
@@ -306,13 +311,37 @@ fn yn(b: bool) -> &'static str {
 }
 
 fn render_field_line(row: Rect, label: &str, input: &InputState, focused: bool, buf: &mut Buffer) {
+    let _ = render_field_line_impl(row, label, input.value(), input.cursor(), focused, None, buf);
+}
+
+/// Like [`render_field_line`] but replaces the displayed value with bullet characters
+/// to hide sensitive content (e.g. API keys).  The underlying value and cursor are
+/// unchanged — only the visual representation is masked.
+fn render_masked_field_line(row: Rect, label: &str, input: &InputState, focused: bool, buf: &mut Buffer) {
+    let value = input.value();
+    let graphemes_before = unicode_segmentation::UnicodeSegmentation::graphemes(&value[..input.cursor().min(value.len())], true).count();
+    let mask = "•".repeat(unicode_segmentation::UnicodeSegmentation::graphemes(value, true).count());
+    // Map the grapheme-aligned cursor to a byte offset in the mask string.
+    let mask_cursor = graphemes_before * "•".len();
+    render_field_line_impl(row, label, value, mask_cursor, focused, Some(&mask), buf);
+}
+
+fn render_field_line_impl(
+    row: Rect,
+    label: &str,
+    value: &str,
+    cursor: usize,
+    focused: bool,
+    mask: Option<&str>,
+    buf: &mut Buffer,
+) {
     let label_span = Span::styled(
         format!(" {:<11}: ", label),
         Style::default().fg(Color::Cyan),
     );
     let mut spans = vec![label_span];
-    let value = input.value();
-    if value.is_empty() {
+    let display = mask.unwrap_or(value);
+    if display.is_empty() {
         // Empty field: dim hint text (no highlight bg, the active border is the cue).
         spans.push(Span::styled(
             if focused { "▏" } else { "·" }.to_string(),
@@ -323,15 +352,15 @@ fn render_field_line(row: Rect, label: &str, input: &InputState, focused: bool, 
             }),
         ));
     } else {
-        // Split value at the cursor so the caret glyph can sit between the
-        // two halves with its own style. Pre-cursor dim, post-cursor bright.
-        let cursor = input.cursor();
-        let value_before = value[..cursor.min(value.len())].to_string();
-        let value_after = value[cursor.min(value.len())..].to_string();
+        // When masked the cursor byte offset maps directly onto the uniform-width
+        // mask string ("•••…"), so we can split at the same byte position.
+        let cursor = cursor.min(display.len());
+        let before = &display[..cursor];
+        let after = &display[cursor..];
         if focused {
-            if !value_before.is_empty() {
+            if !before.is_empty() {
                 spans.push(Span::styled(
-                    value_before,
+                    before.to_string(),
                     Style::default().fg(Color::DarkGray),
                 ));
             }
@@ -341,12 +370,12 @@ fn render_field_line(row: Rect, label: &str, input: &InputState, focused: bool, 
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::SLOW_BLINK),
             ));
-            if !value_after.is_empty() {
-                spans.push(Span::styled(value_after, Style::default().fg(Color::White)));
+            if !after.is_empty() {
+                spans.push(Span::styled(after.to_string(), Style::default().fg(Color::White)));
             }
         } else {
             spans.push(Span::styled(
-                value.to_string(),
+                display.to_string(),
                 Style::default().fg(Color::White),
             ));
         }

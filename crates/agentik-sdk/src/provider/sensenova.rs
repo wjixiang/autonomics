@@ -1,4 +1,5 @@
 use crate::model::ModelInfo;
+use crate::model::ProviderType;
 
 pub const MODEL_SENSENOVA_6_7_FLASH_LITE: &str = "sensenova-6.7-flash-lite";
 pub const MODEL_DEEPSEEK_V4_FLASH: &str = "deepseek-v4-flash";
@@ -6,7 +7,7 @@ pub const MODEL_DEEPSEEK_V4_FLASH: &str = "deepseek-v4-flash";
 pub const DEFAULT_BASE_URL: &str = "https://token.sensenova.cn";
 
 /// Provider type key used by `ProviderConfig::provider_type`.
-pub const PROVIDER_TYPE: &str = "sensenova";
+pub const PROVIDER_TYPE: ProviderType = ProviderType::Sensenova;
 
 pub struct SensenovaProvider;
 

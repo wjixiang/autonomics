@@ -1,9 +1,10 @@
 use crate::model::ModelInfo;
+use crate::model::ProviderType;
 
 pub const MODEL_MINIMAX_M2_7: &str = "MiniMax-M2.7";
 
 /// Provider type key used by `ProviderConfig::provider_type`.
-pub const PROVIDER_TYPE: &str = "minimax";
+pub const PROVIDER_TYPE: ProviderType = ProviderType::Minimax;
 
 /// Minimax has no fixed endpoint preset — a `base_url` must be supplied when
 /// creating the provider instance.

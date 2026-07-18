@@ -1,4 +1,5 @@
 use crate::model::ModelInfo;
+use crate::model::ProviderType;
 
 // ─── Model IDs ──────────────────────────────────────────────────────────────
 // Flagship series
@@ -43,7 +44,7 @@ impl ZaiEndpoint {
 }
 
 /// Provider type key used by `ProviderConfig::provider_type`.
-pub const PROVIDER_TYPE: &str = "zai";
+pub const PROVIDER_TYPE: ProviderType = ProviderType::Zai;
 
 pub struct ZaiProvider;
 

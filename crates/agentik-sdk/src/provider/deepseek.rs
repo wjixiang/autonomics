@@ -1,4 +1,5 @@
 use crate::model::ModelInfo;
+use crate::model::ProviderType;
 
 // ─── Model IDs ──────────────────────────────────────────────────────────────
 // Current generation
@@ -11,7 +12,7 @@ pub const MODEL_DEEPSEEK_REASONER: &str = "deepseek-reasoner";
 pub const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/anthropic";
 
 /// Provider type key used by `ProviderConfig::provider_type`.
-pub const PROVIDER_TYPE: &str = "deepseek";
+pub const PROVIDER_TYPE: ProviderType = ProviderType::Deepseek;
 
 pub struct DeepseekProvider;
 

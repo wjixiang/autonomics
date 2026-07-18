@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use agentik_sdk::AuthMethod;
 use agentik_sdk::model::model_pool::ModelPoolConfig;
-use agentik_sdk::model::{ModelInfo, ProviderConfig};
+use agentik_sdk::model::{ModelInfo, ProviderConfig, ProviderType};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind,
@@ -18,7 +18,7 @@ use rusqlite::Connection;
 use std::io::{Stdout, Write, stdout};
 use uuid::Uuid;
 
-use crate::state::{self, AgentStatus, AppState, InputMode, MainTabState};
+use crate::state::{self, AgentStatus, AppState, ConfigMode, InputMode, MainTabState};
 use crate::widgets::agent_tab_widget::AgentTabWidget;
 use runtime::AgentRuntime;
 
@@ -132,12 +132,13 @@ impl App {
                         rusqlite::Error::ToSqlConversionFailure(e.into())
                     },
                 )?;
+                let provider_type: String = row.get(5)?;
                 Ok(ProviderConfig {
                     id: Uuid::from_u128(id as u128),
                     name: row.get(1)?,
                     base_url: row.get(2)?,
                     api_key: row.get(3)?,
-                    provider_type: row.get(5)?,
+                    provider_type: ProviderType::from(provider_type),
                     auth_method: auth,
                 })
             })?
@@ -325,11 +326,28 @@ impl App {
             Event::Resize(_, _) | Event::FocusGained | Event::FocusLost => 0,
             Event::Mouse(mouse) => self.handle_mouse(mouse),
             Event::Paste(s) => {
-                // Only insert paste into the input area when in input mode and agent is idle.
+                // Insert paste into the agent chat input area when in input mode and agent is idle.
                 if matches!(self.state.main_tab_state, MainTabState::AgentTab) {
                     let ts = &mut self.state.agent_tab_state;
                     if ts.input_mode == InputMode::Input && ts.status == state::AgentStatus::Idle {
                         ts.input.insert_str(s);
+                    }
+                }
+                // Insert paste into the focused field of config tab forms (Provider / Model).
+                if matches!(self.state.main_tab_state, MainTabState::ConfigTab) {
+                    let cs = &mut self.state.config_tab_state;
+                    match &mut cs.mode {
+                        ConfigMode::EditProvider(form) => {
+                            let f = form.focus;
+                            form.fields_mut()[f].insert_str(s);
+                        }
+                        ConfigMode::EditModel(form) => {
+                            let f = form.focus;
+                            if f < state::ModelForm::TEXT_FIELD_COUNT {
+                                form.text_fields_mut()[f].insert_str(s);
+                            }
+                        }
+                        ConfigMode::Browsing => {}
                     }
                 }
                 0
