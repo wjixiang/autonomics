@@ -289,6 +289,17 @@ impl<D: BioDriver> BioSource<D> {
 }
 
 impl<D: BioDriver + 'static> FileSource for BioSource<D> {
+    /// Bioinformatics formats (VCF, BAM, FASTA, …) are **not** byte-range
+    /// splittable — record boundaries depend on format-specific framing
+    /// (VCF lines, BGZF virtual offsets, FASTA `>`, BAM alignment blocks).
+    /// The opener reads the entire object and feeds it to the format-specific
+    /// decoder, so DataFusion's byte-range repartitioner would create N
+    /// partitions that each re-read and re-scan the same file, multiplying
+    /// every row N ×.
+    fn supports_repartitioning(&self) -> bool {
+        false
+    }
+
     fn create_file_opener(
         &self,
         object_store: Arc<dyn ObjectStore>,

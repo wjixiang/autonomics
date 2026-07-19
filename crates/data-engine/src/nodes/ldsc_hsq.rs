@@ -681,4 +681,11 @@ mod tests {
         let ld: Vec<f64> = (0..N_SNP).map(|i| 1.0 + 0.1 * i as f64).collect();
         ld.iter().sum::<f64>() / ld.len() as f64
     }
+
+    // #[test]
+    // fn test_factory_spec_schema() {
+    //     let schema = LdscHsqNodeFactory {}.spec_schema();
+    //     dbg!(schema);
+    //     panic!()
+    // }
 }
