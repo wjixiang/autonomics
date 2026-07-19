@@ -409,7 +409,8 @@ mod tests {
     #[tokio::test]
     async fn test_retry_logic() {
         let mut registry = ToolRegistry::new();
-        let tool_def = ToolDefinitionBuilder::new("retry_tool", "Tool that fails then succeeds").build();
+        let tool_def =
+            ToolDefinitionBuilder::new("retry_tool", "Tool that fails then succeeds").build();
 
         let attempts = Arc::new(AtomicUsize::new(0));
         registry
@@ -447,7 +448,8 @@ mod tests {
     #[tokio::test]
     async fn test_parallel_execution() {
         let mut registry = ToolRegistry::new();
-        let tool_def = ToolDefinitionBuilder::new("slow_tool", "Slow tool for testing parallelism").build();
+        let tool_def =
+            ToolDefinitionBuilder::new("slow_tool", "Slow tool for testing parallelism").build();
 
         registry
             .register(

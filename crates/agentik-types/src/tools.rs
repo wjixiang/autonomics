@@ -1,6 +1,6 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use schemars::JsonSchema;
 
 /// A struct that can describe its own tool definition.
 ///
@@ -80,7 +80,7 @@ impl ToolInputSchema {
                     properties: Map::new(),
                     required: Vec::new(),
                     additional: Map::new(),
-                }
+                };
             }
         };
         obj.remove("$schema");
@@ -104,10 +104,7 @@ impl ToolInputSchema {
             schema_type,
             properties,
             required,
-            additional: obj
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
+            additional: obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         }
     }
 }
@@ -346,14 +343,11 @@ pub fn tool_definition_from_schema<T: JsonSchema>(
     let mut settings = schemars::generate::SchemaSettings::default();
     settings.inline_subschemas = true;
     let schema = settings.into_generator().into_root_schema_for::<T>();
-    let mut root = serde_json::to_value(&schema)
-        .expect("schemars-generated schema must serialize to JSON");
+    let mut root =
+        serde_json::to_value(&schema).expect("schemars-generated schema must serialize to JSON");
 
     // Apply per-field overrides on top of the generated properties.
-    if let Some(props) = root
-        .get_mut("properties")
-        .and_then(|v| v.as_object_mut())
-    {
+    if let Some(props) = root.get_mut("properties").and_then(|v| v.as_object_mut()) {
         for ov in overrides {
             let Some(prop) = props.get_mut(ov.name).and_then(|v| v.as_object_mut()) else {
                 continue;
@@ -365,6 +359,23 @@ pub fn tool_definition_from_schema<T: JsonSchema>(
             }
             if let Some(default) = &ov.default {
                 prop.insert("default".to_string(), default.clone());
+            }
+        }
+
+        // Tool-calling LLMs rely on `type` to decide how to serialise each
+        // parameter.  schemars omits `type` for `serde_json::Value` (it can be
+        // anything), which leaves the model without guidance and may produce
+        // string-encoded objects that silently bypass tool-level validation.
+        // For every property that schemars left without a `type`, default to
+        // `"object"` — the correct choice for arbitrary JSON payloads like
+        // node specs.
+        for prop_schema in props.values_mut() {
+            if !prop_schema.is_object() {
+                continue;
+            }
+            let obj = prop_schema.as_object_mut().unwrap();
+            if !obj.contains_key("type") {
+                obj.insert("type".to_string(), Value::String("object".to_string()));
             }
         }
     }
@@ -389,6 +400,7 @@ impl ToolDefinition {
     }
     pub fn validate_input(&self, input: &Value) -> Result<(), ToolValidationError> {
         if let Value::Object(input_obj) = input {
+            // 1. validate input object doesn't miss required fields.
             for required_field in &self.input_schema.required {
                 if !input_obj.contains_key(required_field) {
                     return Err(ToolValidationError::MissingRequiredField {
@@ -398,6 +410,7 @@ impl ToolDefinition {
                 }
             }
 
+            // 2. validate field schema by field name.
             for (field_name, field_value) in input_obj {
                 if let Some(property_schema) = self.input_schema.properties.get(field_name) {
                     self.validate_field_type(field_name, field_value, property_schema)?;
@@ -438,6 +451,20 @@ impl ToolDefinition {
                     tool: self.name.clone(),
                 });
             }
+        } else {
+            return Err(ToolValidationError::MissingSchema {
+                field: field_name.to_string(),
+                tool: self.name.to_string(),
+                schema: schema.clone(),
+                actual: match value {
+                    Value::Null => "null".to_string(),
+                    Value::Bool(_) => "boolean".to_string(),
+                    Value::Number(_) => "number".to_string(),
+                    Value::String(_) => "string".to_string(),
+                    Value::Array(_) => "array".to_string(),
+                    Value::Object(_) => "object".to_string(),
+                },
+            });
         }
 
         Ok(())
@@ -548,6 +575,17 @@ pub enum ToolValidationError {
         expected: String,
         actual: String,
         tool: String,
+    },
+    #[error(
+        "Field '{field}' in tool '{tool}' has no 'type' in its schema (got: {schema}). \
+         Received value of type '{actual}'. \
+         Ensure the field type implements schemars::JsonSchema and produces a schema with a 'type' key."
+    )]
+    MissingSchema {
+        field: String,
+        tool: String,
+        schema: Value,
+        actual: String,
     },
 }
 

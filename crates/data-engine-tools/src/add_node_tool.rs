@@ -64,3 +64,81 @@ impl ToolFunction for AddNodeTool {
         Ok(ToolResult::success("node added to DAG"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use agentik_core::tools::ToolFunction;
+    use agentik_sdk::types::ToolInput;
+
+    /// Normal round-trip: JSON input → `AddNodeInput`.  Exercises the exact
+    /// path the framework uses when an LLM returns a tool_use payload.
+    #[tokio::test]
+    async fn test_spec_parse_roundtrip() {
+        // Simulate an LLM tool_use input payload.
+        let raw_input = serde_json::json!({
+            "id": "my_sql",
+            "kind": "sql",
+            "spec": { "sql_query": "SELECT * FROM port_0" }
+        });
+
+        // Deserialize into AddNodeInput (same path as ToolFunction::execute).
+        let typed: super::AddNodeInput = serde_json::from_value(raw_input.clone()).unwrap();
+
+        assert_eq!(typed.id, "my_sql");
+        assert_eq!(typed.kind, "sql");
+        assert_eq!(typed.spec["sql_query"], "SELECT * FROM port_0");
+
+        // Validate the schema also accepts the input.
+        let def = super::AddNodeInput::definition();
+        def.validate_input(&raw_input).unwrap();
+    }
+
+    /// Spec as a JSON string — simulates what happens when the LLM doesn't
+    /// know `spec` must be an object (the generated schema lacks `type: "object"`)
+    /// and serializes it as a string instead.
+    ///
+    /// serde happily accepts this at the tool boundary (because `Value` accepts
+    /// anything), but the downstream node factory
+    /// `serde_json::from_value::<SqlNodeSpec>` rejects it with "invalid type:
+    /// string, expected struct".
+    #[tokio::test]
+    async fn test_spec_parse_as_string_rejected_by_factory() {
+        let raw_input = serde_json::json!({
+            "id": "broken",
+            "kind": "sql",
+            "spec": "{\"sql_query\": \"SELECT 1\"}"
+        });
+
+        // Tool-level deserialization succeeds — `serde_json::Value` is permissive.
+        let typed: super::AddNodeInput = serde_json::from_value(raw_input).unwrap();
+        assert!(typed.spec.is_string(), "spec should be a string");
+
+        // But the downstream factory would fail: Value::String ≠ expected struct.
+        let factory_err =
+            serde_json::from_value::<data_engine::nodes::sql_node::SqlNodeSpec>(typed.spec);
+        assert!(
+            factory_err.is_err(),
+            "a string-valued spec must be rejected by the node factory: {factory_err:?}"
+        );
+    }
+
+    /// Verify the generated schema for `spec` contains `type: "object"`.
+    /// schemars emits an unconstrained schema for `serde_json::Value` (no type),
+    /// but `tool_definition_from_schema` post-processes every property and
+    /// injects `type: "object"` so the LLM knows to serialise it as a JSON
+    /// object rather than a string.
+    #[test]
+    fn test_spec_schema_has_object_type() {
+        let def = super::AddNodeInput::definition();
+        let spec_schema = def
+            .input_schema
+            .properties
+            .get("spec")
+            .expect("spec property must be present");
+        assert_eq!(
+            spec_schema.get("type").and_then(|v| v.as_str()),
+            Some("object"),
+            "spec schema must have type 'object', got: {spec_schema}"
+        );
+    }
+}

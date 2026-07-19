@@ -508,7 +508,7 @@ impl DAG {
     }
 
     pub fn delete_node(&mut self, id: &str) -> Result<()> {
-        let target_node_idx = self
+        let target_node_idx = *self
             .id_to_idx
             .get(id)
             .ok_or_else(|| DagError::UnknownNode(id.to_string()))?;
@@ -520,12 +520,66 @@ impl DAG {
                 successors.join(", ")
             )));
         }
-        self.graph.remove_node(*target_node_idx);
+        self.graph.remove_node(target_node_idx);
         self.nodes.remove(id);
         self.id_to_idx.remove(id);
+        // petgraph's Graph uses swap-remove: if the removed node wasn't the
+        // last, the trailing node was moved into its slot, changing its
+        // NodeIndex.  Update the id → index mapping for the swapped node.
+        if let Some(swapped_id) = self.graph.node_weight(target_node_idx) {
+            self.id_to_idx.insert(swapped_id.clone(), target_node_idx);
+        }
         self.statuses.remove(id);
         self.outputs.remove(id);
         Ok(())
+    }
+
+    /// Remove the edge from `from`'s `from_port` to `to`'s `to_port`.
+    ///
+    /// Returns [`DagError::UnknownNode`] if either endpoint does not exist, or
+    /// [`DagError::EdgeNotFound`] if no matching edge is present.
+    pub fn delete_edge(
+        &mut self,
+        from: impl Into<NodeId>,
+        to: impl Into<NodeId>,
+        from_port: u8,
+        to_port: u8,
+    ) -> Result<()> {
+        let from = from.into();
+        let to = to.into();
+        self.resolve_nodes(&from, &to)?;
+
+        let &a = self
+            .id_to_idx
+            .get(&from)
+            .ok_or_else(|| DagError::CannotResolveNodeIdx {
+                node_id: from.clone(),
+            })?;
+        let &b = self
+            .id_to_idx
+            .get(&to)
+            .ok_or_else(|| DagError::CannotResolveNodeIdx {
+                node_id: to.clone(),
+            })?;
+
+        let edge_id = self
+            .graph
+            .edges_connecting(a, b)
+            .find(|e| e.weight().from_port == from_port && e.weight().to_port == to_port)
+            .map(|e| e.id());
+
+        match edge_id {
+            Some(id) => {
+                self.graph.remove_edge(id);
+                Ok(())
+            }
+            None => Err(DagError::EdgeNotFound {
+                from,
+                from_port,
+                to,
+                to_port,
+            }),
+        }
     }
 
     /// Replace the payload of an existing node, keeping its id, `NodeIndex`,
@@ -1360,5 +1414,80 @@ mod tests {
             matches!(err, DagError::PortNotFound { ref node, port, .. } if node == "dst" && port == 0),
             "expected PortNotFound for dst:0, got {err:?}"
         );
+    }
+
+    // ── delete_edge tests ──────────────────────────────────────────────
+
+    #[test]
+    fn delete_edge_removes_matching_edge() {
+        let mut dag = get_diamond_dag();
+        // Diamond: a→b(0,0), a→c(0,0), b→d(0,0), c→d(0,0)
+        assert_eq!(dag.incoming_edges_with_ports("d").len(), 2);
+
+        dag.delete_edge("b", "d", 0, 0).unwrap();
+
+        let edges_d = dag.incoming_edges_with_ports("d");
+        assert_eq!(edges_d.len(), 1);
+        assert_eq!(edges_d[0].0, "c");
+        // a→b, a→c still intact
+        assert_eq!(dag.incoming_edges_with_ports("b").len(), 1);
+        assert_eq!(dag.incoming_edges_with_ports("c").len(), 1);
+    }
+
+    #[test]
+    fn delete_edge_wrong_port_rejected() {
+        let mut dag = DAG::default();
+        add(&mut dag, "x");
+        add(&mut dag, "y");
+        dag.add_edge("x", "y", 0, 0).unwrap();
+
+        let err = dag.delete_edge("x", "y", 0, 1).unwrap_err();
+        assert!(
+            matches!(err, DagError::EdgeNotFound { .. }),
+            "expected EdgeNotFound, got {err:?}"
+        );
+        // Original edge still intact
+        assert_eq!(dag.incoming_edges_with_ports("y").len(), 1);
+    }
+
+    #[test]
+    fn delete_edge_nonexistent_edge_rejected() {
+        let mut dag = DAG::default();
+        add(&mut dag, "x");
+        add(&mut dag, "y");
+
+        let err = dag.delete_edge("x", "y", 0, 0).unwrap_err();
+        assert!(
+            matches!(err, DagError::EdgeNotFound { .. }),
+            "expected EdgeNotFound, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn delete_edge_unknown_node_rejected() {
+        let mut dag = DAG::default();
+        add(&mut dag, "x");
+
+        let err = dag.delete_edge("x", "ghost", 0, 0).unwrap_err();
+        assert!(matches!(err, DagError::UnknownNode(_)), "{err:?}");
+    }
+
+    #[test]
+    fn delete_edge_after_delete_node() {
+        let mut dag = DAG::default();
+        for id in ["a", "b", "c"] {
+            add(&mut dag, id);
+        }
+        dag.add_edge("a", "b", 0, 0).unwrap();
+        dag.add_edge("a", "c", 0, 0).unwrap();
+        dag.delete_edge("a", "b", 0, 0).unwrap();
+        assert_eq!(dag.incoming_edges_with_ports("c").len(), 1);
+
+        // Now b has no incoming edges — safe to delete.
+        dag.delete_node("b").unwrap();
+
+        dbg!(dag.incoming_edges_with_ports("c"));
+        // c is still connected to a.
+        assert_eq!(dag.incoming_edges_with_ports("c").len(), 1);
     }
 }

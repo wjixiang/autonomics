@@ -19,7 +19,7 @@ impl std::fmt::Display for RequestId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Usage {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -31,19 +31,6 @@ pub struct Usage {
     pub server_tool_use: Option<ServerToolUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
-}
-
-impl Default for Usage {
-    fn default() -> Self {
-        Self {
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_creation_input_tokens: None,
-            cache_read_input_tokens: None,
-            server_tool_use: None,
-            service_tier: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

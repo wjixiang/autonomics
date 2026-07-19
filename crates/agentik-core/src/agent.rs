@@ -16,7 +16,7 @@ use agentik_sdk::types::messages::{ContentBlock, Message, Role};
 use agentik_sdk::types::tools::ToolUse;
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
-use tracing::{Level, event, span};
+use tracing::{Level, span};
 use uuid::Uuid;
 
 use agentik_sdk::types::AgentEvent;
@@ -695,6 +695,8 @@ impl Agent {
         Ok(response)
     }
 
+    /// Filter to extract ToolUse from LLM response message, Convert ContentBlock::ToolUse into
+    /// ToolUse
     fn extract_toolcalls(&self, message: &Message) -> Vec<ToolUse> {
         message
             .content
@@ -716,8 +718,6 @@ impl Agent {
 
 /// Default token buffer before compaction triggers (matching OpenCode).
 const COMPACTION_BUFFER_TOKENS: u64 = 20_000;
-/// Default number of tokens to preserve in the "recent" tail during compaction.
-const DEFAULT_KEEP_TOKENS: u64 = 8_000;
 
 #[derive(Default)]
 pub struct TokenBudget {

@@ -67,6 +67,15 @@ pub enum DagError {
 
     #[error("node `{node_type}` failed: {msg}")]
     NodeError { node_type: String, msg: String },
+
+    /// No edge exists between the given node–port pair.
+    #[error("no edge from `{from}.{from_port}` to `{to}.{to_port}`")]
+    EdgeNotFound {
+        from: String,
+        from_port: u8,
+        to: String,
+        to_port: u8,
+    },
 }
 
 impl DagError {
@@ -130,6 +139,15 @@ impl DagError {
             Self::NodeError { node_type, msg } => super::runtime::DagErrorReport {
                 kind: "node_error".into(),
                 message: format!("node `{node_type}` failed: {msg}"),
+            },
+            Self::EdgeNotFound {
+                from,
+                from_port,
+                to,
+                to_port,
+            } => super::runtime::DagErrorReport {
+                kind: "edge_not_found".into(),
+                message: format!("no edge from `{from}.{from_port}` to `{to}.{to_port}`"),
             },
         }
     }

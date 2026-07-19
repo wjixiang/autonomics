@@ -161,8 +161,18 @@ impl DataEngine {
         Ok(self)
     }
 
-    pub fn delete_edge(&mut self) -> Result<()> {
-        todo!()
+    /// Remove the edge from `from`'s `from_port` to `to`'s `to_port`.
+    ///
+    /// Errors if either node does not exist or no matching edge is found.
+    pub fn delete_edge(
+        &mut self,
+        from: impl Into<String>,
+        to: impl Into<String>,
+        from_port: u8,
+        to_port: u8,
+    ) -> Result<()> {
+        self.dag.delete_edge(from, to, from_port, to_port)?;
+        Ok(())
     }
 
     // /// Add an edge connecting `from`'s `from_port` output port to `to`'s
