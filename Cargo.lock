@@ -1667,6 +1667,7 @@ dependencies = [
  "datafusion",
  "datalake",
  "derive_more",
+ "faer",
  "fs",
  "futures",
  "iceberg",
