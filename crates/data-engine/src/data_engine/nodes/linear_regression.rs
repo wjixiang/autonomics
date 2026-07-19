@@ -220,8 +220,6 @@ impl LinearRegressionNode {
     }
 }
 
-const LINEAR_REGRESSION_NODE_KIND: &str = "linear_regression";
-
 #[derive(Debug, JsonSchema, Deserialize)]
 pub struct LinearRegressionNodeSpec {
     pub x_columns: Vec<String>,
@@ -238,7 +236,7 @@ pub struct LinearRegressionNodeFactory {}
 
 impl NodeFactory for LinearRegressionNodeFactory {
     fn kind(&self) -> &'static str {
-        LINEAR_REGRESSION_NODE_KIND
+        <LinearRegressionNode as DagNode>::kind()
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -270,7 +268,10 @@ impl DagNode for LinearRegressionNode {
         Box::new((*self).clone())
     }
 
-    fn node_type(&self) -> &str {
+    fn kind() -> &'static str
+    where
+        Self: Sized,
+    {
         "linear_regression"
     }
 

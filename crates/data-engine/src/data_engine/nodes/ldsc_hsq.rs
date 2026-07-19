@@ -195,13 +195,11 @@ impl LdscHsqConfig {
     }
 }
 
-const LDSC_HSQ_NODE_KIND: &str = "ldsc";
-
 pub struct LdscHsqNodeFactory {}
 
 impl NodeFactory for LdscHsqNodeFactory {
     fn kind(&self) -> &'static str {
-        LDSC_HSQ_NODE_KIND
+        <LdscHsqNode as DagNode>::kind()
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -268,7 +266,10 @@ impl DagNode for LdscHsqNode {
         Box::new((*self).clone())
     }
 
-    fn node_type(&self) -> &str {
+    fn kind() -> &'static str
+    where
+        Self: Sized,
+    {
         "ldsc"
     }
 
