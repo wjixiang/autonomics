@@ -249,8 +249,6 @@ impl SinkNode {
     }
 }
 
-const SINK_NODE_KIND: &str = "sink";
-
 #[derive(Debug, JsonSchema, Deserialize)]
 #[serde(tag = "type")]
 pub enum SinkNodeSpec {
@@ -273,7 +271,7 @@ pub struct SinkNodeFactory {}
 
 impl NodeFactory for SinkNodeFactory {
     fn kind(&self) -> &'static str {
-        SINK_NODE_KIND
+        <SinkNode as DagNode>::kind()
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -317,7 +315,10 @@ impl DagNode for SinkNode {
         Box::new(cp_node)
     }
 
-    fn node_type(&self) -> &str {
+    fn kind() -> &'static str
+    where
+        Self: Sized,
+    {
         "sink"
     }
 

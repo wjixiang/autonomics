@@ -7,6 +7,7 @@ description = "Domain-agnostic agent runtime. Plug in any AgentContext to specia
 license.workspace = true
 
 [dependencies]
+schemars.workspace = true
 tokio = { version = "1", features = [
   "rt",
   "rt-multi-thread",

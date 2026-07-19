@@ -47,13 +47,11 @@ pub struct SqlNodeSpec {
     sql_query: String,
 }
 
-const SQL_NODE_KIND: &str = "sql";
-
 pub struct SqlNodeFactory {}
 
 impl NodeFactory for SqlNodeFactory {
     fn kind(&self) -> &'static str {
-        SQL_NODE_KIND
+        <SqlNode as DagNode>::kind()
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -106,7 +104,10 @@ impl DagNode for SqlNode {
         Box::new((*self).clone())
     }
 
-    fn node_type(&self) -> &str {
+    fn kind() -> &'static str
+    where
+        Self: Sized,
+    {
         "sql"
     }
 

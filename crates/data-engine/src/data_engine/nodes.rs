@@ -5,6 +5,7 @@
 //! [`source`], [`sql_node`], and [`sink`].
 
 pub mod ldsc_hsq;
+pub mod ldsc_rg;
 pub mod linear_regression;
 pub mod meta;
 pub mod mr;
@@ -14,6 +15,7 @@ pub mod source;
 pub mod sql_node;
 
 pub use ldsc_hsq::{LdscHsqConfig, LdscHsqNode, LdscHsqNodeFactory};
+pub use ldsc_rg::{LdscRgConfig, LdscRgNode, LdscRgNodeFactory};
 pub use linear_regression::{LinearRegressionNode, LinearRegressionNodeFactory, LinearRegressionNodeSpec};
 pub use meta::{DEFAULT_PORT, DagNode, NodeId, NodeInput, NodeMeta, Port};
 pub use mr::{MrNode, MrNodeFactory, MrNodeSpec, MrParameters};

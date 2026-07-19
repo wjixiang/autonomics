@@ -1,0 +1,983 @@
+//! LD Score Regression bivariate node — genetic correlation (rg).
+//!
+//! Takes **two** upstream GWAS summary-statistics `DataFrame`s (trait 1 and
+//! trait 2, each with Z-scores, sample sizes, and rsid), queries the Iceberg
+//! data lake for the LD score panel under `iceberg.ld_score.*`, inner-joins all
+//! three on rsid so only SNPs shared by *both* traits and the panel survive,
+//! and runs the bivariate LD Score Regression via [`ldsc::regress::RG::new`].
+//! Outputs a single-row summary `DataFrame` with rg, its SE/z/p, the cross-trait
+//! gencov, and each trait's h².
+//!
+//! This mirrors [`super::ldsc_hsq::LdscHsqNode`]; the only structural difference
+//! is the second input port and the 3-way join producing aligned `Z1/Z2/N1/N2`
+//! columns. Unlike h², rg has no DataFrame entry point in the `ldsc` crate, so
+//! the node collects the joined columns into plain vectors and calls
+//! [`ldsc::regress::RG::new`] directly.
+
+use std::sync::Arc;
+
+use arrow_array::{
+    Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array, RecordBatch,
+    UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+};
+use arrow_schema::{DataType, Field, Schema, SchemaRef};
+use async_trait::async_trait;
+use datalake::Datalake;
+use faer::Mat;
+use schemars::{schema_for, JsonSchema};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use super::meta::{DagNode, NodeInput, NodeMeta};
+use crate::{
+    data_engine::dag::{DagError, graph::PortOutputs},
+    node_registry::registry::{NodeCtx, NodeFactory},
+};
+
+// =====================================================================
+// Error type
+// =====================================================================
+
+#[derive(Debug, Error)]
+pub enum LdscRgNodeError {
+    #[error("LDSC computation failed: {0}")]
+    Ldsc(#[from] ldsc::LdscError),
+    #[error("failed to build result batch: {0}")]
+    Arrow(#[from] arrow_schema::ArrowError),
+    #[error("failed to read result batch: {0}")]
+    ReadBatch(#[from] datafusion::error::DataFusionError),
+    #[error("datalake error: {0}")]
+    Datalake(String),
+}
+
+impl From<LdscRgNodeError> for DagError {
+    fn from(e: LdscRgNodeError) -> Self {
+        DagError::NodeError {
+            node_type: "ldsc_rg".to_string(),
+            msg: e.to_string(),
+        }
+    }
+}
+
+impl From<datalake::error::Error> for LdscRgNodeError {
+    fn from(e: datalake::error::Error) -> Self {
+        LdscRgNodeError::Datalake(e.to_string())
+    }
+}
+
+// =====================================================================
+// Schemas
+// =====================================================================
+
+/// The fixed output schema of the LDSC rg summary `DataFrame`.
+///
+/// Columns: `rg`, `rg_se`, `rg_z`, `rg_p`, `gencov`, `gencov_se`, `h2_1`,
+/// `h2_1_se`, `h2_2`, `h2_2_se`, `n_snp` (all Float64).
+///
+/// `rg`/`rg_se`/`rg_z`/`rg_p` are `NaN` when either trait's h² ≤ 0 (rg is
+/// undefined); the row is still emitted.
+///
+/// This is the single source of truth shared by the node's declared output port
+/// (so the DAG can validate downstream edges) and [`build_result_batch`].
+fn output_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new("rg", DataType::Float64, false),
+        Field::new("rg_se", DataType::Float64, false),
+        Field::new("rg_z", DataType::Float64, false),
+        Field::new("rg_p", DataType::Float64, false),
+        Field::new("gencov", DataType::Float64, false),
+        Field::new("gencov_se", DataType::Float64, false),
+        Field::new("h2_1", DataType::Float64, false),
+        Field::new("h2_1_se", DataType::Float64, false),
+        Field::new("h2_2", DataType::Float64, false),
+        Field::new("h2_2_se", DataType::Float64, false),
+        Field::new("n_snp", DataType::Float64, false),
+    ]))
+}
+
+/// The fixed input column names each upstream GWAS sumstats `DataFrame` must
+/// expose. Both input ports share this schema; it is enforced by
+/// [`input_schema`] so the DAG rejects mis-shaped edges at `add_edge` time.
+const INPUT_Z_COL: &str = "Z";
+const INPUT_N_COL: &str = "N";
+const INPUT_RSID_COL: &str = "rsid";
+
+/// Input port schema (shared by both ports): per-SNP Z-score (`Z`, Float64),
+/// sample size (`N`, Float64), rsid join key (`rsid`, Utf8). See
+/// [`super::ldsc_hsq`] for the rationale behind pinning these names.
+fn input_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        Field::new(INPUT_Z_COL, DataType::Float64, true),
+        Field::new(INPUT_N_COL, DataType::Float64, true),
+        Field::new(INPUT_RSID_COL, DataType::Utf8, false),
+    ]))
+}
+
+/// Build a single-row rg summary `RecordBatch` from the [`ldsc::regress::RG`]
+/// result.
+fn build_result_batch(rg: &ldsc::regress::RG, n_snp: usize) -> Result<RecordBatch, LdscRgNodeError> {
+    let schema = output_schema();
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(Float64Array::from(vec![rg.rg_ratio])),
+            Arc::new(Float64Array::from(vec![rg.rg_se])),
+            Arc::new(Float64Array::from(vec![rg.z])),
+            Arc::new(Float64Array::from(vec![rg.p])),
+            Arc::new(Float64Array::from(vec![rg.gencov.reg.tot])),
+            Arc::new(Float64Array::from(vec![rg.gencov.reg.tot_se])),
+            Arc::new(Float64Array::from(vec![rg.hsq1.reg.tot])),
+            Arc::new(Float64Array::from(vec![rg.hsq1.reg.tot_se])),
+            Arc::new(Float64Array::from(vec![rg.hsq2.reg.tot])),
+            Arc::new(Float64Array::from(vec![rg.hsq2.reg.tot_se])),
+            Arc::new(Float64Array::from(vec![n_snp as f64])),
+        ],
+    )?;
+    Ok(batch)
+}
+
+// =====================================================================
+// Config
+// =====================================================================
+
+/// Configuration for the LDSC rg estimation algorithm.
+///
+/// Bundles the parameters that govern the bivariate LD Score Regression
+/// itself. Datalake and sumstats column names are orthogonal and live on the
+/// node directly.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct LdscRgConfig {
+    /// Per-annotation M: the number of SNPs in each LD score annotation
+    /// category, in the same order as the LD score panel column. For baseline
+    /// LDSC (single annotation, the current node wiring) pass
+    /// `vec![total_snps]` matching the panel's SNP count.
+    pub m: Vec<f64>,
+    /// Number of block-jackknife blocks used by [`ldsc::regress::RG`] to
+    /// compute standard errors and intercepts. A typical value is 200.
+    pub n_blocks: usize,
+    /// Optional fixed intercept for trait 1's h² regression. `None` lets LDSC
+    /// estimate it freely (the common case).
+    pub intercept_hsq1: Option<f64>,
+    /// Optional fixed intercept for trait 2's h² regression. `None` lets LDSC
+    /// estimate it freely (the common case).
+    pub intercept_hsq2: Option<f64>,
+    /// Optional fixed intercept for the cross-trait gencov regression. `None`
+    /// lets LDSC estimate it freely (the common case).
+    pub intercept_gencov: Option<f64>,
+    /// Two-step estimator cutoff. `None` falls back to the LDSC default of 30
+    /// (matching the h² node), applied only when no intercept is constrained.
+    pub two_step: Option<f64>,
+}
+
+impl LdscRgConfig {
+    /// Construct an [`LdscRgConfig`] with free intercepts and the default
+    /// two-step cutoff.
+    pub fn new(m: Vec<f64>, n_blocks: usize) -> Self {
+        Self {
+            m,
+            n_blocks,
+            intercept_hsq1: None,
+            intercept_hsq2: None,
+            intercept_gencov: None,
+            two_step: None,
+        }
+    }
+}
+
+impl Default for LdscRgConfig {
+    fn default() -> Self {
+        Self {
+            m: Vec::new(),
+            n_blocks: 200,
+            intercept_hsq1: None,
+            intercept_hsq2: None,
+            intercept_gencov: None,
+            two_step: None,
+        }
+    }
+}
+
+// =====================================================================
+// Node
+// =====================================================================
+
+const LDSC_RG_NODE_KIND: &str = "ldsc_rg";
+
+/// A transform node that runs bivariate LD Score Regression for genetic
+/// correlation (rg) between two GWAS traits.
+///
+/// Accepts two upstream `DataFrame`s (trait 1 on port 0, trait 2 on port 1),
+/// queries the Iceberg data lake for the LD score panel, inner-joins all three
+/// on rsid (so only SNPs shared by both traits and the panel are used), and
+/// runs the bivariate regression.
+///
+/// Each upstream `DataFrame` must have columns named exactly `Z` (Float64),
+/// `N` (Float64), and `rsid` (Utf8) — enforced by the input port schemas.
+#[derive(Clone)]
+pub struct LdscRgNode {
+    /// DAG node metadata (id, ports): two typed inputs, one typed output.
+    meta: NodeMeta,
+    /// Iceberg data lake handle, used to fetch the LD score panel
+    /// (`iceberg.ld_score.*`) for the 3-way join.
+    datalake: Arc<Datalake>,
+    /// Algorithm configuration; see [`LdscRgConfig`].
+    ldsc_rg: LdscRgConfig,
+}
+
+pub struct LdscRgNodeFactory {}
+
+impl NodeFactory for LdscRgNodeFactory {
+    fn kind(&self) -> &'static str {
+        LDSC_RG_NODE_KIND
+    }
+
+    fn spec_schema(&self) -> schemars::Schema {
+        schema_for!(LdscRgConfig)
+    }
+
+    fn build(
+        &self,
+        spec: serde_json::Value,
+        node_ctx: NodeCtx,
+    ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
+        let config: LdscRgConfig = serde_json::from_value(spec)?;
+        let node = LdscRgNode::new(node_ctx.datalake, config);
+        Ok(Box::new(node))
+    }
+}
+
+impl LdscRgNode {
+    /// Construct an [`LdscRgNode`].
+    ///
+    /// * `datalake` — Iceberg data lake handle; the node queries the LD score
+    ///   panel from `iceberg.ld_score.*` through it.
+    /// * `ldsc_rg` — algorithm configuration; see [`LdscRgConfig`].
+    ///
+    /// Both upstream `DataFrame`s must expose columns `Z` (Float64), `N`
+    /// (Float64), and `rsid` (Utf8) — enforced by the input port schemas.
+    pub fn new(datalake: Arc<Datalake>, ldsc_rg: LdscRgConfig) -> Self {
+        // Fixed, typed ports: two inputs (trait 1, trait 2) carrying GWAS
+        // sumstats, and one output with the fixed rg summary schema. Declaring
+        // the schemas lets the DAG validate edge compatibility at
+        // `add_edge`/`validate` time.
+        let meta = NodeMeta::new()
+            .add_input_port(Some(input_schema()))
+            .add_input_port(Some(input_schema()))
+            .add_output_port(Some(output_schema()));
+        Self {
+            meta,
+            datalake,
+            ldsc_rg,
+        }
+    }
+}
+
+/// The fixed column names produced by the internal 3-way SQL join. The SQL
+/// aliases output columns to these names so the downstream vector extraction is
+/// independent of the user-facing column names.
+const LD_Z1_COL: &str = "Z1";
+const LD_Z2_COL: &str = "Z2";
+const LD_N1_COL: &str = "N1";
+const LD_N2_COL: &str = "N2";
+const LD_REF_COL: &str = "L2_0";
+const LD_WLD_COL: &str = "WLD";
+
+#[async_trait]
+impl DagNode for LdscRgNode {
+    fn meta(&self) -> &NodeMeta {
+        &self.meta
+    }
+
+    fn clone_box(&self) -> Box<dyn DagNode> {
+        Box::new((*self).clone())
+    }
+
+    fn node_type(&self) -> &str {
+        "ldsc_rg"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
+        // Two inputs: trait 1 on port 0, trait 2 on port 1.
+        let input1 = inputs
+            .iter()
+            .find(|i| i.port == 0)
+            .ok_or(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+                "missing trait-1 input DataFrame (port 0)".into(),
+            )))?;
+        let input2 = inputs
+            .iter()
+            .find(|i| i.port == 1)
+            .ok_or(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+                "missing trait-2 input DataFrame (port 1)".into(),
+            )))?;
+
+        // 1. Get a DataFusion context with the Iceberg catalog registered, then
+        //    delegate to the catalog-independent pipeline. Splitting here lets
+        //    the pipeline be exercised end-to-end against an in-memory catalog
+        //    (see `tests::run_with_test_catalog`).
+        let ctx = self.datalake.get_ctx().await.map_err(LdscRgNodeError::from)?;
+
+        // TODO: Auto select LD score panel table by population
+        let (rg, n_snp) =
+            Self::run_with_ctx(&ctx, &input1.data, &input2.data, "ukbb_eur", &self.ldsc_rg).await?;
+
+        // 2. Build a single-row summary RecordBatch and return.
+        let batch = build_result_batch(&rg, n_snp)?;
+        let df = ctx.read_batch(batch).map_err(LdscRgNodeError::ReadBatch)?;
+
+        let mut res: PortOutputs = PortOutputs::new();
+        res.insert(0, df);
+        Ok(res)
+    }
+}
+
+impl LdscRgNode {
+    /// The catalog-independent rg pipeline.
+    ///
+    /// Given a [`SessionContext`] in which `iceberg.ld_score.{ld_table}` resolves
+    /// to an LD-score panel, this registers the two upstream sumstats
+    /// `DataFrame`s as `sumstats1` / `sumstats2`, runs the 3-way inner join on
+    /// rsid (keeping only SNPs shared by both traits and the panel), collects
+    /// the aligned vectors, and fits [`ldsc::regress::RG`].
+    ///
+    /// Returns the fitted [`ldsc::regress::RG`] and the SNP count. Extracted
+    /// from [`DagNode::execute`](LdscRgNode::execute) so the full pipeline can
+    /// be tested against an in-memory catalog without a live Iceberg REST
+    /// server.
+    async fn run_with_ctx(
+        ctx: &datafusion::prelude::SessionContext,
+        input1: &datafusion::prelude::DataFrame,
+        input2: &datafusion::prelude::DataFrame,
+        ld_table: &str,
+        cfg: &LdscRgConfig,
+    ) -> Result<(ldsc::regress::RG, usize), DagError> {
+        // 1. Register both upstream sumstats DataFrames as temporary tables.
+        ctx.register_table("sumstats1", input1.clone().into_view())
+            .map_err(LdscRgNodeError::ReadBatch)?;
+        ctx.register_table("sumstats2", input2.clone().into_view())
+            .map_err(LdscRgNodeError::ReadBatch)?;
+
+        // 2. Build SQL: 3-way inner join — both traits share an rsid that is
+        //    also present in the LD score panel. ld_score is used for both
+        //    ref_ld and w_ld (single-annotation baseline). Ordered by genomic
+        //    position so the block jackknife groups consecutive SNPs.
+        let sql = format!(
+            r#"SELECT s1."{z}" AS "{Z1}", s2."{z}" AS "{Z2}",
+                      s1."{n}" AS "{N1}", s2."{n}" AS "{N2}",
+                      l.ld_score AS "{REF}", l.ld_score AS "{WLD}"
+               FROM sumstats1 AS s1
+               INNER JOIN sumstats2 AS s2 ON s1."{rsid}" = s2."{rsid}"
+               INNER JOIN iceberg.ld_score.{table} AS l ON s1."{rsid}" = l.rsid
+               ORDER BY l.locus.position"#,
+            z = INPUT_Z_COL,
+            n = INPUT_N_COL,
+            rsid = INPUT_RSID_COL,
+            table = ld_table,
+            Z1 = LD_Z1_COL,
+            Z2 = LD_Z2_COL,
+            N1 = LD_N1_COL,
+            N2 = LD_N2_COL,
+            REF = LD_REF_COL,
+            WLD = LD_WLD_COL,
+        );
+
+        // 3. Execute the join and collect the aligned rows.
+        let joined_df = ctx.sql(&sql).await.map_err(LdscRgNodeError::ReadBatch)?;
+        let batches = joined_df
+            .clone()
+            .collect()
+            .await
+            .map_err(LdscRgNodeError::ReadBatch)?;
+        if batches.is_empty() {
+            return Err(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+                "ldsc_rg: joined DataFrame is empty (no SNPs shared by both traits and the LD panel)".into(),
+            ))
+            .into());
+        }
+
+        // 4. Extract the aligned vectors.
+        let z1 = extract_f64(&batches, LD_Z1_COL)?;
+        let z2 = extract_f64(&batches, LD_Z2_COL)?;
+        let n1 = extract_f64(&batches, LD_N1_COL)?;
+        let n2 = extract_f64(&batches, LD_N2_COL)?;
+        let ref_ld = extract_f64(&batches, LD_REF_COL)?;
+        let w_ld = extract_f64(&batches, LD_WLD_COL)?;
+        let n_snp = z1.len();
+        if z2.len() != n_snp
+            || n1.len() != n_snp
+            || n2.len() != n_snp
+            || ref_ld.len() != n_snp
+            || w_ld.len() != n_snp
+        {
+            return Err(LdscRgNodeError::Ldsc(ldsc::LdscError::DimensionMismatch(format!(
+                "ldsc_rg: aligned column length mismatch (z1={}, z2={}, n1={}, n2={}, ref_ld={}, w_ld={})",
+                n_snp,
+                z2.len(),
+                n1.len(),
+                n2.len(),
+                ref_ld.len(),
+                w_ld.len()
+            )))
+            .into());
+        }
+
+        // 5. Build the LD score design matrix (n_snp × 1) and weight vector.
+        let x = Mat::from_fn(n_snp, 1, |i, _| ref_ld[i]);
+
+        // 6. Resolve config, applying the LDSC two-step default of 30 when no
+        //    intercept is constrained (matching the h² node).
+        let LdscRgConfig {
+            m,
+            n_blocks,
+            intercept_hsq1,
+            intercept_hsq2,
+            intercept_gencov,
+            two_step,
+        } = cfg;
+        let two_step = two_step.or(if intercept_hsq1.is_none()
+            && intercept_hsq2.is_none()
+            && intercept_gencov.is_none()
+        {
+            Some(30.0)
+        } else {
+            None
+        });
+
+        // 7. Run the bivariate regression.
+        let rg = ldsc::regress::RG::new(
+            &z1,
+            &z2,
+            &x,
+            &w_ld,
+            &n1,
+            &n2,
+            m,
+            *intercept_hsq1,
+            *intercept_hsq2,
+            *intercept_gencov,
+            *n_blocks,
+            two_step,
+        )
+        .map_err(LdscRgNodeError::from)?;
+
+        Ok((rg, n_snp))
+    }
+}
+
+// =====================================================================
+// Column extraction
+// =====================================================================
+
+/// Extract a named numeric column from a sequence of record batches into a
+/// flat `Vec<f64>`, casting nulls to `NaN`. Mirrors the downcast ladder in
+/// `ldsc::ingest` (kept private to the `ldsc` crate), so the data-engine node
+/// is self-contained.
+fn extract_f64(batches: &[RecordBatch], name: &str) -> Result<Vec<f64>, LdscRgNodeError> {
+    let schema = batches
+        .first()
+        .ok_or(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+            "extract_f64: no batches".into(),
+        )))?
+        .schema();
+    let idx = schema
+        .index_of(name)
+        .map_err(|_| {
+            LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
+                "missing column '{name}'"
+            )))
+        })?;
+    let dtype = schema.field(idx).data_type().clone();
+    if !matches!(
+        dtype,
+        DataType::Float32
+            | DataType::Float64
+            | DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::UInt8
+            | DataType::UInt16
+            | DataType::UInt32
+            | DataType::UInt64
+    ) {
+        return Err(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
+            "column '{name}' is not numeric (got {dtype})"
+        ))));
+    }
+
+    let mut out = Vec::new();
+    for batch in batches {
+        push_numeric(batch.column(idx), &mut out);
+    }
+    Ok(out)
+}
+
+fn push_numeric(col: &dyn Array, out: &mut Vec<f64>) {
+    macro_rules! cast {
+        ($arr:expr, $t:ty) => {
+            if let Some(a) = $arr.as_any().downcast_ref::<$t>() {
+                for v in a.iter() {
+                    out.push(match v {
+                        Some(val) => val as f64,
+                        None => f64::NAN,
+                    });
+                }
+                return;
+            }
+        };
+    }
+    cast!(col, Int8Array);
+    cast!(col, Int16Array);
+    cast!(col, Int32Array);
+    cast!(col, Int64Array);
+    cast!(col, UInt8Array);
+    cast!(col, UInt16Array);
+    cast!(col, UInt32Array);
+    cast!(col, UInt64Array);
+    cast!(col, Float32Array);
+    cast!(col, Float64Array);
+}
+
+// =====================================================================
+// Tests
+// =====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::{Array, Int64Array, StringArray, StructArray};
+    use datafusion::catalog::{
+        CatalogProvider, MemTable, MemoryCatalogProvider, MemorySchemaProvider, SchemaProvider,
+    };
+    use datafusion::prelude::SessionContext;
+
+    // -----------------------------------------------------------------
+    // Structural / unit checks (no catalog, no execution)
+    // -----------------------------------------------------------------
+
+    /// Construct the node and assert its kind and two-input/one-output port
+    /// topology.
+    #[tokio::test]
+    async fn test_ldsc_rg_node_structure() {
+        let node = LdscRgNode::new(Arc::new(Datalake::new()), LdscRgConfig::new(vec![20.0], 5));
+        assert_eq!(node.node_type(), "ldsc_rg");
+        assert_eq!(node.meta().input_ports().len(), 2);
+        assert_eq!(node.meta().output_ports().len(), 1);
+    }
+
+    /// The declared output schema has exactly the rg summary columns.
+    #[test]
+    fn test_output_schema_matches_batch() {
+        let schema = output_schema();
+        assert_eq!(schema.fields().len(), 11);
+        for name in [
+            "rg", "rg_se", "rg_z", "rg_p", "gencov", "gencov_se", "h2_1", "h2_1_se", "h2_2",
+            "h2_2_se", "n_snp",
+        ] {
+            assert!(schema.field_with_name(name).is_ok(), "missing {name}");
+        }
+    }
+
+    /// `extract_f64` casts a Float64 column and turns nulls into NaN.
+    #[test]
+    fn test_extract_f64_casts_and_nulls() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("z", DataType::Float64, true),
+            Field::new("rsid", DataType::Utf8, false),
+        ]));
+        let z = Float64Array::from(vec![Some(1.5), None, Some(-2.0)]);
+        let rsid = StringArray::from(vec!["a", "b", "c"]);
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![Arc::new(z) as _, Arc::new(rsid) as _],
+        )
+        .unwrap();
+        let v = extract_f64(&[batch], "z").unwrap();
+        assert_eq!(v.len(), 3);
+        assert!((v[0] - 1.5).abs() < 1e-12);
+        assert!(v[1].is_nan());
+        assert!((v[2] + 2.0).abs() < 1e-12);
+    }
+
+    // -----------------------------------------------------------------
+    // In-memory catalog harness
+    // -----------------------------------------------------------------
+    //
+    // The production node resolves the LD panel through `iceberg.ld_score.*`
+    // via a live REST catalog. To exercise the *full* pipeline
+    // (SQL 3-way join → vector extraction → RG fit → output batch)
+    // deterministically and without any external service, we register an
+    // in-memory `MemoryCatalogProvider` under the same `iceberg` name, with a
+    // `ld_score.ukbb_eur` table backed by a `MemTable`. The node's SQL then
+    // resolves identically to production.
+
+    /// The LD-panel row count used by the synthetic fixtures.
+    const N_SNP: usize = 200;
+
+    /// Build a synthetic LD-score panel `RecordBatch` with columns
+    /// `rsid` (Utf8), `ld_score` (Float64), `locus` (Struct<position: Int64>),
+    /// matching the schema the node's SQL reads (`l.rsid`, `l.ld_score`,
+    /// `l.locus.position`). `ld_score` strictly increases so the LDSC slope is
+    /// well identified; `position` increases in lock-step so the SQL
+    /// `ORDER BY l.locus.position` preserves the LD order (keeping the block
+    /// jackknife deterministic).
+    fn ld_panel_batch(n: usize) -> RecordBatch {
+        let rsids: Vec<String> = (0..n).map(|i| format!("rs{}", 1_000_000 + i)).collect();
+        let ld: Vec<f64> = (0..n).map(|i| 1.0 + 0.1 * i as f64).collect();
+        let pos: Vec<i64> = (0..n).map(|i| i as i64).collect();
+
+        let position_field = Arc::new(Field::new("position", DataType::Int64, false));
+        let locus = StructArray::new(
+            vec![position_field].into(),
+            vec![Arc::new(Int64Array::from(pos)) as Arc<dyn Array>],
+            None,
+        );
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("rsid", DataType::Utf8, false),
+            Field::new("ld_score", DataType::Float64, false),
+            Field::new(
+                "locus",
+                DataType::Struct(
+                    vec![Arc::new(Field::new("position", DataType::Int64, false))].into(),
+                ),
+                false,
+            ),
+        ]));
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(rsids)),
+                Arc::new(Float64Array::from(ld)),
+                Arc::new(locus) as Arc<dyn Array>,
+            ],
+        )
+        .unwrap()
+    }
+
+    /// Build a synthetic GWAS sumstats `RecordBatch` (`Z`, `N`, `rsid`) for one
+    /// trait, given a per-SNP Z vector.
+    fn sumstats_batch(z: &[f64], rsids: &[String], n_samp: f64) -> RecordBatch {
+        let n: Vec<f64> = vec![n_samp; z.len()];
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("Z", DataType::Float64, false),
+            Field::new("N", DataType::Float64, false),
+            Field::new("rsid", DataType::Utf8, false),
+        ]));
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Float64Array::from(z.to_vec())),
+                Arc::new(Float64Array::from(n)),
+                Arc::new(StringArray::from(rsids.to_vec())),
+            ],
+        )
+        .unwrap()
+    }
+
+    /// Build a `SessionContext` with an in-memory `iceberg.ld_score.ukbb_eur`
+    /// table holding `ld_panel_batch(n)`.
+    fn ctx_with_ld_panel(n: usize) -> SessionContext {
+        let ctx = SessionContext::new();
+        let batch = ld_panel_batch(n);
+
+        let schema = batch.schema();
+        let table = MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+        let ld_schema = MemorySchemaProvider::new();
+        ld_schema
+            .register_table("ukbb_eur".to_string(), Arc::new(table))
+            .unwrap();
+        let catalog = MemoryCatalogProvider::new();
+        catalog
+            .register_schema("ld_score", Arc::new(ld_schema))
+            .unwrap();
+        ctx.register_catalog("iceberg", Arc::new(catalog));
+        ctx
+    }
+
+    /// Constrained-intercept config mirroring the proven `regress::RG` unit
+    /// tests: `intercept_hsq1 = intercept_hsq2 = 1`, `intercept_gencov = 0`,
+    /// no two-step. Under the analytic ±Z construction this yields rg = ∓1.
+    fn constrained_cfg() -> LdscRgConfig {
+        LdscRgConfig {
+            m: vec![N_SNP as f64],
+            n_blocks: 20,
+            intercept_hsq1: Some(1.0),
+            intercept_hsq2: Some(1.0),
+            intercept_gencov: Some(0.0),
+            two_step: None,
+        }
+    }
+
+    /// Run the full pipeline against the in-memory catalog for a pair of Z
+    /// vectors over the shared rsid set.
+    async fn run_pipeline(
+        z1: &[f64],
+        z2: &[f64],
+        cfg: &LdscRgConfig,
+    ) -> (ldsc::regress::RG, usize) {
+        let rsids: Vec<String> = (0..z1.len())
+            .map(|i| format!("rs{}", 1_000_000 + i))
+            .collect();
+        let ctx = ctx_with_ld_panel(N_SNP);
+        let df1 = ctx
+            .read_batch(sumstats_batch(z1, &rsids, 1000.0))
+            .unwrap();
+        let df2 = ctx
+            .read_batch(sumstats_batch(z2, &rsids, 1000.0))
+            .unwrap();
+        LdscRgNode::run_with_ctx(&ctx, &df1, &df2, "ukbb_eur", cfg)
+            .await
+            .expect("rg pipeline should succeed")
+    }
+
+    // -----------------------------------------------------------------
+    // Known-answer end-to-end tests
+    // -----------------------------------------------------------------
+
+    /// When the two traits' Z-scores are perfect negatives (`z2 = -z1`) over a
+    /// shared, well-conditioned LD panel, the cross-trait covariance is the
+    /// negative of each trait's χ² signal, so the recovered rg is near −1.
+    ///
+    /// Drives the *full* node path (SQL 3-way join → vector extraction →
+    /// `RG::new`), not just `RG` directly.
+    ///
+    /// Note on tolerances: `|rg|` lands at ≈0.97 rather than exactly 1 because
+    /// the `Hsq` and `Gencov` IRWLS weight functions differ (null intercepts
+    /// 1 vs 0, distinct variance models), so the gencov slope is a few percent
+    /// smaller in magnitude than the h² slope even on identical designs. We
+    /// therefore assert `|rg|≈1` loosely (0.1) but check the *exact*
+    /// relationships tightly: since `z2² == z1²` the two h² fits are
+    /// bit-identical (`h1 == h2`), and `rg == gencov/h1` must hold to
+    /// machine precision.
+    #[tokio::test]
+    async fn e2e_perfect_anticorrelation_is_near_minus_one() {
+        let ld: Vec<f64> = (0..N_SNP).map(|i| 1.0 + 0.1 * i as f64).collect();
+        let z1: Vec<f64> = ld.iter().map(|l| l * 10.0).collect();
+        let z2: Vec<f64> = z1.iter().map(|z| -z).collect();
+
+        let (rg, n_snp) = run_pipeline(&z1, &z2, &constrained_cfg()).await;
+
+        assert_eq!(n_snp, N_SNP, "all shared SNPs must survive the join");
+        assert!(
+            rg.rg_ratio.is_finite(),
+            "rg must be finite, got {}",
+            rg.rg_ratio
+        );
+
+        // Exact symmetry: z2² == z1² ⇒ identical Hsq inputs ⇒ h1 == h2.
+        assert!(
+            rg.hsq1.reg.tot > 0.0 && rg.hsq2.reg.tot > 0.0,
+            "both h² must be > 0 (got {}, {})",
+            rg.hsq1.reg.tot,
+            rg.hsq2.reg.tot
+        );
+        assert!(
+            (rg.hsq1.reg.tot - rg.hsq2.reg.tot).abs() < 1e-9,
+            "h1 should equal h2 (same |Z|), got {} vs {}",
+            rg.hsq1.reg.tot,
+            rg.hsq2.reg.tot
+        );
+
+        // Exact rg wiring: rg = gencov / sqrt(h1·h2) = gencov / h1.
+        let recomputed = rg.gencov.reg.tot / rg.hsq1.reg.tot;
+        assert!(
+            (recomputed - rg.rg_ratio).abs() < 1e-9,
+            "rg should equal gencov/h1, got rg={} gencov/h1={}",
+            rg.rg_ratio,
+            recomputed
+        );
+
+        // Magnitude near the −1 boundary (loose; see note on IRWLS asymmetry).
+        assert!(
+            rg.rg_ratio < 0.0,
+            "anticorrelated ⇒ rg < 0, got {}",
+            rg.rg_ratio
+        );
+        assert!(
+            (rg.rg_ratio + 1.0).abs() < 0.1,
+            "rg should be near -1, got {}",
+            rg.rg_ratio
+        );
+        assert!(
+            rg.gencov.reg.tot < 0.0,
+            "gencov must be negative, got {}",
+            rg.gencov.reg.tot
+        );
+    }
+
+    /// Symmetric to the above: `z2 = z1` ⇒ rg near +1, gencov positive.
+    #[tokio::test]
+    async fn e2e_perfect_correlation_is_near_plus_one() {
+        let ld: Vec<f64> = (0..N_SNP).map(|i| 1.0 + 0.1 * i as f64).collect();
+        let z1: Vec<f64> = ld.iter().map(|l| l * 10.0).collect();
+        let z2 = z1.clone();
+
+        let (rg, n_snp) = run_pipeline(&z1, &z2, &constrained_cfg()).await;
+        assert_eq!(n_snp, N_SNP);
+        assert!(rg.rg_ratio.is_finite(), "rg={}, expected finite", rg.rg_ratio);
+
+        assert!(
+            (rg.hsq1.reg.tot - rg.hsq2.reg.tot).abs() < 1e-9,
+            "h1 should equal h2, got {} vs {}",
+            rg.hsq1.reg.tot,
+            rg.hsq2.reg.tot
+        );
+        let recomputed = rg.gencov.reg.tot / rg.hsq1.reg.tot;
+        assert!(
+            (recomputed - rg.rg_ratio).abs() < 1e-9,
+            "rg should equal gencov/h1, got rg={} gencov/h1={}",
+            rg.rg_ratio,
+            recomputed
+        );
+        assert!(
+            rg.rg_ratio > 0.0,
+            "correlated ⇒ rg > 0, got {}",
+            rg.rg_ratio
+        );
+        assert!(
+            (rg.rg_ratio - 1.0).abs() < 0.1,
+            "rg should be near +1, got {}",
+            rg.rg_ratio
+        );
+        assert!(
+            rg.gencov.reg.tot > 0.0,
+            "gencov must be positive, got {}",
+            rg.gencov.reg.tot
+        );
+    }
+
+    /// The production default config (free intercepts + two-step cutoff 30)
+    /// must also produce a sane, sign-correct rg on a well-conditioned signal.
+    /// Uses a milder Z scale so the bulk of χ² stays below the two-step cutoff.
+    #[tokio::test]
+    async fn e2e_default_config_sign_correct_and_finite() {
+        let ld: Vec<f64> = (0..N_SNP).map(|i| 1.0 + 0.1 * i as f64).collect();
+        // scale 0.2 ⇒ max χ² = 0.04 · ld² ≈ 0.04 · 436 ≈ 17.5 < 30 (two-step
+        // keeps all SNPs), mean χ² ≈ 6.4 ≫ 1 (strong h² signal).
+        let z1: Vec<f64> = ld.iter().map(|l| l * 0.2).collect();
+        let z2: Vec<f64> = z1.iter().map(|z| -z).collect();
+
+        let cfg = LdscRgConfig::new(vec![N_SNP as f64], 20);
+        assert!(cfg.two_step.is_none(), "fixture precondition");
+        // run_with_ctx applies the LDSC default two_step = 30 internally.
+
+        let (rg, n_snp) = run_pipeline(&z1, &z2, &cfg).await;
+        assert_eq!(n_snp, N_SNP);
+        assert!(
+            rg.rg_ratio.is_finite(),
+            "rg must be finite under default config, got {}",
+            rg.rg_ratio
+        );
+        assert!(
+            rg.hsq1.reg.tot > 0.0 && rg.hsq2.reg.tot > 0.0,
+            "h² must be > 0, got {} / {}",
+            rg.hsq1.reg.tot,
+            rg.hsq2.reg.tot
+        );
+        assert!(
+            rg.rg_ratio < 0.0,
+            "anticorrelated signal ⇒ rg < 0, got {}",
+            rg.rg_ratio
+        );
+    }
+
+    /// `build_result_batch` wires the fitted `RG` into exactly the declared
+    /// output schema (full path including output construction).
+    #[tokio::test]
+    async fn e2e_result_batch_has_declared_schema() {
+        let ld: Vec<f64> = (0..N_SNP).map(|i| 1.0 + 0.1 * i as f64).collect();
+        let z1: Vec<f64> = ld.iter().map(|l| l * 10.0).collect();
+        let z2: Vec<f64> = z1.iter().map(|z| -z).collect();
+        let (rg, n_snp) = run_pipeline(&z1, &z2, &constrained_cfg()).await;
+
+        let batch = build_result_batch(&rg, n_snp).unwrap();
+        assert_eq!(batch.schema(), output_schema());
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch.num_columns(), 11);
+        // n_snp column carries the joined SNP count.
+        let n_snp_col = batch
+            .column(10)
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .unwrap();
+        assert_eq!(n_snp_col.value(0) as usize, N_SNP);
+    }
+
+    // -----------------------------------------------------------------
+    // Error-path end-to-end tests
+    // -----------------------------------------------------------------
+
+    /// When the two traits share no rsid with each other (and hence none with
+    /// the panel), the 3-way inner join is empty and the pipeline must error
+    /// with `InvalidInput` rather than silently producing NaNs.
+    #[tokio::test]
+    async fn e2e_disjoint_rsid_sets_yield_error() {
+        let ctx = ctx_with_ld_panel(N_SNP);
+        // Trait 1 covers rs1_000_000..rs1_000_050 (in the panel); trait 2 uses a
+        // disjoint range the panel does not contain.
+        let rs1: Vec<String> = (0..50).map(|i| format!("rs{}", 1_000_000 + i)).collect();
+        let rs2: Vec<String> = (0..50).map(|i| format!("rs{}", 9_000_000 + i)).collect();
+        let z1: Vec<f64> = (0..50).map(|i| (i as f64) * 0.1).collect();
+        let z2 = z1.clone();
+
+        let df1 = ctx
+            .read_batch(sumstats_batch(&z1, &rs1, 1000.0))
+            .unwrap();
+        let df2 = ctx
+            .read_batch(sumstats_batch(&z2, &rs2, 1000.0))
+            .unwrap();
+
+        let res =
+            LdscRgNode::run_with_ctx(&ctx, &df1, &df2, "ukbb_eur", &constrained_cfg()).await;
+        assert!(
+            res.is_err(),
+            "disjoint rsid sets must error, not silently return NaN"
+        );
+    }
+
+    /// A missing input port must surface a clear error before any catalog work.
+    #[tokio::test]
+    async fn e2e_missing_input_yields_error() {
+        let mut node = LdscRgNode::new(Arc::new(Datalake::new()), constrained_cfg());
+        let batch = sumstats_batch(
+            &[1.0, 2.0, 3.0],
+            &["rs1".into(), "rs2".into(), "rs3".into()],
+            1000.0,
+        );
+        let df = SessionContext::new().read_batch(batch).unwrap();
+        let one_input = vec![super::super::meta::NodeInput { port: 0, data: df }];
+        let res = node.execute(&one_input).await;
+        assert!(res.is_err(), "missing trait-2 input must error");
+    }
+
+    /// Only SNPs present in all three tables survive: feeding traits whose rsid
+    /// sets are a strict subset of the panel still yields the intersection,
+    /// not the union.
+    #[tokio::test]
+    async fn e2e_join_keeps_intersection_only() {
+        let ctx = ctx_with_ld_panel(N_SNP);
+        // Trait 1 + 2 share only the first 80 rsids (subset of the 200-row panel).
+        let shared: Vec<String> = (0..80).map(|i| format!("rs{}", 1_000_000 + i)).collect();
+        let ld: Vec<f64> = (0..80).map(|i| 1.0 + 0.1 * i as f64).collect();
+        let z1: Vec<f64> = ld.iter().map(|l| l * 10.0).collect();
+        let z2: Vec<f64> = z1.iter().map(|z| -z).collect();
+
+        let df1 = ctx
+            .read_batch(sumstats_batch(&z1, &shared, 1000.0))
+            .unwrap();
+        let df2 = ctx
+            .read_batch(sumstats_batch(&z2, &shared, 1000.0))
+            .unwrap();
+        let (rg, n_snp) =
+            LdscRgNode::run_with_ctx(&ctx, &df1, &df2, "ukbb_eur", &constrained_cfg())
+                .await
+                .expect("intersection join should succeed");
+        assert_eq!(n_snp, 80, "only the 80 shared rsids survive");
+        assert!(rg.rg_ratio.is_finite());
+    }
+}

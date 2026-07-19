@@ -112,6 +112,34 @@ impl DataEngine {
         Ok(self)
     }
 
+    /// Update an existing node's spec in-place.
+    ///
+    /// The node's `kind` is discovered from its current `node_type()` (which
+    /// equals the registry kind via the `DagNode` trait contract). A new
+    /// instance is built through the same factory with `spec`, then the DAG
+    /// payload is atomically replaced — all edges are preserved and
+    /// re-validated against the new node's port topology.
+    ///
+    /// Errors if `id` does not exist, if the kind has no registered factory,
+    /// if the spec fails deserialization, or if any existing edge becomes
+    /// incompatible with the new port layout.
+    pub fn update_node(
+        &mut self,
+        id: impl Into<String>,
+        spec: serde_json::Value,
+    ) -> Result<()> {
+        let id = id.into();
+        let kind = self
+            .dag
+            .get_node(&id)
+            .ok_or_else(|| Error::Dag(DagError::UnknownNode(id.clone())))?
+            .node_type()
+            .to_string();
+        let node = self.node_registry.build_node(&kind, spec)?;
+        self.dag.replace_node(&id, node)?;
+        Ok(())
+    }
+
     pub fn view_dag(&self) -> Result<String> {
         Ok(self.dag.to_dot())
     }
@@ -759,9 +787,7 @@ mod tests {
         fn clone_box(&self) -> Box<dyn DagNode> {
             Box::new((*self).clone())
         }
-        fn node_type(&self) -> &str {
-            "boom"
-        }
+        fn kind() -> &'static str where Self: Sized { "boom" }
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -803,9 +829,7 @@ mod tests {
         fn clone_box(&self) -> Box<dyn DagNode> {
             Box::new((*self).clone())
         }
-        fn node_type(&self) -> &str {
-            "sleep"
-        }
+        fn kind() -> &'static str where Self: Sized { "sleep" }
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -1156,5 +1180,89 @@ mod tests {
             );
         }
         assert!(std::path::Path::new(out).exists());
+    }
+
+    // ── update_node tests ────────────────────────────────────────────
+
+    /// update_node can change a sql node's query and the DAG still runs
+    /// correctly with the downstream edges preserved.
+    #[tokio::test]
+    async fn update_node_changes_sql_and_runs() {
+        let mut engine = DataEngine::builder().build();
+        let csv = datasets_dir().join("insurance.csv");
+        let out = "/tmp/dag_update_sql_test.csv";
+        let _ = std::fs::remove_file(out);
+
+        engine
+            .source_node(
+                "src",
+                Source::File {
+                    path: csv.to_str().unwrap().to_string(),
+                    format: None,
+                },
+            )
+            .unwrap();
+        engine
+            .add_node_from_registry(
+                "agg",
+                "sql",
+                serde_json::json!({"sql_query": "SELECT region, CAST(AVG(charges) AS BIGINT) AS avg_chg FROM port_0 GROUP BY region"}),
+            )
+            .unwrap();
+        engine
+            .add_node_from_registry(
+                "out",
+                "sink",
+                serde_json::json!({"type": "file", "path": out, "format": "csv"}),
+            )
+            .unwrap();
+        engine.add_edge("src", "agg", 0, 0).unwrap();
+        engine.add_edge("agg", "out", 0, 0).unwrap();
+
+        // First run with original SQL.
+        let report1 = engine.run().await.expect("run should succeed");
+        assert!(report1.ok);
+
+        // Update agg to a different query.
+        engine
+            .update_node(
+                "agg",
+                serde_json::json!({"sql_query": "SELECT COUNT(*) AS cnt FROM port_0"}),
+            )
+            .expect("update_node should succeed");
+
+        // Second run with updated SQL — edges preserved.
+        let report2 = engine.run().await.expect("run after update should succeed");
+        assert!(report2.ok);
+        for n in ["src", "agg", "out"] {
+            assert_eq!(report2.status(n), Some(RuntimeStatus::Success), "{n}");
+        }
+    }
+
+    /// update_node rejects a non-existent node id.
+    #[tokio::test]
+    async fn update_node_unknown_id_rejected() {
+        let mut engine = DataEngine::builder().build();
+        let err = engine
+            .update_node("ghost", serde_json::json!({"sql_query": "SELECT 1"}))
+            .unwrap_err();
+        assert!(err.to_string().contains("unknown node"), "{err}");
+    }
+
+    /// update_node rejects a malformed spec.
+    #[tokio::test]
+    async fn update_node_bad_spec_rejected() {
+        let mut engine = DataEngine::builder().build();
+        engine
+            .add_node_from_registry("x", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
+            .unwrap();
+        // Empty spec missing sql_query.
+        let err = engine
+            .update_node("x", serde_json::json!({}))
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("sql_query") || err.to_string().contains("missing field"),
+            "expected deserialization error, got {err}"
+        );
     }
 }

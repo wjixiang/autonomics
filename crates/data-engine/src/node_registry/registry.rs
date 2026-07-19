@@ -11,6 +11,7 @@ use crate::data_engine::{
     dag::DagNode,
     nodes::{
         ldsc_hsq::LdscHsqNodeFactory,
+        ldsc_rg::LdscRgNodeFactory,
         linear_regression::LinearRegressionNodeFactory,
         mock_node::MockNodeFactory,
         mr::MrNodeFactory,
@@ -68,6 +69,7 @@ impl NodeRegistry {
         registry.register(Box::new(SourceNodeFactory {}));
         registry.register(Box::new(SinkNodeFactory {}));
         registry.register(Box::new(LdscHsqNodeFactory {}));
+        registry.register(Box::new(LdscRgNodeFactory {}));
         registry.register(Box::new(LinearRegressionNodeFactory {}));
         registry.register(Box::new(MockNodeFactory {}));
         registry.register(Box::new(MrNodeFactory {}));
@@ -106,5 +108,54 @@ impl NodeRegistry {
                 schema: factory.spec_schema(),
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal valid specs for each registered node kind — used by the
+    /// invariant test to build a node without needing real files / data.
+    fn fixture_spec(kind: &str) -> serde_json::Value {
+        match kind {
+            "sql" => serde_json::json!({"sql_query": "SELECT 1"}),
+            "source" => serde_json::json!({"type": "file", "path": "/tmp/dummy.csv"}),
+            "sink" => serde_json::json!({"type": "file", "path": "/tmp/dummy_out.csv", "format": "csv"}),
+            "linear_regression" => {
+                serde_json::json!({"x_columns": ["x"], "y_column": "y"})
+            }
+            "ldsc" => serde_json::json!({"m": [1000000.0], "n_blocks": 200}),
+            "mock" => serde_json::json!({}),
+            other => panic!("no fixture spec for kind '{other}'"),
+        }
+    }
+
+    /// Invariant: every registered factory's `kind()` matches the
+    /// `node_type()` of a node built by that factory. Under Option B
+    /// this should always hold (factories delegate to `<N as DagNode>::kind()`),
+    /// but the test catches any future drift.
+    #[test]
+    fn all_factories_kind_matches_node_kind() {
+        let ctx = datafusion::prelude::SessionContext::new();
+        let datalake = std::sync::Arc::new(datalake::Datalake::default());
+        let registry = NodeRegistry::new(ctx, datalake);
+
+        let nodes = registry.list_nodes();
+        assert!(!nodes.is_empty(), "registry should have at least one kind");
+
+        for info in &nodes {
+            let kind = &info.kind;
+            let spec = fixture_spec(kind);
+            let node = registry
+                .build_node(kind, spec)
+                .unwrap_or_else(|e| panic!("build_node({kind}) failed: {e}"));
+            assert_eq!(
+                node.node_type(),
+                kind,
+                "factory kind '{}' must match built node's node_type()",
+                kind
+            );
+        }
     }
 }

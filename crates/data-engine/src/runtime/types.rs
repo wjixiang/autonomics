@@ -43,4 +43,9 @@ pub enum DataEngineCmd {
     ListNodeFactories {
         reply: oneshot::Sender<EngineResult<Vec<crate::node_registry::NodeInfo>>>,
     },
+    UpdateNode {
+        id: String,
+        spec: serde_json::Value,
+        reply: oneshot::Sender<EngineResult<()>>,
+    },
 }
