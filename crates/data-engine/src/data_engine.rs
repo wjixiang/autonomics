@@ -65,10 +65,10 @@ impl DataEngine {
 
     /// Register a node under `id`.
     ///
-    /// Prefer the typed helpers ([`Self::source_node`], [`Self::sql_node`],
-    /// [`Self::sink_node`]) — they construct the `NodeMeta` internally so the
-    /// call chains cleanly. With this raw `add_node`, build the meta in a
-    /// separate statement:
+    /// Prefer [`Self::add_node_from_registry`] for all standard node kinds —
+    /// it validates the spec against the registered JSON Schema and builds
+    /// the node automatically. Use this raw `add_node` only for custom test
+    /// nodes or ad-hoc types not in the registry.
     ///
     /// ```ignore
     /// let meta = NodeMeta::new();
@@ -83,8 +83,12 @@ impl DataEngine {
         Ok(self)
     }
 
-    /// TODO: this method will replace add_node. The only path to create node is through
-    /// NodeRegistry in future (all `add_*_node` will be eradicated)
+    /// Create a node by its registered `kind` and a JSON `spec`.
+    ///
+    /// The spec is validated against the kind's JSON Schema and deserialized
+    /// by the corresponding factory. This is the primary path for node
+    /// creation — all standard node kinds (source, sql, sink, ldsc,
+    /// linear_regression, mock, mr) are available.
     pub fn add_node_from_registry(
         &mut self,
         node_id: impl Into<String>,
@@ -144,89 +148,6 @@ impl DataEngine {
     pub fn clear_dag(&mut self) -> Result<()> {
         self.dag.clear();
         Ok(())
-    }
-
-    /// Convenience: add a [`SourceNode`] (chaining-safe — meta built internally).
-    pub fn source_node(&mut self, id: impl Into<String>, source: Source) -> Result<&mut Self> {
-        let id = id.into();
-        self.dag.add_node(
-            id.clone(),
-            Box::new(SourceNode::new(source, self.ctx.clone())),
-        )?;
-        Ok(self)
-    }
-
-    /// Convenience: add a [`SqlNode`] (chaining-safe).
-    pub fn sql_node(
-        &mut self,
-        id: impl Into<String>,
-        query: impl Into<String>,
-    ) -> Result<&mut Self> {
-        let id = id.into();
-        self.dag.add_node(
-            id.clone(),
-            Box::new(SqlNode::new(query.into(), self.ctx.clone())),
-        )?;
-        Ok(self)
-    }
-
-    /// Convenience: add a [`SinkNode`] (chaining-safe).
-    pub fn sink_node(
-        &mut self,
-        id: impl Into<String>,
-        sink: Sink,
-        mode: SinkMode,
-        datalake: Arc<Datalake>,
-    ) -> Result<&mut Self> {
-        let id = id.into();
-        self.dag.add_node(
-            id.clone(),
-            Box::new(SinkNode::new(sink, mode, self.ctx.clone(), datalake)),
-        )?;
-        Ok(self)
-    }
-
-    /// Convenience: add a [`LinearRegressionNode`] (chaining-safe).
-    ///
-    /// Fits an OLS regression of `y_column` on `x_columns` over the input
-    /// DataFrame produced by upstream nodes. When `intercept` is true, the
-    /// model includes an intercept term (reported as the first row).
-    pub fn linear_regression_node(
-        &mut self,
-        id: impl Into<String>,
-        x_columns: Vec<String>,
-        y_column: impl Into<String>,
-        intercept: bool,
-    ) -> Result<&mut Self> {
-        let id = id.into();
-        self.dag.add_node(
-            id.clone(),
-            Box::new(LinearRegressionNode::new(
-                x_columns,
-                y_column.into(),
-                intercept,
-            )),
-        )?;
-        Ok(self)
-    }
-
-    /// Convenience: add a [`LdscHsqNode`] (chaining-safe).
-    ///
-    /// Runs LD Score Regression for SNP-heritability (h2). Accepts raw GWAS
-    /// summary statistics with columns `Z`, `N`, `rsid` as input, queries
-    /// the Iceberg data lake for LD score panel data
-    /// (`genetics.ld_score.{ld_score_table}`), joins on rsid, and runs LDSC
-    /// internally.
-    pub fn ldsc_node(
-        &mut self,
-        id: impl Into<String>,
-        datalake: Arc<Datalake>,
-        ldsc: LdscHsqConfig,
-    ) -> Result<&mut Self> {
-        let id = id.into();
-        self.dag
-            .add_node(id.clone(), Box::new(LdscHsqNode::new(datalake, ldsc)))?;
-        Ok(self)
     }
 
     /// Add an edge from `from`'s default output port to `to`'s default input
@@ -315,14 +236,13 @@ impl DataEngineBuilder {
 mod tests {
     use std::sync::Arc;
 
-    use super::{DataEngine, Sink, SinkMode, Source, WriteFormat};
+    use super::DataEngine;
     use crate::data_engine::dag::graph::PortOutputs;
     use crate::data_engine::dag::{DagError, RuntimeStatus, SchedulerConfig};
     use crate::data_engine::error::Error;
     use crate::data_engine::nodes::{DagNode, NodeInput, NodeMeta};
     use datafusion::common::HashMap;
     use datafusion::prelude::CsvReadOptions;
-    use datalake::Datalake;
     use fs::OpendalFileStorage;
 
     fn datasets_dir() -> std::path::PathBuf {
@@ -370,36 +290,31 @@ mod tests {
         let _ = std::fs::remove_file(out_path);
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "load",
-                Source::File {
-                    path: csv_path.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": csv_path.to_str().unwrap()}),
             )
-            .unwrap()
-            .sql_node(
-                "agg",
-                // agg's single input (port 0) is registered as "port_0".
-                "SELECT region, CAST(AVG(charges) AS BIGINT) AS avg_chg \
-                 FROM port_0 GROUP BY region",
-            )
-            .unwrap()
-            .sink_node(
-                "out",
-                Sink::File {
-                    path: out_path.into(),
-                    format: WriteFormat::Csv,
-                },
-                SinkMode::Overwrite,
-                Arc::new(Datalake::default()),
-            )
-            .unwrap()
-            // Default edges: each node has a single relevant port, resolved automatically.
-            .add_edge("load", "agg", 0, 0)
-            .unwrap()
-            .add_edge("agg", "out", 0, 0)
             .unwrap();
+        engine
+            .add_node_from_registry(
+                "agg",
+                "sql",
+                // agg's single input (port 0) is registered as "port_0".
+                serde_json::json!({"sql_query": "SELECT region, CAST(AVG(charges) AS BIGINT) AS avg_chg \
+                 FROM port_0 GROUP BY region"}),
+            )
+            .unwrap();
+        engine
+            .add_node_from_registry(
+                "out",
+                "sink",
+                serde_json::json!({"type": "file", "path": out_path, "format": "csv"}),
+            )
+            .unwrap();
+        // Default edges: each node has a single relevant port, resolved automatically.
+        engine.add_edge("load", "agg", 0, 0).unwrap();
+        engine.add_edge("agg", "out", 0, 0).unwrap();
 
         let report = engine.run().await.expect("run should succeed");
         assert!(report.ok, "all nodes should succeed: {:?}", report.statuses);
@@ -419,30 +334,30 @@ mod tests {
         let iris = datasets_dir().join("Iris.csv");
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "load",
-                Source::File {
-                    path: iris.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": iris.to_str().unwrap()}),
             )
-            .unwrap()
-            // Note: DataFusion lowercases unquoted identifiers, so quote the
-            // mixed-case column name "Species".
-            .sql_node(
-                "setosa",
-                r#"SELECT * FROM port_0 WHERE "Species" = 'Iris-setosa'"#,
-            )
-            .unwrap()
-            .sql_node(
-                "virginica",
-                r#"SELECT * FROM port_0 WHERE "Species" = 'Iris-virginica'"#,
-            )
-            .unwrap()
-            .add_edge("load", "setosa", 0, 0)
-            .unwrap()
-            .add_edge("load", "virginica", 0, 0)
             .unwrap();
+        // Note: DataFusion lowercases unquoted identifiers, so quote the
+        // mixed-case column name "Species".
+        engine
+            .add_node_from_registry(
+                "setosa",
+                "sql",
+                serde_json::json!({"sql_query": r#"SELECT * FROM port_0 WHERE "Species" = 'Iris-setosa'"#}),
+            )
+            .unwrap();
+        engine
+            .add_node_from_registry(
+                "virginica",
+                "sql",
+                serde_json::json!({"sql_query": r#"SELECT * FROM port_0 WHERE "Species" = 'Iris-virginica'"#}),
+            )
+            .unwrap();
+        engine.add_edge("load", "setosa", 0, 0).unwrap();
+        engine.add_edge("load", "virginica", 0, 0).unwrap();
 
         let report = engine.run().await.expect("run should succeed");
         assert!(
@@ -466,28 +381,28 @@ mod tests {
         let iris = datasets_dir().join("Iris.csv");
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "load",
-                Source::File {
-                    path: iris.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": iris.to_str().unwrap()}),
             )
-            .unwrap()
-            .sql_node(
-                "a",
-                r#"SELECT COUNT(*) AS cnt FROM port_0 WHERE "Species" = 'Iris-setosa'"#,
-            )
-            .unwrap()
-            .sql_node(
-                "b",
-                r#"SELECT COUNT(*) AS cnt FROM port_0 WHERE "Species" = 'Iris-virginica'"#,
-            )
-            .unwrap()
-            .add_edge("load", "a", 0, 0)
-            .unwrap()
-            .add_edge("load", "b", 0, 0)
             .unwrap();
+        engine
+            .add_node_from_registry(
+                "a",
+                "sql",
+                serde_json::json!({"sql_query": r#"SELECT COUNT(*) AS cnt FROM port_0 WHERE "Species" = 'Iris-setosa'"#}),
+            )
+            .unwrap();
+        engine
+            .add_node_from_registry(
+                "b",
+                "sql",
+                serde_json::json!({"sql_query": r#"SELECT COUNT(*) AS cnt FROM port_0 WHERE "Species" = 'Iris-virginica'"#}),
+            )
+            .unwrap();
+        engine.add_edge("load", "a", 0, 0).unwrap();
+        engine.add_edge("load", "b", 0, 0).unwrap();
 
         let report = engine.run().await.expect("run should succeed");
         assert!(
@@ -508,20 +423,17 @@ mod tests {
         let iris = datasets_dir().join("Iris.csv");
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "src_a",
-                Source::File {
-                    path: iris.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": iris.to_str().unwrap()}),
             )
-            .unwrap()
-            .source_node(
+            .unwrap();
+        engine
+            .add_node_from_registry(
                 "src_b",
-                Source::File {
-                    path: iris.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": iris.to_str().unwrap()}),
             )
             .unwrap();
 
@@ -540,18 +452,15 @@ mod tests {
                     // "result".to_string(),
                 ),
             )
-            .unwrap()
-            .sink_node(
+            .unwrap();
+        engine
+            .add_node_from_registry(
                 "out",
-                Sink::File {
-                    path: "/tmp/dag_join_out.csv".into(),
-                    format: WriteFormat::Csv,
-                },
-                SinkMode::Overwrite,
-                Arc::new(Datalake::default()),
+                "sink",
+                serde_json::json!({"type": "file", "path": "/tmp/dag_join_out.csv", "format": "csv"}),
             )
-            .unwrap()
-            .add_edge("src_a", "join", 0, 0)
+            .unwrap();
+        engine.add_edge("src_a", "join", 0, 0)
             .unwrap()
             .add_edge("src_b", "join", 0, 1)
             .unwrap()
@@ -576,12 +485,10 @@ mod tests {
         let vcf = datasets_dir().join("sample.vcf.gz");
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "vcf",
-                Source::File {
-                    path: vcf.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": vcf.to_str().unwrap()}),
             )
             .unwrap();
 
@@ -604,12 +511,10 @@ mod tests {
         let vcf = datasets_dir().join("sample.vcf.gz");
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "vcf",
-                Source::File {
-                    path: vcf.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": vcf.to_str().unwrap()}),
             )
             .unwrap();
 
@@ -644,12 +549,10 @@ mod tests {
         let vcf = datasets_dir().join("sample.vcf.gz");
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "vcf",
-                Source::File {
-                    path: vcf.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": vcf.to_str().unwrap()}),
             )
             .unwrap();
 
@@ -683,11 +586,12 @@ mod tests {
     async fn cycle_is_rejected() {
         let mut engine = DataEngine::builder().build();
         engine
-            .sql_node("a", "SELECT 1")
-            .unwrap()
-            .sql_node("b", "SELECT 1")
-            .unwrap()
-            .add_edge("a", "b", 0, 0)
+            .add_node_from_registry("a", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
+            .unwrap();
+        engine
+            .add_node_from_registry("b", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
+            .unwrap();
+        engine.add_edge("a", "b", 0, 0)
             .unwrap()
             .add_edge("b", "a", 0, 0)
             .unwrap();
@@ -707,7 +611,7 @@ mod tests {
         // placeholder column names never get used.
         let mut engine = DataEngine::builder().build();
         engine
-            .linear_regression_node("lr", vec!["x".into()], "y", true)
+            .add_node_from_registry("lr", "linear_regression", serde_json::json!({"x_columns": ["x"], "y_column": "y", "intercept": true}))
             .unwrap();
 
         let err = engine.run().await.unwrap_err();
@@ -723,28 +627,28 @@ mod tests {
         let mut engine = DataEngine::builder().build();
         let iris = datasets_dir().join("Iris.csv");
         engine
-            .source_node(
+            .add_node_from_registry(
                 "s1",
-                Source::File {
-                    path: iris.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": iris.to_str().unwrap()}),
             )
-            .unwrap()
-            .source_node(
-                "s2",
-                Source::File {
-                    path: iris.to_str().unwrap().to_string(),
-                    format: None,
-                },
-            )
-            .unwrap()
-            .sql_node("c", "SELECT 1")
-            .unwrap()
-            .add_edge("s1", "c", 0, 0)
-            .unwrap()
-            .add_edge("s2", "c", 0, 0)
             .unwrap();
+        engine
+            .add_node_from_registry(
+                "s2",
+                "source",
+                serde_json::json!({"type": "file", "path": iris.to_str().unwrap()}),
+            )
+            .unwrap();
+        engine
+            .add_node_from_registry(
+                "c",
+                "sql",
+                serde_json::json!({"sql_query": "SELECT 1"}),
+            )
+            .unwrap();
+        engine.add_edge("s1", "c", 0, 0).unwrap();
+        engine.add_edge("s2", "c", 0, 0).unwrap();
 
         let err = engine.run().await.unwrap_err();
         assert!(
@@ -757,12 +661,13 @@ mod tests {
     async fn unknown_port_rejected() {
         let mut engine = DataEngine::builder().build();
         engine
-            .sql_node("a", "SELECT 1")
-            .unwrap()
-            .sql_node("b", "SELECT 1")
-            .unwrap()
-            // "a" has no output port named "nope".
-            .add_edge("a", "b", 99, 0)
+            .add_node_from_registry("a", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
+            .unwrap();
+        engine
+            .add_node_from_registry("b", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
+            .unwrap();
+        // "a" has no output port named "nope".
+        engine.add_edge("a", "b", 99, 0)
             .unwrap();
 
         let err = engine.run().await.unwrap_err();
@@ -801,9 +706,9 @@ mod tests {
         let boom_meta = NodeMeta::source();
         engine.add_node("boom", BoomNode(boom_meta)).unwrap();
         engine
-            .sql_node("child", "SELECT 1")
-            .unwrap()
-            .add_edge("boom", "child", 0, 0)
+            .add_node_from_registry("child", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
+            .unwrap();
+        engine.add_edge("boom", "child", 0, 0)
             .unwrap();
 
         let report = engine.run().await.expect("run completes even on failure");
@@ -971,12 +876,10 @@ mod tests {
         let csv = datasets_dir().join("insurance.csv");
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "src",
-                Source::File {
-                    path: csv.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": csv.to_str().unwrap()}),
             )
             .unwrap();
 
@@ -1023,12 +926,10 @@ mod tests {
         let _ = std::fs::remove_file(out);
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "src",
-                Source::File {
-                    path: csv.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": csv.to_str().unwrap()}),
             )
             .unwrap();
 
@@ -1055,12 +956,10 @@ mod tests {
         let csv = datasets_dir().join("insurance.csv");
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "src",
-                Source::File {
-                    path: csv.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": csv.to_str().unwrap()}),
             )
             .unwrap();
 
@@ -1086,12 +985,10 @@ mod tests {
         let csv = datasets_dir().join("insurance.csv");
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "src",
-                Source::File {
-                    path: csv.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": csv.to_str().unwrap()}),
             )
             .unwrap();
 
@@ -1194,12 +1091,10 @@ mod tests {
         let _ = std::fs::remove_file(out);
 
         engine
-            .source_node(
+            .add_node_from_registry(
                 "src",
-                Source::File {
-                    path: csv.to_str().unwrap().to_string(),
-                    format: None,
-                },
+                "source",
+                serde_json::json!({"type": "file", "path": csv.to_str().unwrap()}),
             )
             .unwrap();
         engine
