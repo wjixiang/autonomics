@@ -14,6 +14,7 @@ use crate::data_engine::{
         ldsc_rg::LdscRgNodeFactory,
         linear_regression::LinearRegressionNodeFactory,
         mock_node::MockNodeFactory,
+        mr::MrNodeFactory,
         sink::SinkNodeFactory,
         source::SourceNodeFactory,
         sql_node::SqlNodeFactory,
@@ -71,6 +72,7 @@ impl NodeRegistry {
         registry.register(Box::new(LdscRgNodeFactory {}));
         registry.register(Box::new(LinearRegressionNodeFactory {}));
         registry.register(Box::new(MockNodeFactory {}));
+        registry.register(Box::new(MrNodeFactory {}));
         registry
     }
 
