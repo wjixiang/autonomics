@@ -137,8 +137,11 @@ pub struct SourceNode {
 impl SourceNode {
     pub fn new(source: Source, ctx: SessionContext) -> Self {
         // A source has no inputs and a single output port.
-        let meta = NodePorts::new().add_output_port(None);
-        Self { meta, source, ctx }
+        Self {
+            meta: port_layout(),
+            source,
+            ctx,
+        }
     }
 }
 
@@ -158,6 +161,12 @@ pub enum SourceNodeSpec {
 
 pub struct SourceNodeFactory {}
 
+/// Static port layout for every [`SourceNode`]: no inputs, a single untyped
+/// output port (schema discovered from the source at runtime).
+fn port_layout() -> NodePorts {
+    NodePorts::new().add_output_port(None)
+}
+
 impl NodeFactory for SourceNodeFactory {
     fn kind(&self) -> &'static str {
         "source"
@@ -165,6 +174,10 @@ impl NodeFactory for SourceNodeFactory {
 
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(SourceNodeSpec)
+    }
+
+    fn ports(&self) -> NodePorts {
+        port_layout()
     }
 
     fn build(

@@ -169,9 +169,8 @@ impl SinkNode {
         ctx: SessionContext,
         datalake: Arc<Datalake>,
     ) -> Self {
-        let meta = NodePorts::new().add_input_port(None);
         Self {
-            meta,
+            meta: port_layout(),
             sink,
             mode,
             ctx,
@@ -269,6 +268,12 @@ pub enum SinkNodeSpec {
 
 pub struct SinkNodeFactory {}
 
+/// Static port layout for every [`SinkNode`]: a single untyped input port and
+/// no outputs.
+fn port_layout() -> NodePorts {
+    NodePorts::new().add_input_port(None)
+}
+
 impl NodeFactory for SinkNodeFactory {
     fn kind(&self) -> &'static str {
         "sink"
@@ -276,6 +281,10 @@ impl NodeFactory for SinkNodeFactory {
 
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(SinkNodeSpec)
+    }
+
+    fn ports(&self) -> NodePorts {
+        port_layout()
     }
 
     fn build(

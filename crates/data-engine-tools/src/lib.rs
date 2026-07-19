@@ -1,12 +1,12 @@
 mod add_edge_tool;
 mod add_node_tool;
 mod clear_dag_tool;
-mod update_node_tool;
 mod get_node_spec_tool;
 mod get_output_tool;
 mod list_node_factories_tool;
 mod remove_node_tool;
 mod run_dag_tool;
+mod update_node_tool;
 mod view_dag_tool;
 
 use std::sync::Arc;
@@ -65,6 +65,23 @@ impl From<ExecError> for ToolError {
 /// Each tool sends commands to the [`DataEngineClient`] actor and awaits
 /// replies via oneshot channels. All node creation is done through the
 /// generic `add_node` tool (kind + JSON spec).
+pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
+    vec![
+        ToolRegistration::from(list_node_factories_tool::ListNodeFactoriesTool::new(
+            client.clone(),
+        )),
+        ToolRegistration::from(get_node_spec_tool::GetNodeSpecTool::new(client.clone())),
+        ToolRegistration::from(add_node_tool::AddNodeTool::new(client.clone())),
+        ToolRegistration::from(update_node_tool::UpdateNodeTool::new(client.clone())),
+        ToolRegistration::from(add_edge_tool::AddEdgeTool::new(client.clone())),
+        ToolRegistration::from(run_dag_tool::RunDagTool::new(client.clone())),
+        ToolRegistration::from(get_output_tool::GetOutputTool::new(client.clone())),
+        ToolRegistration::from(remove_node_tool::RemoveNodeTool::new(client.clone())),
+        ToolRegistration::from(view_dag_tool::ViewDagTool::new(client.clone())),
+        ToolRegistration::from(clear_dag_tool::ClearDagTool::new(client)),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use agentik_proc::tool;
@@ -76,10 +93,7 @@ mod tests {
     /// serialize the spec to a string and node factories reject it with
     /// "invalid type: string, expected ...". Under schemars, `Value` produces
     /// an unconstrained schema (no restrictive `type`).
-    #[tool(
-        name = "test_value_field",
-        description = "test harness tool"
-    )]
+    #[tool(name = "test_value_field", description = "test harness tool")]
     pub struct TestValueInput {
         /// arbitrary json
         pub spec: serde_json::Value,
@@ -102,10 +116,7 @@ mod tests {
 
     /// The `#[tool]` macro must still derive accurate JSON Schema types for
     /// primitive fields and surface `#[desc]` as the property description.
-    #[tool(
-        name = "test_typed_fields",
-        description = "test harness tool"
-    )]
+    #[tool(name = "test_typed_fields", description = "test harness tool")]
     pub struct TestTypedInput {
         #[desc = "the name"]
         pub name: String,
@@ -144,21 +155,4 @@ mod tests {
         // `name` is required (non-Option, no default).
         assert!(def.input_schema.required.contains(&"name".to_string()));
     }
-}
-
-pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
-    vec![
-        ToolRegistration::from(list_node_factories_tool::ListNodeFactoriesTool::new(
-            client.clone(),
-        )),
-        ToolRegistration::from(get_node_spec_tool::GetNodeSpecTool::new(client.clone())),
-        ToolRegistration::from(add_node_tool::AddNodeTool::new(client.clone())),
-        ToolRegistration::from(update_node_tool::UpdateNodeTool::new(client.clone())),
-        ToolRegistration::from(add_edge_tool::AddEdgeTool::new(client.clone())),
-        ToolRegistration::from(run_dag_tool::RunDagTool::new(client.clone())),
-        ToolRegistration::from(get_output_tool::GetOutputTool::new(client.clone())),
-        ToolRegistration::from(remove_node_tool::RemoveNodeTool::new(client.clone())),
-        ToolRegistration::from(view_dag_tool::ViewDagTool::new(client.clone())),
-        ToolRegistration::from(clear_dag_tool::ClearDagTool::new(client)),
-    ]
 }

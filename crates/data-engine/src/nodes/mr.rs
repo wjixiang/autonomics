@@ -454,14 +454,22 @@ pub struct MrNode {
 impl MrNode {
     /// Construct an [`MrNode`] from a fully-specified [`MrNodeSpec`].
     pub fn new(spec: MrNodeSpec) -> Self {
-        let meta = NodePorts::new()
-            .add_input_port(Some(input_schema()))
-            .add_output_port(Some(output_schema()));
-        Self { meta, spec }
+        Self {
+            meta: port_layout(),
+            spec,
+        }
     }
 }
 
 pub struct MrNodeFactory {}
+
+/// Static port layout for every [`MrNode`]: one typed input (harmonised GWAS
+/// sumstats, see [`input_schema`]) and one typed output ([`output_schema`]).
+fn port_layout() -> NodePorts {
+    NodePorts::new()
+        .add_input_port(Some(input_schema()))
+        .add_output_port(Some(output_schema()))
+}
 
 impl NodeFactory for MrNodeFactory {
     fn kind(&self) -> &'static str {
@@ -470,6 +478,10 @@ impl NodeFactory for MrNodeFactory {
 
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(MrNodeSpec)
+    }
+
+    fn ports(&self) -> NodePorts {
+        port_layout()
     }
 
     fn build(

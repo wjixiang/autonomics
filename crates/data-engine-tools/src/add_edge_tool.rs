@@ -13,7 +13,16 @@ use crate::ExecError;
     name = "add_edge",
     description = "Connect two DAG nodes port-to-port: data flows from the \
                   'from' node's output port to the 'to' node's input port. \
-                  Omit from_port/to_port for single-port nodes (default ports)."
+                  Omit from_port/to_port for single-port nodes (default ports). \
+                  \
+                  WARNING — DO NOT call `add_edge` in the same response turn as \
+                  `add_node`. Both endpoints (`from` and `to`) must already exist \
+                  in the DAG when this tool runs; if node creation runs in the \
+                  same turn it races ahead of the edge and produces a dangling \
+                  edge or a failed connection. First create all nodes and wait \
+                  for their results, THEN add edges in a separate turn. Multiple \
+                  `add_edge` calls within one turn are fine (assuming every \
+                  referenced node already exists)."
 )]
 pub struct AddEdgeInput {
     #[desc = "ID of the upstream (source) node"]

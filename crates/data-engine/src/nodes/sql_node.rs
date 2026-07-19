@@ -49,6 +49,13 @@ pub struct SqlNodeSpec {
 
 pub struct SqlNodeFactory {}
 
+/// Static port layout for every [`SqlNode`]: a single untyped output port and
+/// a variadic input (input count not fixed, so the scheduler skips
+/// over/under-connectivity validation).
+fn port_layout() -> NodePorts {
+    NodePorts::new().add_output_port(None).set_fixed_input(false)
+}
+
 impl NodeFactory for SqlNodeFactory {
     fn kind(&self) -> &'static str {
         "sql"
@@ -56,6 +63,10 @@ impl NodeFactory for SqlNodeFactory {
 
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(SqlNodeSpec)
+    }
+
+    fn ports(&self) -> NodePorts {
+        port_layout()
     }
 
     fn build(
@@ -71,9 +82,8 @@ impl NodeFactory for SqlNodeFactory {
 
 impl SqlNode {
     pub fn new(query: String, ctx: SessionContext) -> Self {
-        let meta = NodePorts::new().add_output_port(None).set_fixed_input(false);
         Self {
-            meta,
+            meta: port_layout(),
             sql_query: query,
             ctx,
         }

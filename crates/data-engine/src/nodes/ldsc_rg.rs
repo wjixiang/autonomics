@@ -238,6 +238,10 @@ impl NodeFactory for LdscRgNodeFactory {
         schema_for!(LdscRgConfig)
     }
 
+    fn ports(&self) -> NodePorts {
+        port_layout()
+    }
+
     fn build(
         &self,
         spec: serde_json::Value,
@@ -263,16 +267,22 @@ impl LdscRgNode {
         // sumstats, and one output with the fixed rg summary schema. Declaring
         // the schemas lets the DAG validate edge compatibility at
         // `add_edge`/`validate` time.
-        let meta = NodePorts::new()
-            .add_input_port(Some(input_schema()))
-            .add_input_port(Some(input_schema()))
-            .add_output_port(Some(output_schema()));
         Self {
-            meta,
+            meta: port_layout(),
             datalake,
             ldsc_rg,
         }
     }
+}
+
+/// Static port layout for every [`LdscRgNode`]: two typed inputs (trait 1 and
+/// trait 2, both GWAS sumstats) and one typed output with the fixed rg summary
+/// schema.
+fn port_layout() -> NodePorts {
+    NodePorts::new()
+        .add_input_port(Some(input_schema()))
+        .add_input_port(Some(input_schema()))
+        .add_output_port(Some(output_schema()))
 }
 
 /// The fixed column names produced by the internal 3-way SQL join. The SQL

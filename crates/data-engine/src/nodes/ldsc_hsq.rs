@@ -197,6 +197,15 @@ impl LdscHsqConfig {
 
 pub struct LdscHsqNodeFactory {}
 
+/// Static port layout for every [`LdscHsqNode`]: a single typed input carrying
+/// GWAS sumstats (Z, N, rsid) and a single typed output with the fixed h²
+/// summary schema.
+fn port_layout() -> NodePorts {
+    NodePorts::new()
+        .add_input_port(Some(input_schema()))
+        .add_output_port(Some(output_schema()))
+}
+
 impl NodeFactory for LdscHsqNodeFactory {
     fn kind(&self) -> &'static str {
         "ldsc"
@@ -204,6 +213,10 @@ impl NodeFactory for LdscHsqNodeFactory {
 
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(LdscHsqConfig)
+    }
+
+    fn ports(&self) -> NodePorts {
+        port_layout()
     }
 
     fn build(
@@ -233,11 +246,8 @@ impl LdscHsqNode {
         // rsid) and a single output with the fixed h² summary schema.
         // Declaring the schemas lets the DAG validate edge compatibility
         // at `add_edge`/`validate` time.
-        let meta = NodePorts::new()
-            .add_input_port(Some(input_schema()))
-            .add_output_port(Some(output_schema()));
         Self {
-            meta,
+            meta: port_layout(),
             datalake,
             ldsc_hsq,
         }

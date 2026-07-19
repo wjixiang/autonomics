@@ -9,6 +9,8 @@
 use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::{common::HashMap, prelude::DataFrame};
+use serde::ser::{SerializeStruct, Serializer};
+use serde::{Serialize, ser::SerializeMap};
 
 use crate::dag::{DagError, graph::PortOutputs};
 
@@ -62,9 +64,47 @@ impl Port {
     }
 }
 
+/// Serializable description of one column in a port's [`arrow_schema::Schema`].
+///
+/// `arrow_schema::DataType` is not serde-serializable without an extra feature
+/// flag, so we surface the type as its `Debug` string — enough for a caller
+/// (e.g. the agent wiring edges) to reason about column shape.
+#[derive(Serialize)]
+struct PortFieldDto<'a> {
+    name: &'a str,
+    data_type: String,
+    nullable: bool,
+}
+
+impl Serialize for Port {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("index", &self.index)?;
+        match &self.schema {
+            // A typed port: emit its columns so consumers can validate edge
+            // compatibility without instantiating the node.
+            Some(schema) => {
+                let fields: Vec<PortFieldDto<'_>> = schema
+                    .fields()
+                    .iter()
+                    .map(|f| PortFieldDto {
+                        name: f.name().as_str(),
+                        data_type: format!("{:?}", f.data_type()),
+                        nullable: f.is_nullable(),
+                    })
+                    .collect();
+                map.serialize_entry("schema", &fields)?;
+            }
+            // An untyped port (schema discovered at runtime).
+            None => map.serialize_entry("schema", &None::<()>)?,
+        }
+        map.end()
+    }
+}
+
 /// An ordered collection of [`Port`]s belonging to a single dataflow direction
 /// (input or output) on a node.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Ports {
     ports: HashMap<PortId, Port>,
     /// Whether the number of ports is fixed. If `false`, the scheduler will not
@@ -112,6 +152,18 @@ impl Ports {
     }
 }
 
+impl Serialize for Ports {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut st = serializer.serialize_struct("Ports", 2)?;
+        // Emit ports in index order regardless of HashMap iteration order, so
+        // the serialized layout is stable and matches port numbering.
+        let ordered: Vec<&Port> = self.iter().collect();
+        st.serialize_field("ports", &ordered)?;
+        st.serialize_field("is_fixed", &self.is_fixed)?;
+        st.end()
+    }
+}
+
 impl From<Vec<Port>> for Ports {
     fn from(ports: Vec<Port>) -> Self {
         let map = ports.into_iter().map(|p| (p.index, p)).collect();
@@ -134,7 +186,7 @@ pub struct NodeInput {
 }
 
 /// Static per-node port layout: declared input/output ports.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct NodePorts {
     input_ports: Ports,
     output_ports: Ports,
@@ -196,6 +248,15 @@ impl NodePorts {
     /// will validate edge connectivity).
     pub fn is_fixed_input(&self) -> bool {
         self.input_ports.is_fixed
+    }
+}
+
+impl Serialize for NodePorts {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut st = serializer.serialize_struct("NodePorts", 2)?;
+        st.serialize_field("input_ports", &self.input_ports)?;
+        st.serialize_field("output_ports", &self.output_ports)?;
+        st.end()
     }
 }
 

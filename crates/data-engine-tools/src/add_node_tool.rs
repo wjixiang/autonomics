@@ -28,7 +28,15 @@ use crate::ExecError;
                   - \"sink\":           {\"type\": \"file\", \"path\": \"/out/result.csv\", \"format\": \"csv\", \"mode\": \"overwrite\"} \
                   - \"linear_regression\": {\"x_columns\": [\"x1\"], \"y_column\": \"y\", \"intercept\": true} \
                   - \"ldsc\":           {\"m\": [1000000.0], \"n_blocks\": 200, \"intercept\": null} \
-                  - \"mock\":           {}"
+                  - \"mock\":           {} \
+                  \
+                  WARNING — DO NOT combine `add_node` and `add_edge` in the same \
+                  response turn. An edge requires both endpoints to already exist, \
+                  so calling `add_node` and `add_edge` together in one turn causes \
+                  a race: the edge may be applied before the node lands, and the \
+                  DAG ends up with a dangling edge or a failed connection. Create \
+                  ALL nodes first, wait for their results, then add edges in a \
+                  SEPARATE turn. Multiple `add_node` calls within one turn are fine."
 )]
 pub struct AddNodeInput {
     /// Unique identifier for this node in the DAG.

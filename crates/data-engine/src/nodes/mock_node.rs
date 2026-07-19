@@ -42,6 +42,13 @@ pub struct MockNodeSpec {}
 
 pub struct MockNodeFactory {}
 
+/// Static port layout for every [`MockNode`]: no declared ports (the mock
+/// emits the iris dataset on the default output at execution time without a
+/// statically-declared port).
+fn port_layout() -> NodePorts {
+    NodePorts::new()
+}
+
 impl NodeFactory for MockNodeFactory {
     fn kind(&self) -> &'static str {
         "mock"
@@ -49,6 +56,10 @@ impl NodeFactory for MockNodeFactory {
 
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(MockNodeSpec)
+    }
+
+    fn ports(&self) -> NodePorts {
+        port_layout()
     }
 
     fn build(
@@ -65,8 +76,9 @@ impl MockNode {}
 impl Default for MockNode {
     fn default() -> Self {
         // A source-style mock: no inputs, one output port "iris".
-        let meta = NodePorts::new();
-        Self { meta }
+        Self {
+            meta: port_layout(),
+        }
     }
 }
 #[async_trait]

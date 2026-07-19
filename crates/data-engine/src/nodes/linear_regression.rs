@@ -210,9 +210,8 @@ impl LinearRegressionNode {
         y_column: String,
         intercept: bool,
     ) -> Self {
-        let meta = NodePorts::new().add_output_port(None).add_input_port(None);
         Self {
-            meta,
+            meta: port_layout(),
             x_columns,
             y_column,
             intercept,
@@ -234,6 +233,12 @@ fn default_intercept() -> bool {
 
 pub struct LinearRegressionNodeFactory {}
 
+/// Static port layout for every [`LinearRegressionNode`]: one untyped input
+/// (the data to regress) and one untyped output (the summary table).
+fn port_layout() -> NodePorts {
+    NodePorts::new().add_output_port(None).add_input_port(None)
+}
+
 impl NodeFactory for LinearRegressionNodeFactory {
     fn kind(&self) -> &'static str {
         "linear_regression"
@@ -241,6 +246,10 @@ impl NodeFactory for LinearRegressionNodeFactory {
 
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(LinearRegressionNodeSpec)
+    }
+
+    fn ports(&self) -> NodePorts {
+        port_layout()
     }
 
     fn build(
