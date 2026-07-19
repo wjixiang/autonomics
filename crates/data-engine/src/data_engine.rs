@@ -5,8 +5,8 @@ use fs::OpendalFileStorage;
 
 use crate::dag::{DAG, DagError, RunReport, SchedulerConfig};
 use crate::data_engine::error::{Error, Result};
-use crate::nodes::DagNode;
 use crate::node_registry::registry::NodeRegistry;
+use crate::nodes::DagNode;
 use datalake::Datalake;
 
 pub mod error;
@@ -61,7 +61,7 @@ impl DataEngine {
         self.ctx.clone()
     }
 
-    /// Register a node under `id`.
+    /// Register a node under `id`(for test purposes).
     ///
     /// Prefer [`Self::add_node_from_registry`] for all standard node kinds —
     /// it validates the spec against the registered JSON Schema and builds
@@ -159,6 +159,10 @@ impl DataEngine {
     ) -> Result<&mut Self> {
         self.dag.add_edge(from, to, from_port, to_port)?;
         Ok(self)
+    }
+
+    pub fn delete_edge(&mut self) -> Result<()> {
+        todo!()
     }
 
     // /// Add an edge connecting `from`'s `from_port` output port to `to`'s
@@ -458,7 +462,8 @@ mod tests {
                 serde_json::json!({"type": "file", "path": "/tmp/dag_join_out.csv", "format": "csv"}),
             )
             .unwrap();
-        engine.add_edge("src_a", "join", 0, 0)
+        engine
+            .add_edge("src_a", "join", 0, 0)
             .unwrap()
             .add_edge("src_b", "join", 0, 1)
             .unwrap()
@@ -589,7 +594,8 @@ mod tests {
         engine
             .add_node_from_registry("b", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
             .unwrap();
-        engine.add_edge("a", "b", 0, 0)
+        engine
+            .add_edge("a", "b", 0, 0)
             .unwrap()
             .add_edge("b", "a", 0, 0)
             .unwrap();
@@ -609,7 +615,11 @@ mod tests {
         // placeholder column names never get used.
         let mut engine = DataEngine::builder().build();
         engine
-            .add_node_from_registry("lr", "linear_regression", serde_json::json!({"x_columns": ["x"], "y_column": "y", "intercept": true}))
+            .add_node_from_registry(
+                "lr",
+                "linear_regression",
+                serde_json::json!({"x_columns": ["x"], "y_column": "y", "intercept": true}),
+            )
             .unwrap();
 
         let err = engine.run().await.unwrap_err();
@@ -639,11 +649,7 @@ mod tests {
             )
             .unwrap();
         engine
-            .add_node_from_registry(
-                "c",
-                "sql",
-                serde_json::json!({"sql_query": "SELECT 1"}),
-            )
+            .add_node_from_registry("c", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
             .unwrap();
         engine.add_edge("s1", "c", 0, 0).unwrap();
         engine.add_edge("s2", "c", 0, 0).unwrap();
@@ -665,8 +671,7 @@ mod tests {
             .add_node_from_registry("b", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
             .unwrap();
         // "a" has no output port named "nope".
-        engine.add_edge("a", "b", 99, 0)
-            .unwrap();
+        engine.add_edge("a", "b", 99, 0).unwrap();
 
         let err = engine.run().await.unwrap_err();
         assert!(
@@ -706,8 +711,7 @@ mod tests {
         engine
             .add_node_from_registry("child", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
             .unwrap();
-        engine.add_edge("boom", "child", 0, 0)
-            .unwrap();
+        engine.add_edge("boom", "child", 0, 0).unwrap();
 
         let report = engine.run().await.expect("run completes even on failure");
         assert!(!report.ok, "run should report failure");

@@ -15,6 +15,13 @@ use crate::dag::{DagError, graph::PortOutputs};
 /// Unique identifier for a node in the DAG.
 pub type NodeId = String;
 
+/// Numeric identifier for an individual port on a node.
+///
+/// Ports are indexed sequentially starting from 0. An edge in the DAG
+/// connects one `(node, PortId)` pair on the output side to another
+/// `(node, PortId)` pair on the input side.
+pub type PortId = u8;
+
 /// The default port name used when a single-input/single-output node does not name its
 /// ports explicitly.
 pub const DEFAULT_PORT: &str = "default";
@@ -26,18 +33,18 @@ pub const DEFAULT_PORT: &str = "default";
 /// of an edge declare a schema, the engine validates compatibility in [`DAG::validate`].
 #[derive(Debug, Clone)]
 pub struct Port {
-    pub index: u8,
+    pub index: PortId,
     pub schema: Option<SchemaRef>,
 }
 
 impl Port {
     /// An untyped port (schema discovered at runtime).
-    pub fn new(index: u8, schema: Option<SchemaRef>) -> Self {
+    pub fn new(index: PortId, schema: Option<SchemaRef>) -> Self {
         Self { index, schema }
     }
 
     /// A port with a known schema.
-    pub fn typed(index: u8, schema: SchemaRef) -> Self {
+    pub fn typed(index: PortId, schema: SchemaRef) -> Self {
         Self {
             index,
             schema: Some(schema),
@@ -55,12 +62,14 @@ impl Port {
     }
 }
 
-/// Data interface group of DagNode, grouped by dataflow direction (input / output)
+/// An ordered collection of [`Port`]s belonging to a single dataflow direction
+/// (input or output) on a node.
 #[derive(Clone)]
 pub struct Ports {
-    ports: HashMap<u8, Port>,
-    /// Whether the number of the port is fixed. If `false`, DataEngine will not validate
-    /// `OverConnected` / `UnderConnected` edge situations.
+    ports: HashMap<PortId, Port>,
+    /// Whether the number of ports is fixed. If `false`, the scheduler will not
+    /// validate `OverConnected` / `UnderConnected` edge situations — useful for
+    /// variadic nodes like `SqlNode` that accept any number of inputs.
     is_fixed: bool,
 }
 impl Default for Ports {
@@ -73,20 +82,24 @@ impl Default for Ports {
 }
 
 impl Ports {
+    /// Append a new port with the next sequential index and the given schema.
     pub fn add_port(&mut self, schema: Option<SchemaRef>) {
         let length = self.ports.len();
         self.ports
-            .insert(length as u8, Port::new(length as u8, schema));
+            .insert(length as PortId, Port::new(length as PortId, schema));
     }
 
-    pub fn get(&self, index: u8) -> Option<&Port> {
+    /// Look up a port by its numeric index.
+    pub fn get(&self, index: PortId) -> Option<&Port> {
         self.ports.get(&index)
     }
 
+    /// Number of declared ports.
     pub fn len(&self) -> usize {
         self.ports.len()
     }
 
+    /// Returns `true` if no ports are declared.
     pub fn is_empty(&self) -> bool {
         self.ports.is_empty()
     }
@@ -113,9 +126,10 @@ impl From<Vec<Port>> for Ports {
 /// port.
 #[derive(Debug, Clone)]
 pub struct NodeInput {
-    /// The consuming node's INPUT port name this data arrived on (e.g. `"left"`,
-    /// `"right"`, or `"default"`). The node looks up its inputs by this name.
-    pub port: u8,
+    /// The consuming node's input **port index** this data arrived on. The node
+    /// looks up its inputs by this index to identify which slot each DataFrame
+    /// belongs to.
+    pub port: PortId,
     /// Globally-unique table name under which `data` is registered in the shared
     /// `SessionContext` (derived from the edge: `"{from_node}__{from_port}__{to_node}"`).
     /// Guaranteed not to collide with any other node's registration.
@@ -161,39 +175,50 @@ impl NodeMeta {
         .add_input_port(None)
     }
 
+    /// Set whether the input port count is fixed (default `true`).
+    ///
+    /// When `false`, the scheduler skips `OverConnected`/`UnderConnected`
+    /// validation on this node's input ports. This is useful for variadic nodes
+    /// that accept a dynamic number of inputs (e.g. `SqlNode`).
     pub fn set_fixed_input(mut self, is_fixed: bool) -> Self {
         self.input_ports.is_fixed = is_fixed;
         self
     }
 
+    /// Append an output port with the given schema (builder-style).
     pub fn add_output_port(mut self, schema: Option<SchemaRef>) -> Self {
         self.output_ports.add_port(schema);
         self
     }
 
+    /// Append an input port with the given schema (builder-style).
     pub fn add_input_port(mut self, schema: Option<SchemaRef>) -> Self {
         self.input_ports.add_port(schema);
         self
     }
 
+    /// Access the declared input ports.
     pub fn input_ports(&self) -> &Ports {
         &self.input_ports
     }
 
+    /// Access the declared output ports.
     pub fn output_ports(&self) -> &Ports {
         &self.output_ports
     }
 
     /// Look up a declared input port by index.
-    pub fn input_port(&self, index: u8) -> Option<&Port> {
+    pub fn input_port(&self, index: PortId) -> Option<&Port> {
         self.input_ports.get(index)
     }
 
     /// Look up a declared output port by index.
-    pub fn output_port(&self, index: u8) -> Option<&Port> {
+    pub fn output_port(&self, index: PortId) -> Option<&Port> {
         self.output_ports.get(index)
     }
 
+    /// Returns `true` if the input port count is fixed (i.e. the scheduler
+    /// will validate edge connectivity).
     pub fn is_fixed_input(&self) -> bool {
         self.input_ports.is_fixed
     }
@@ -202,14 +227,27 @@ impl NodeMeta {
 /// A single unit of work in the DAG.
 ///
 /// `execute` receives one [`NodeInput`] per connected input port (the node identifies each
-/// by its `port` field) and returns its outputs keyed by **output port name**, so the
+/// by its [`NodeInput::port`] index) and returns its outputs keyed by **output port name**, so the
 /// engine can route each [`DataFrame`] through the correct outgoing edge.
 ///
-/// - Stateless: all runtime state is managed by the DAG.
+/// Implementors must be [`Send`] + [`Sync`] because nodes are executed by an async
+/// scheduler that may run them on different tasks.
 #[async_trait]
 pub trait DagNode: Send + Sync {
+    /// Return this node's static metadata (declared ports).
     fn meta(&self) -> &NodeMeta;
+
+    /// Run the node's computation.
+    ///
+    /// Receives one [`NodeInput`] per connected input port and must return a
+    /// [`PortOutputs`] map keyed by output port index.
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError>;
+
+    /// Clone this node into a boxed trait object.
+    ///
+    /// Required because `Clone` is not object-safe; the DAG stores nodes as
+    /// `Box<dyn DagNode>` and needs to duplicate them (e.g. for validation
+    /// dry-runs).
     fn clone_box(&self) -> Box<dyn DagNode>;
 
     /// The kind string identifying this node type (e.g. `"source"`,

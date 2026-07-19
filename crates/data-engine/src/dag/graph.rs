@@ -15,13 +15,19 @@ use tracing::{debug, warn};
 
 use super::utils::{build_inputs, cascade_skip};
 
-use crate::nodes::sink::SinkNode;
 use super::error::DagError;
 use super::runtime::{NodeReport, RunReport, RuntimeStatus, SchedulerConfig};
 use super::{DagNode, NodeId};
+use crate::nodes::sink::SinkNode;
 
 /// Output DataFrames keyed by output port index.
 pub type PortOutputs = HashMap<u8, DataFrame>;
+
+pub struct DagEdge {
+    pub from_node: NodeId,
+    pub to_node: NodeId,
+    pub from_port: u8,
+}
 
 /// Metadata attached to every edge in the graph: which output port of the
 /// source feeds which input port of the target. Exactly one [`DataFrame`] flows
@@ -914,7 +920,7 @@ fn schema_compatible(
 
 #[cfg(test)]
 mod tests {
-    use crate::dag::{NodeMeta, NodeInput};
+    use crate::dag::{NodeInput, NodeMeta};
     use std::assert_matches;
 
     use super::*;
@@ -950,7 +956,9 @@ mod tests {
         fn clone_box(&self) -> Box<dyn super::DagNode> {
             Box::new((*self).clone())
         }
-        fn kind(&self) -> &'static str { "echo" }
+        fn kind(&self) -> &'static str {
+            "echo"
+        }
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -1089,7 +1097,9 @@ mod tests {
         fn clone_box(&self) -> Box<dyn super::DagNode> {
             Box::new((*self).clone())
         }
-        fn kind(&self) -> &'static str { "ported" }
+        fn kind(&self) -> &'static str {
+            "ported"
+        }
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -1146,9 +1156,7 @@ mod tests {
         .unwrap();
         dag.add_node(
             "dst".into(),
-            Box::new(PortedNode(
-                NodeMeta::new().add_input_port(Some(in_schema)),
-            )),
+            Box::new(PortedNode(NodeMeta::new().add_input_port(Some(in_schema)))),
         )
         .unwrap();
         // Schema mismatch is caught at `add_edge` time (via validate_edge_schema).
@@ -1304,8 +1312,7 @@ mod tests {
         let mut dag = DAG::default();
         add(&mut dag, "x");
         // Insert a fake output.
-        dag.outputs
-            .insert("x".to_string(), HashMap::new());
+        dag.outputs.insert("x".to_string(), HashMap::new());
         assert!(dag.output("x").is_some());
 
         dag.replace_node("x", Box::new(EchoNode(dummy_meta())))
