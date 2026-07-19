@@ -4,7 +4,7 @@ use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodePorts};
 
 use crate::{
     dag::{DagError, graph::PortOutputs},
@@ -37,7 +37,7 @@ impl From<SqlNodeError> for DagError {
 /// (`set_fixed_input(false)`); the ports are whatever the wiring connects.
 #[derive(Clone)]
 pub struct SqlNode {
-    meta: NodeMeta,
+    meta: NodePorts,
     sql_query: String,
     ctx: SessionContext,
 }
@@ -71,7 +71,7 @@ impl NodeFactory for SqlNodeFactory {
 
 impl SqlNode {
     pub fn new(query: String, ctx: SessionContext) -> Self {
-        let meta = NodeMeta::new().add_output_port(None).set_fixed_input(false);
+        let meta = NodePorts::new().add_output_port(None).set_fixed_input(false);
         Self {
             meta,
             sql_query: query,
@@ -79,11 +79,11 @@ impl SqlNode {
         }
     }
 
-    /// Create a [`SqlNode`] from a pre-built [`NodeMeta`] (useful for
+    /// Create a [`SqlNode`] from a pre-built [`NodePorts`] (useful for
     /// multi-input join nodes that declare several input ports).
-    pub fn from_meta(meta: NodeMeta, query: String, ctx: SessionContext) -> Self {
+    pub fn from_ports(ports: NodePorts, query: String, ctx: SessionContext) -> Self {
         Self {
-            meta,
+            meta: ports,
             sql_query: query,
             ctx,
         }
@@ -96,7 +96,7 @@ impl SqlNode {
 
 #[async_trait]
 impl DagNode for SqlNode {
-    fn meta(&self) -> &NodeMeta {
+    fn ports(&self) -> &NodePorts {
         &self.meta
     }
 

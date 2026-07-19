@@ -48,7 +48,7 @@ pub struct NodeRegistry {
 }
 
 impl NodeRegistry {
-    /// NOTE: currently all nodes are directly registered in this function. In future,
+    /// NOTE: currently all nodes are directly registered in this function.
     pub fn new(ctx: SessionContext, datalake: Arc<Datalake>) -> Self {
         let node_ctx = NodeCtx {
             session: ctx,

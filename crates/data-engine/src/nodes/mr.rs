@@ -25,7 +25,7 @@ use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodePorts};
 use crate::{
     dag::{DagError, graph::PortOutputs},
     node_registry::registry::{NodeCtx, NodeFactory},
@@ -447,14 +447,14 @@ const MR_NODE_KIND: &str = "mr";
 /// columns (see [`input_schema`]).
 #[derive(Clone)]
 pub struct MrNode {
-    meta: NodeMeta,
+    meta: NodePorts,
     spec: MrNodeSpec,
 }
 
 impl MrNode {
     /// Construct an [`MrNode`] from a fully-specified [`MrNodeSpec`].
     pub fn new(spec: MrNodeSpec) -> Self {
-        let meta = NodeMeta::new()
+        let meta = NodePorts::new()
             .add_input_port(Some(input_schema()))
             .add_output_port(Some(output_schema()));
         Self { meta, spec }
@@ -484,7 +484,7 @@ impl NodeFactory for MrNodeFactory {
 
 #[async_trait]
 impl DagNode for MrNode {
-    fn meta(&self) -> &NodeMeta {
+    fn ports(&self) -> &NodePorts {
         &self.meta
     }
 

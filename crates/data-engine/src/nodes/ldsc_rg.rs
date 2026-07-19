@@ -28,7 +28,7 @@ use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodePorts};
 use crate::{
     dag::{DagError, graph::PortOutputs},
     node_registry::registry::{NodeCtx, NodeFactory},
@@ -219,7 +219,7 @@ const LDSC_RG_NODE_KIND: &str = "ldsc_rg";
 #[derive(Clone)]
 pub struct LdscRgNode {
     /// DAG node metadata (id, ports): two typed inputs, one typed output.
-    meta: NodeMeta,
+    meta: NodePorts,
     /// Iceberg data lake handle, used to fetch the LD score panel
     /// (`iceberg.ld_score.*`) for the 3-way join.
     datalake: Arc<Datalake>,
@@ -263,7 +263,7 @@ impl LdscRgNode {
         // sumstats, and one output with the fixed rg summary schema. Declaring
         // the schemas lets the DAG validate edge compatibility at
         // `add_edge`/`validate` time.
-        let meta = NodeMeta::new()
+        let meta = NodePorts::new()
             .add_input_port(Some(input_schema()))
             .add_input_port(Some(input_schema()))
             .add_output_port(Some(output_schema()));
@@ -287,7 +287,7 @@ const LD_WLD_COL: &str = "WLD";
 
 #[async_trait]
 impl DagNode for LdscRgNode {
-    fn meta(&self) -> &NodeMeta {
+    fn ports(&self) -> &NodePorts {
         &self.meta
     }
 
@@ -569,8 +569,8 @@ mod tests {
     async fn test_ldsc_rg_node_structure() {
         let node = LdscRgNode::new(Arc::new(Datalake::new()), LdscRgConfig::new(vec![20.0], 5));
         assert_eq!(node.kind(), "ldsc_rg");
-        assert_eq!(node.meta().input_ports().len(), 2);
-        assert_eq!(node.meta().output_ports().len(), 1);
+        assert_eq!(node.ports().input_ports().len(), 2);
+        assert_eq!(node.ports().output_ports().len(), 1);
     }
 
     /// The declared output schema has exactly the rg summary columns.

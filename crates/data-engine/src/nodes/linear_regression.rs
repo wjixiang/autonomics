@@ -16,7 +16,7 @@ use schemars::{schema_for, JsonSchema};
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodePorts};
 use crate::{
     dag::{DagError, graph::PortOutputs},
     node_registry::registry::{NodeCtx, NodeFactory},
@@ -198,7 +198,7 @@ fn build_result_batch(
 /// A transform node that fits an OLS linear regression on the input DataFrame.
 #[derive(Clone)]
 pub struct LinearRegressionNode {
-    meta: NodeMeta,
+    meta: NodePorts,
     x_columns: Vec<String>,
     y_column: String,
     intercept: bool,
@@ -210,7 +210,7 @@ impl LinearRegressionNode {
         y_column: String,
         intercept: bool,
     ) -> Self {
-        let meta = NodeMeta::new().add_output_port(None).add_input_port(None);
+        let meta = NodePorts::new().add_output_port(None).add_input_port(None);
         Self {
             meta,
             x_columns,
@@ -260,7 +260,7 @@ impl NodeFactory for LinearRegressionNodeFactory {
 
 #[async_trait]
 impl DagNode for LinearRegressionNode {
-    fn meta(&self) -> &NodeMeta {
+    fn ports(&self) -> &NodePorts {
         &self.meta
     }
 

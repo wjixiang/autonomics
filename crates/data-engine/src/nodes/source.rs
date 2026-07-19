@@ -18,7 +18,7 @@ use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodePorts};
 use crate::{
     dag::{DagError, graph::PortOutputs},
     node_registry::registry::{NodeCtx, NodeFactory},
@@ -129,7 +129,7 @@ impl From<SourceError> for DagError {
 
 #[derive(Clone)]
 pub struct SourceNode {
-    meta: NodeMeta,
+    meta: NodePorts,
     source: Source,
     ctx: SessionContext,
 }
@@ -137,7 +137,7 @@ pub struct SourceNode {
 impl SourceNode {
     pub fn new(source: Source, ctx: SessionContext) -> Self {
         // A source has no inputs and a single output port.
-        let meta = NodeMeta::new().add_output_port(None);
+        let meta = NodePorts::new().add_output_port(None);
         Self { meta, source, ctx }
     }
 }
@@ -197,7 +197,7 @@ pub fn normalize_path(path: &str) -> String {
 
 #[async_trait]
 impl DagNode for SourceNode {
-    fn meta(&self) -> &NodeMeta {
+    fn ports(&self) -> &NodePorts {
         &self.meta
     }
 

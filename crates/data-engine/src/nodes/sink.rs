@@ -19,7 +19,7 @@ use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::meta::{DagNode, NodeInput, NodeMeta};
+use super::meta::{DagNode, NodeInput, NodePorts};
 use super::source::normalize_path;
 use crate::{
     dag::DagError,
@@ -82,7 +82,7 @@ impl From<SinkError> for DagError {
 }
 
 pub struct SinkNode {
-    meta: NodeMeta,
+    meta: NodePorts,
     sink: Sink,
     mode: SinkMode,
     ctx: SessionContext,
@@ -169,7 +169,7 @@ impl SinkNode {
         ctx: SessionContext,
         datalake: Arc<Datalake>,
     ) -> Self {
-        let meta = NodeMeta::new().add_input_port(None);
+        let meta = NodePorts::new().add_input_port(None);
         Self {
             meta,
             sink,
@@ -299,7 +299,7 @@ impl NodeFactory for SinkNodeFactory {
 
 #[async_trait]
 impl DagNode for SinkNode {
-    fn meta(&self) -> &NodeMeta {
+    fn ports(&self) -> &NodePorts {
         &self.meta
     }
 

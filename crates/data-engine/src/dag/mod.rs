@@ -1,6 +1,6 @@
 //! DAG workflow engine: graph model, and async scheduler.
 //!
-//! Node abstractions ([`DagNode`] trait, [`NodeMeta`], [`NodeInput`]) live in
+//! Node abstractions ([`DagNode`] trait, [`NodePorts`], [`NodeInput`]) live in
 //! [`crate::nodes`] and are re-exported here for convenience so
 //! existing `use crate::dag::{DagNode, ...}` paths keep working.
 //!
@@ -15,7 +15,7 @@ pub mod utils;
 
 // Re-export node abstractions from the nodes module for backward compatibility
 // and so that dag internals (graph.rs, runtime.rs) can use `super::DagNode` etc.
-pub use crate::nodes::{DagNode, NodeId, NodeInput, NodeMeta};
+pub use crate::nodes::{DagNode, NodeId, NodeInput, NodePorts};
 
 pub use error::DagError;
 pub use graph::DAG;

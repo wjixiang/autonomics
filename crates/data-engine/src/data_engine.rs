@@ -69,7 +69,7 @@ impl DataEngine {
     /// nodes or ad-hoc types not in the registry.
     ///
     /// ```ignore
-    /// let meta = NodeMeta::new();
+    /// let meta = NodePorts::new();
     /// engine.add_node("x", MyNode::new(meta, ...))?;
     /// ```
     pub fn add_node<N: DagNode + 'static>(
@@ -252,7 +252,7 @@ mod tests {
     use crate::dag::graph::PortOutputs;
     use crate::dag::{DagError, RuntimeStatus, SchedulerConfig};
     use crate::data_engine::error::Error;
-    use crate::nodes::{DagNode, NodeInput, NodeMeta};
+    use crate::nodes::{DagNode, NodeInput, NodePorts};
     use datafusion::common::HashMap;
     use datafusion::prelude::CsvReadOptions;
     use fs::OpendalFileStorage;
@@ -454,8 +454,8 @@ mod tests {
         engine
             .add_node(
                 "join",
-                super::SqlNode::from_meta(
-                    NodeMeta::new()
+                super::SqlNode::from_ports(
+                    NodePorts::new()
                         .add_input_port(None)
                         .add_input_port(None)
                         .add_output_port(None),
@@ -692,10 +692,10 @@ mod tests {
 
     /// A node that always fails — for the cascade test. Source-like (no inputs).
     #[derive(Clone)]
-    struct BoomNode(NodeMeta);
+    struct BoomNode(NodePorts);
     #[async_trait::async_trait]
     impl DagNode for BoomNode {
-        fn meta(&self) -> &NodeMeta {
+        fn ports(&self) -> &NodePorts {
             &self.0
         }
         fn clone_box(&self) -> Box<dyn DagNode> {
@@ -716,8 +716,8 @@ mod tests {
     async fn failure_cascades() {
         let mut engine = DataEngine::builder().build();
         // Source-like boom node (no input ports) so it passes port validation.
-        let boom_meta = NodeMeta::source();
-        engine.add_node("boom", BoomNode(boom_meta)).unwrap();
+        let boom_ports = NodePorts::new().add_output_port(None);
+        engine.add_node("boom", BoomNode(boom_ports)).unwrap();
         engine
             .add_node_from_registry("child", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
             .unwrap();
@@ -735,10 +735,10 @@ mod tests {
 
     /// A node that sleeps — for the parallelism test. No inputs, no real output.
     #[derive(Clone)]
-    struct SleepNode(NodeMeta);
+    struct SleepNode(NodePorts);
     #[async_trait::async_trait]
     impl DagNode for SleepNode {
-        fn meta(&self) -> &NodeMeta {
+        fn ports(&self) -> &NodePorts {
             &self.0
         }
         fn clone_box(&self) -> Box<dyn DagNode> {
@@ -769,7 +769,7 @@ mod tests {
             for i in 0..4 {
                 let id = format!("s{i}");
                 // No input ports: standalone nodes pass port validation.
-                let meta = NodeMeta::source();
+                let meta = NodePorts::new().add_output_port(None);
                 engine.add_node(id, SleepNode(meta)).unwrap();
             }
             let start = Instant::now();

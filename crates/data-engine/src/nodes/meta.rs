@@ -130,24 +130,17 @@ pub struct NodeInput {
     /// looks up its inputs by this index to identify which slot each DataFrame
     /// belongs to.
     pub port: PortId,
-    /// Globally-unique table name under which `data` is registered in the shared
-    /// `SessionContext` (derived from the edge: `"{from_node}__{from_port}__{to_node}"`).
-    /// Guaranteed not to collide with any other node's registration.
-    ///
-    /// TODO: Need to remove this field, DAG node should use auto-generated port index to reference
-    /// instead of naming dataframe explicitly.
-    // pub df_name: String,
     pub data: DataFrame,
 }
 
-/// Static per-node metadata: declared input/output ports.
-#[derive(Clone)]
-pub struct NodeMeta {
+/// Static per-node port layout: declared input/output ports.
+#[derive(Clone, Default)]
+pub struct NodePorts {
     input_ports: Ports,
     output_ports: Ports,
 }
 
-impl NodeMeta {
+impl NodePorts {
     /// A transform node with a single default input port and a single default output
     /// port.
     pub fn new() -> Self {
@@ -155,24 +148,6 @@ impl NodeMeta {
             input_ports: Ports::default(),
             output_ports: Ports::default(),
         }
-    }
-
-    /// A source node: no inputs, a single default output port.
-    pub fn source() -> Self {
-        Self {
-            input_ports: Ports::default(),
-            output_ports: Ports::default(),
-        }
-        .add_output_port(None)
-    }
-
-    /// A sink node: a single default input port, no outputs.
-    pub fn sink() -> Self {
-        Self {
-            input_ports: Ports::default(),
-            output_ports: Ports::default(),
-        }
-        .add_input_port(None)
     }
 
     /// Set whether the input port count is fixed (default `true`).
@@ -232,10 +207,14 @@ impl NodeMeta {
 ///
 /// Implementors must be [`Send`] + [`Sync`] because nodes are executed by an async
 /// scheduler that may run them on different tasks.
+///
+/// - NodeSpec: editable parameters exposured to public during runtime, control customized action of node.
+/// - NodePorts: contain input / output port wiring definitions of the node. It is definite during
+/// compile time
 #[async_trait]
 pub trait DagNode: Send + Sync {
     /// Return this node's static metadata (declared ports).
-    fn meta(&self) -> &NodeMeta;
+    fn ports(&self) -> &NodePorts;
 
     /// Run the node's computation.
     ///

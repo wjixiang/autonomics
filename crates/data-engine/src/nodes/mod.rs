@@ -1,6 +1,6 @@
 //! Node abstractions and built-in implementations.
 //!
-//! [`meta`] defines the [`DagNode`] trait, [`NodeMeta`], and [`NodeInput`] —
+//! [`meta`] defines the [`DagNode`] trait, [`NodePorts`], and [`NodeInput`] —
 //! the contract every node fulfils. Concrete implementations live in
 //! [`source`], [`sql_node`], and [`sink`].
 
@@ -17,7 +17,7 @@ pub mod sql_node;
 pub use ldsc_hsq::{LdscHsqConfig, LdscHsqNode, LdscHsqNodeFactory};
 pub use ldsc_rg::{LdscRgConfig, LdscRgNode, LdscRgNodeFactory};
 pub use linear_regression::{LinearRegressionNode, LinearRegressionNodeFactory, LinearRegressionNodeSpec};
-pub use meta::{DEFAULT_PORT, DagNode, NodeId, NodeInput, NodeMeta, Port};
+pub use meta::{DEFAULT_PORT, DagNode, NodeId, NodeInput, NodePorts, Port};
 pub use mr::{MrNode, MrNodeFactory, MrNodeSpec, MrParameters};
 pub use mock_node::{MockNodeFactory, MockNodeSpec};
 pub use sink::{Sink, SinkMode, SinkNode, SinkNodeFactory, SinkNodeSpec, WriteFormat};

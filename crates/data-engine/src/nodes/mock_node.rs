@@ -6,14 +6,14 @@ use schemars::{schema_for, JsonSchema};
 use serde::Deserialize;
 
 use crate::{
-    dag::{DagError, DagNode, NodeInput, NodeMeta, graph::PortOutputs},
+    dag::{DagError, DagNode, NodeInput, NodePorts, graph::PortOutputs},
     dataset::{BuiltinDataset, get_builtin_dataset},
     node_registry::registry::{NodeCtx, NodeFactory},
 };
 
 #[derive(Clone)]
 pub struct MockNode {
-    meta: NodeMeta,
+    meta: NodePorts,
 }
 
 #[derive(Debug)]
@@ -65,13 +65,13 @@ impl MockNode {}
 impl Default for MockNode {
     fn default() -> Self {
         // A source-style mock: no inputs, one output port "iris".
-        let meta = NodeMeta::new();
+        let meta = NodePorts::new();
         Self { meta }
     }
 }
 #[async_trait]
 impl DagNode for MockNode {
-    fn meta(&self) -> &NodeMeta {
+    fn ports(&self) -> &NodePorts {
         &self.meta
     }
 

@@ -455,8 +455,8 @@ impl DAG {
         self.resolve_nodes(&from, &to)?;
 
         // Enforce strict 1:1 on declared input ports at edge-insertion time.
-        let to_meta = self.nodes[&to].meta();
-        if to_meta.is_fixed_input() && to_meta.input_port(to_port).is_some() {
+        let to_ports = self.nodes[&to].ports();
+        if to_ports.is_fixed_input() && to_ports.input_port(to_port).is_some() {
             self.ensure_port_available(&to, to_port)?;
         }
 
@@ -587,7 +587,7 @@ impl DAG {
     ///
     /// Before swapping, every edge touching this node is re-validated:
     ///   - the port referenced by the edge must still exist on the new node's
-    ///     `NodeMeta`
+    ///     `NodePorts`
     ///   - if both endpoints declare a port schema, they must remain compatible
     ///
     /// If any edge fails validation the replacement is rejected and the old
@@ -598,7 +598,7 @@ impl DAG {
             .get(id)
             .ok_or_else(|| DagError::UnknownNode(id.to_string()))?;
 
-        let new_meta = new_node.meta();
+        let new_ports = new_node.ports();
 
         // Validate incoming edges: each upstream's from_port must exist on the
         // source node (unchanged) and the to_port must exist on the new node.
@@ -609,10 +609,10 @@ impl DAG {
             let Some(from_node) = from_node else {
                 continue;
             };
-            let from_meta = from_node.meta();
+            let from_ports = from_node.ports();
 
             // Source port still exists.
-            if from_meta.output_port(label.from_port).is_none() {
+            if from_ports.output_port(label.from_port).is_none() {
                 return Err(DagError::PortNotFound {
                     node: from.clone(),
                     port: label.from_port,
@@ -620,7 +620,7 @@ impl DAG {
                 });
             }
             // Target port must exist on the new node.
-            if new_meta.is_fixed_input() && new_meta.input_port(label.to_port).is_none() {
+            if new_ports.is_fixed_input() && new_ports.input_port(label.to_port).is_none() {
                 return Err(DagError::PortNotFound {
                     node: id.to_string(),
                     port: label.to_port,
@@ -640,10 +640,10 @@ impl DAG {
             let Some(to_node) = to_node else {
                 continue;
             };
-            let to_meta = to_node.meta();
+            let to_ports = to_node.ports();
 
             // Source port must exist on the new node.
-            if new_meta.output_port(label.from_port).is_none() {
+            if new_ports.output_port(label.from_port).is_none() {
                 return Err(DagError::PortNotFound {
                     node: id.to_string(),
                     port: label.from_port,
@@ -651,7 +651,7 @@ impl DAG {
                 });
             }
             // Target port still exists on downstream.
-            if to_meta.is_fixed_input() && to_meta.input_port(label.to_port).is_none() {
+            if to_ports.is_fixed_input() && to_ports.input_port(label.to_port).is_none() {
                 return Err(DagError::PortNotFound {
                     node: to.clone(),
                     port: label.to_port,
@@ -748,11 +748,11 @@ impl DAG {
             let from = self.graph[edge.source()].clone();
             let to = self.graph[edge.target()].clone();
             let label = edge.weight();
-            let from_meta = self.nodes[&from].meta();
-            let to_meta = self.nodes[&to].meta();
+            let from_ports = self.nodes[&from].ports();
+            let to_ports = self.nodes[&to].ports();
 
             // Port existence.
-            if from_meta.output_port(label.from_port).is_none() {
+            if from_ports.output_port(label.from_port).is_none() {
                 return Err(DagError::PortNotFound {
                     node: from,
                     port: label.from_port,
@@ -760,7 +760,7 @@ impl DAG {
                 });
             }
 
-            if to_meta.is_fixed_input() && to_meta.input_port(label.to_port).is_none() {
+            if to_ports.is_fixed_input() && to_ports.input_port(label.to_port).is_none() {
                 return Err(DagError::PortNotFound {
                     node: to.clone(),
                     port: label.to_port,
@@ -779,7 +779,7 @@ impl DAG {
 
         // Completeness: every declared input port must have exactly one edge.
         for id in self.nodes.keys() {
-            let meta = self.nodes[id].meta();
+            let meta = self.nodes[id].ports();
             for port in meta.input_ports().iter() {
                 if !connected.contains(&((*id).clone(), port.index)) {
                     return Err(DagError::PortDisconnected {
@@ -814,8 +814,8 @@ impl DAG {
         let (Some(from_node), Some(to_node)) = (self.nodes.get(from), self.nodes.get(to)) else {
             return Ok(());
         };
-        let from_port_field = from_node.meta().output_port(from_port);
-        let to_port_field = to_node.meta().input_port(to_port);
+        let from_port_field = from_node.ports().output_port(from_port);
+        let to_port_field = to_node.ports().input_port(to_port);
         let (Some(fp), Some(tp)) = (from_port_field, to_port_field) else {
             return Ok(());
         };
@@ -974,13 +974,13 @@ fn schema_compatible(
 
 #[cfg(test)]
 mod tests {
-    use crate::dag::{NodeInput, NodeMeta};
+    use crate::dag::{NodeInput, NodePorts};
     use std::assert_matches;
 
     use super::*;
 
-    fn dummy_meta() -> NodeMeta {
-        NodeMeta::new()
+    fn dummy_ports() -> NodePorts {
+        NodePorts::new()
             .add_input_port(None)
             .add_output_port(None)
             .set_fixed_input(false)
@@ -1001,10 +1001,10 @@ mod tests {
 
     // A no-op node so tests can build a real DAG without touching IO.
     #[derive(Clone)]
-    struct EchoNode(NodeMeta);
+    struct EchoNode(NodePorts);
     #[async_trait::async_trait]
     impl super::DagNode for EchoNode {
-        fn meta(&self) -> &NodeMeta {
+        fn ports(&self) -> &NodePorts {
             &self.0
         }
         fn clone_box(&self) -> Box<dyn super::DagNode> {
@@ -1025,7 +1025,7 @@ mod tests {
     }
 
     fn add(dag: &mut DAG, id: &str) {
-        dag.add_node(id.into(), Box::new(EchoNode(dummy_meta())))
+        dag.add_node(id.into(), Box::new(EchoNode(dummy_ports())))
             .unwrap();
     }
 
@@ -1072,7 +1072,7 @@ mod tests {
         ));
         // duplicate id
         assert!(matches!(
-            dag.add_node("a".into(), Box::new(EchoNode(dummy_meta()))),
+            dag.add_node("a".into(), Box::new(EchoNode(dummy_ports()))),
             Err(DagError::DuplicateNode(_))
         ));
     }
@@ -1141,11 +1141,11 @@ mod tests {
 
     /// A no-op node with caller-supplied port topology (for schema/port tests).
     #[derive(Clone)]
-    struct PortedNode(NodeMeta);
+    struct PortedNode(NodePorts);
 
     #[async_trait::async_trait]
     impl super::DagNode for PortedNode {
-        fn meta(&self) -> &NodeMeta {
+        fn ports(&self) -> &NodePorts {
             &self.0
         }
         fn clone_box(&self) -> Box<dyn super::DagNode> {
@@ -1204,13 +1204,13 @@ mod tests {
         dag.add_node(
             "src".into(),
             Box::new(PortedNode(
-                NodeMeta::new().add_output_port(Some(out_schema)),
+                NodePorts::new().add_output_port(Some(out_schema)),
             )),
         )
         .unwrap();
         dag.add_node(
             "dst".into(),
-            Box::new(PortedNode(NodeMeta::new().add_input_port(Some(in_schema)))),
+            Box::new(PortedNode(NodePorts::new().add_input_port(Some(in_schema)))),
         )
         .unwrap();
         // Schema mismatch is caught at `add_edge` time (via validate_edge_schema).
@@ -1253,13 +1253,13 @@ mod tests {
     #[test]
     fn one_to_multi_wiring_accept() {
         let mut dag = DAG::default();
-        let node_a_meta = NodeMeta::new().add_output_port(None);
-        let node_b_meta = NodeMeta::new().add_input_port(None);
-        let node_c_meta = NodeMeta::new().add_input_port(None);
+        let node_a_ports = NodePorts::new().add_output_port(None);
+        let node_b_ports = NodePorts::new().add_input_port(None);
+        let node_c_ports = NodePorts::new().add_input_port(None);
 
-        let node_a = PortedNode(node_a_meta);
-        let node_b = PortedNode(node_b_meta);
-        let node_c = PortedNode(node_c_meta);
+        let node_a = PortedNode(node_a_ports);
+        let node_b = PortedNode(node_b_ports);
+        let node_c = PortedNode(node_c_ports);
 
         dag.add_node("node_a_id".into(), Box::new(node_a)).unwrap();
         dag.add_node("node_b_id".into(), Box::new(node_b)).unwrap();
@@ -1276,15 +1276,15 @@ mod tests {
     #[test]
     fn multi_to_one_wiring_reject() {
         let mut dag = DAG::default();
-        let node_a_meta = NodeMeta::new().add_output_port(None);
-        let node_b_meta = NodeMeta::new().add_input_port(None);
-        let node_c_meta = NodeMeta::new().add_output_port(None);
+        let node_a_ports = NodePorts::new().add_output_port(None);
+        let node_b_ports = NodePorts::new().add_input_port(None);
+        let node_c_ports = NodePorts::new().add_output_port(None);
 
-        dag.add_node("node_a_id".into(), Box::new(PortedNode(node_a_meta)))
+        dag.add_node("node_a_id".into(), Box::new(PortedNode(node_a_ports)))
             .unwrap();
-        dag.add_node("node_b_id".into(), Box::new(PortedNode(node_b_meta)))
+        dag.add_node("node_b_id".into(), Box::new(PortedNode(node_b_ports)))
             .unwrap();
-        dag.add_node("node_c_id".into(), Box::new(PortedNode(node_c_meta)))
+        dag.add_node("node_c_id".into(), Box::new(PortedNode(node_c_ports)))
             .unwrap();
 
         // Two edges to the same declared input port 0 — rejected at add_edge.
@@ -1303,15 +1303,15 @@ mod tests {
         // time. Two nodes (a, c) both trying to connect to b's declared input
         // port 0 — the second `add_edge` must reject immediately.
         let mut dag = DAG::default();
-        let node_a_meta = NodeMeta::new().add_output_port(None);
-        let node_b_meta = NodeMeta::new().add_input_port(None);
-        let node_c_meta = NodeMeta::new().add_output_port(None);
+        let node_a_ports = NodePorts::new().add_output_port(None);
+        let node_b_ports = NodePorts::new().add_input_port(None);
+        let node_c_ports = NodePorts::new().add_output_port(None);
 
-        dag.add_node("node_a_id".into(), Box::new(PortedNode(node_a_meta)))
+        dag.add_node("node_a_id".into(), Box::new(PortedNode(node_a_ports)))
             .unwrap();
-        dag.add_node("node_b_id".into(), Box::new(PortedNode(node_b_meta)))
+        dag.add_node("node_b_id".into(), Box::new(PortedNode(node_b_ports)))
             .unwrap();
-        dag.add_node("node_c_id".into(), Box::new(PortedNode(node_c_meta)))
+        dag.add_node("node_c_id".into(), Box::new(PortedNode(node_c_ports)))
             .unwrap();
 
         // First edge to b's declared input port 0 — OK.
@@ -1349,7 +1349,7 @@ mod tests {
     fn replace_node_preserves_edges() {
         let mut dag = get_diamond_dag(); // a→b, a→c, b→d, c→d
         // Replace node "b" with a new EchoNode (same port topology).
-        let new_b = Box::new(EchoNode(dummy_meta()));
+        let new_b = Box::new(EchoNode(dummy_ports()));
         dag.replace_node("b", new_b).unwrap();
 
         // All four nodes still present.
@@ -1369,7 +1369,7 @@ mod tests {
         dag.outputs.insert("x".to_string(), HashMap::new());
         assert!(dag.output("x").is_some());
 
-        dag.replace_node("x", Box::new(EchoNode(dummy_meta())))
+        dag.replace_node("x", Box::new(EchoNode(dummy_ports())))
             .unwrap();
         // Output must be cleared after replacement.
         assert!(dag.output("x").is_none());
@@ -1379,7 +1379,7 @@ mod tests {
     fn replace_node_unknown_id_rejected() {
         let mut dag = DAG::default();
         let err = dag
-            .replace_node("ghost", Box::new(EchoNode(dummy_meta())))
+            .replace_node("ghost", Box::new(EchoNode(dummy_ports())))
             .unwrap_err();
         assert!(matches!(err, DagError::UnknownNode(_)));
     }
@@ -1393,14 +1393,14 @@ mod tests {
         dag.add_node(
             "src".into(),
             Box::new(PortedNode(
-                NodeMeta::new().add_output_port(Some(out_schema)),
+                NodePorts::new().add_output_port(Some(out_schema)),
             )),
         )
         .unwrap();
         dag.add_node(
             "dst".into(),
             Box::new(PortedNode(
-                NodeMeta::new().add_input_port(Some(in_schema.clone())),
+                NodePorts::new().add_input_port(Some(in_schema.clone())),
             )),
         )
         .unwrap();
@@ -1408,7 +1408,7 @@ mod tests {
 
         // Replace "dst" with a node that has NO declared input ports → the
         // existing edge references port 0 which no longer exists.
-        let no_ports = Box::new(PortedNode(NodeMeta::new()));
+        let no_ports = Box::new(PortedNode(NodePorts::new()));
         let err = dag.replace_node("dst", no_ports).unwrap_err();
         assert!(
             matches!(err, DagError::PortNotFound { ref node, port, .. } if node == "dst" && port == 0),
