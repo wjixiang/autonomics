@@ -271,7 +271,7 @@ pub struct SinkNodeFactory {}
 
 impl NodeFactory for SinkNodeFactory {
     fn kind(&self) -> &'static str {
-        <SinkNode as DagNode>::kind()
+        "sink"
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -315,10 +315,7 @@ impl DagNode for SinkNode {
         Box::new(cp_node)
     }
 
-    fn kind() -> &'static str
-    where
-        Self: Sized,
-    {
+    fn kind(&self) -> &'static str {
         "sink"
     }
 

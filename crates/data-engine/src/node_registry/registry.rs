@@ -126,6 +126,8 @@ mod tests {
                 serde_json::json!({"x_columns": ["x"], "y_column": "y"})
             }
             "ldsc" => serde_json::json!({"m": [1000000.0], "n_blocks": 200}),
+            "ldsc_rg" => serde_json::json!({"m": [1000000.0], "n_blocks": 200}),
+            "mr" => serde_json::json!({"action": 2, "method_list": ["mr_egger_regression"]}),
             "mock" => serde_json::json!({}),
             other => panic!("no fixture spec for kind '{other}'"),
         }
@@ -151,9 +153,9 @@ mod tests {
                 .build_node(kind, spec)
                 .unwrap_or_else(|e| panic!("build_node({kind}) failed: {e}"));
             assert_eq!(
-                node.node_type(),
+                node.kind(),
                 kind,
-                "factory kind '{}' must match built node's node_type()",
+                "factory kind '{}' must match built node's kind()",
                 kind
             );
         }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
 
-use crate::data_engine::dag::{DAG, RunReport, SchedulerConfig};
+use crate::data_engine::dag::{DAG, DagError, RunReport, SchedulerConfig};
 use crate::data_engine::error::{Error, Result};
 use crate::data_engine::nodes::DagNode;
 use crate::node_registry::registry::NodeRegistry;
@@ -123,17 +123,13 @@ impl DataEngine {
     /// Errors if `id` does not exist, if the kind has no registered factory,
     /// if the spec fails deserialization, or if any existing edge becomes
     /// incompatible with the new port layout.
-    pub fn update_node(
-        &mut self,
-        id: impl Into<String>,
-        spec: serde_json::Value,
-    ) -> Result<()> {
+    pub fn update_node(&mut self, id: impl Into<String>, spec: serde_json::Value) -> Result<()> {
         let id = id.into();
         let kind = self
             .dag
             .get_node(&id)
             .ok_or_else(|| Error::Dag(DagError::UnknownNode(id.clone())))?
-            .node_type()
+            .kind()
             .to_string();
         let node = self.node_registry.build_node(&kind, spec)?;
         self.dag.replace_node(&id, node)?;
@@ -787,7 +783,9 @@ mod tests {
         fn clone_box(&self) -> Box<dyn DagNode> {
             Box::new((*self).clone())
         }
-        fn kind() -> &'static str where Self: Sized { "boom" }
+        fn kind(&self) -> &'static str {
+            "boom"
+        }
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -829,7 +827,9 @@ mod tests {
         fn clone_box(&self) -> Box<dyn DagNode> {
             Box::new((*self).clone())
         }
-        fn kind() -> &'static str where Self: Sized { "sleep" }
+        fn kind(&self) -> &'static str {
+            "sleep"
+        }
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -1257,9 +1257,7 @@ mod tests {
             .add_node_from_registry("x", "sql", serde_json::json!({"sql_query": "SELECT 1"}))
             .unwrap();
         // Empty spec missing sql_query.
-        let err = engine
-            .update_node("x", serde_json::json!({}))
-            .unwrap_err();
+        let err = engine.update_node("x", serde_json::json!({})).unwrap_err();
         assert!(
             err.to_string().contains("sql_query") || err.to_string().contains("missing field"),
             "expected deserialization error, got {err}"

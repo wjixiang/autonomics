@@ -212,25 +212,10 @@ pub trait DagNode: Send + Sync {
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError>;
     fn clone_box(&self) -> Box<dyn DagNode>;
 
-    /// The single source of truth for this node's kind (e.g. `"source"`,
+    /// The kind string identifying this node type (e.g. `"source"`,
     /// `"sql"`, `"sink"`). This MUST match the [`NodeFactory::kind`] that
-    /// builds this node type — factories delegate here (`<N as
-    /// DagNode>::kind()`), so the string is defined exactly once per node
-    /// type and cannot drift between the trait and the registry.
-    ///
-    /// Not callable on `dyn DagNode` (it carries `where Self: Sized` and is
-    /// excluded from the vtable); use [`Self::node_type`] for dynamic
-    /// dispatch.
-    fn kind() -> &'static str
-    where
-        Self: Sized;
-
-    /// Human-readable node kind. Defaults to [`Self::kind`]; override only
-    /// if a node genuinely needs a display name distinct from its registry
-    /// kind (none currently do).
-    fn node_type(&self) -> &'static str {
-        Self::kind()
-    }
+    /// builds this node type.
+    fn kind(&self) -> &'static str;
 
     /// Downcast helper for concrete-type introspection (e.g. extracting
     /// sink-specific details at report time).

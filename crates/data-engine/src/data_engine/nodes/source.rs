@@ -160,7 +160,7 @@ pub struct SourceNodeFactory {}
 
 impl NodeFactory for SourceNodeFactory {
     fn kind(&self) -> &'static str {
-        <SourceNode as DagNode>::kind()
+        "source"
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -205,10 +205,7 @@ impl DagNode for SourceNode {
         Box::new((*self).clone())
     }
 
-    fn kind() -> &'static str
-    where
-        Self: Sized,
-    {
+    fn kind(&self) -> &'static str {
         "source"
     }
 

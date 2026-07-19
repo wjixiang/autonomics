@@ -16,12 +16,12 @@
 use std::sync::Arc;
 
 use arrow_array::{
-    Array, Float32Array, Float64Array, Int64Array, Int8Array, Int16Array, Int32Array, RecordBatch,
+    Array, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, RecordBatch,
     StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -172,13 +172,10 @@ fn extract_required_string(
             ),
         };
         for v in opt_iter {
-            out.push(
-                v.map(str::to_string)
-                    .ok_or(MrNodeError::WrongColumnType {
-                        name: name.to_string(),
-                        dtype: "null".to_string(),
-                    })?,
-            );
+            out.push(v.map(str::to_string).ok_or(MrNodeError::WrongColumnType {
+                name: name.to_string(),
+                dtype: "null".to_string(),
+            })?);
         }
     }
     Ok(out)
@@ -258,10 +255,7 @@ fn extract_f64(batches: &[RecordBatch], name: &str) -> Result<Vec<f64>, MrNodeEr
 
 /// Extract a numeric column into `Vec<Option<f64>>` (null → `None`). Used for
 /// the optional effect-allele-frequency columns.
-fn extract_opt_f64(
-    batches: &[RecordBatch],
-    name: &str,
-) -> Result<Vec<Option<f64>>, MrNodeError> {
+fn extract_opt_f64(batches: &[RecordBatch], name: &str) -> Result<Vec<Option<f64>>, MrNodeError> {
     let idx = column_index(batches, name)?;
     let dtype = batches[0].schema().field(idx).data_type().clone();
     let is_numeric = matches!(
@@ -498,7 +492,7 @@ impl DagNode for MrNode {
         Box::new((*self).clone())
     }
 
-    fn node_type(&self) -> &str {
+    fn kind(&self) -> &'static str {
         MR_NODE_KIND
     }
 
@@ -512,12 +506,16 @@ impl DagNode for MrNode {
             return Err(MrNodeError::InvalidAction(self.spec.action).into());
         }
 
-        let batches: Vec<RecordBatch> = input.data.clone().collect().await.map_err(|e| {
-            DagError::NodeError {
-                node_type: MR_NODE_KIND.into(),
-                msg: format!("collect failed: {e}"),
-            }
-        })?;
+        let batches: Vec<RecordBatch> =
+            input
+                .data
+                .clone()
+                .collect()
+                .await
+                .map_err(|e| DagError::NodeError {
+                    node_type: MR_NODE_KIND.into(),
+                    msg: format!("collect failed: {e}"),
+                })?;
         if batches.is_empty() || batches.iter().map(|b| b.num_rows()).sum::<usize>() == 0 {
             return Err(MrNodeError::EmptyInput.into());
         }
@@ -583,21 +581,14 @@ impl DagNode for MrNode {
         }
 
         // ---- harmonise ----
-        let harmonised = mr::harmonise::harmonise_data_with(
-            &hinputs,
-            self.spec.action,
-            self.spec.tolerance,
-        );
+        let harmonised =
+            mr::harmonise::harmonise_data_with(&hinputs, self.spec.action, self.spec.tolerance);
 
         // ---- dispatch mr() ----
         let parameters: mr::Parameters = self.spec.parameters.clone().into();
-        let method_refs: Vec<&str> = self
-            .spec
-            .method_list
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
-        let rows = mr::dispatch::mr(&harmonised, &parameters, &method_refs)?;
+        let method_refs: Vec<&str> = self.spec.method_list.iter().map(|s| s.as_str()).collect();
+        let rows = mr::dispatch::mr(&harmonised, &parameters, &method_refs)
+            .map_err(MrNodeError::Mr)?;
 
         // ---- build output batch ----
         let batch = build_result_batch(&rows)?;
@@ -650,9 +641,7 @@ mod tests {
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
         let fields: Vec<Field> = columns
             .iter()
-            .map(|(name, arr)| {
-                Field::new(*name, arr.data_type().clone(), arr.null_count() != 0)
-            })
+            .map(|(name, arr)| Field::new(*name, arr.data_type().clone(), arr.null_count() != 0))
             .collect();
         let arrays: Vec<Arc<dyn Array>> = columns.into_iter().map(|(_, a)| a).collect();
         RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).unwrap()
@@ -708,7 +697,7 @@ mod tests {
             tolerance: default_tolerance(),
             parameters: MrParameters::default(),
         });
-        assert_eq!(node.node_type(), "mr");
+        assert_eq!(node.kind(), "mr");
 
         let outs = node.execute(&[make_test_input()]).await.unwrap();
         let df = outs.get(&0).unwrap().clone();
@@ -734,10 +723,7 @@ mod tests {
         );
 
         // Verify the output schema: nsnp is Int64.
-        assert_eq!(
-            batches[0].schema().field(3).data_type(),
-            &DataType::Int64
-        );
+        assert_eq!(batches[0].schema().field(3).data_type(), &DataType::Int64);
     }
 
     #[tokio::test]
@@ -774,10 +760,7 @@ mod tests {
             tolerance: default_tolerance(),
             parameters: MrParameters::default(),
         });
-        let err = node
-            .execute(&[make_test_input()])
-            .await
-            .unwrap_err();
+        let err = node.execute(&[make_test_input()]).await.unwrap_err();
         assert!(err.to_string().contains("action"), "got: {err}");
     }
 }

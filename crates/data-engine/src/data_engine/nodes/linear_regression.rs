@@ -236,7 +236,7 @@ pub struct LinearRegressionNodeFactory {}
 
 impl NodeFactory for LinearRegressionNodeFactory {
     fn kind(&self) -> &'static str {
-        <LinearRegressionNode as DagNode>::kind()
+        "linear_regression"
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -268,10 +268,7 @@ impl DagNode for LinearRegressionNode {
         Box::new((*self).clone())
     }
 
-    fn kind() -> &'static str
-    where
-        Self: Sized,
-    {
+    fn kind(&self) -> &'static str {
         "linear_regression"
     }
 

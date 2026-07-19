@@ -17,14 +17,14 @@
 use std::sync::Arc;
 
 use arrow_array::{
-    Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, Int8Array, RecordBatch,
-    UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+    Array, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, RecordBatch,
+    UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datalake::Datalake;
 use faer::Mat;
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -115,7 +115,10 @@ fn input_schema() -> SchemaRef {
 
 /// Build a single-row rg summary `RecordBatch` from the [`ldsc::regress::RG`]
 /// result.
-fn build_result_batch(rg: &ldsc::regress::RG, n_snp: usize) -> Result<RecordBatch, LdscRgNodeError> {
+fn build_result_batch(
+    rg: &ldsc::regress::RG,
+    n_snp: usize,
+) -> Result<RecordBatch, LdscRgNodeError> {
     let schema = output_schema();
     let batch = RecordBatch::try_new(
         schema,
@@ -292,7 +295,7 @@ impl DagNode for LdscRgNode {
         Box::new((*self).clone())
     }
 
-    fn node_type(&self) -> &str {
+    fn kind(&self) -> &'static str {
         "ldsc_rg"
     }
 
@@ -319,7 +322,11 @@ impl DagNode for LdscRgNode {
         //    delegate to the catalog-independent pipeline. Splitting here lets
         //    the pipeline be exercised end-to-end against an in-memory catalog
         //    (see `tests::run_with_test_catalog`).
-        let ctx = self.datalake.get_ctx().await.map_err(LdscRgNodeError::from)?;
+        let ctx = self
+            .datalake
+            .get_ctx()
+            .await
+            .map_err(LdscRgNodeError::from)?;
 
         // TODO: Auto select LD score panel table by population
         let (rg, n_snp) =
@@ -438,14 +445,13 @@ impl LdscRgNode {
             intercept_gencov,
             two_step,
         } = cfg;
-        let two_step = two_step.or(if intercept_hsq1.is_none()
-            && intercept_hsq2.is_none()
-            && intercept_gencov.is_none()
-        {
-            Some(30.0)
-        } else {
-            None
-        });
+        let two_step = two_step.or(
+            if intercept_hsq1.is_none() && intercept_hsq2.is_none() && intercept_gencov.is_none() {
+                Some(30.0)
+            } else {
+                None
+            },
+        );
 
         // 7. Run the bivariate regression.
         let rg = ldsc::regress::RG::new(
@@ -483,13 +489,11 @@ fn extract_f64(batches: &[RecordBatch], name: &str) -> Result<Vec<f64>, LdscRgNo
             "extract_f64: no batches".into(),
         )))?
         .schema();
-    let idx = schema
-        .index_of(name)
-        .map_err(|_| {
-            LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
-                "missing column '{name}'"
-            )))
-        })?;
+    let idx = schema.index_of(name).map_err(|_| {
+        LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
+            "missing column '{name}'"
+        )))
+    })?;
     let dtype = schema.field(idx).data_type().clone();
     if !matches!(
         dtype,
@@ -504,9 +508,9 @@ fn extract_f64(batches: &[RecordBatch], name: &str) -> Result<Vec<f64>, LdscRgNo
             | DataType::UInt32
             | DataType::UInt64
     ) {
-        return Err(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
-            "column '{name}' is not numeric (got {dtype})"
-        ))));
+        return Err(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+            format!("column '{name}' is not numeric (got {dtype})"),
+        )));
     }
 
     let mut out = Vec::new();
@@ -564,7 +568,7 @@ mod tests {
     #[tokio::test]
     async fn test_ldsc_rg_node_structure() {
         let node = LdscRgNode::new(Arc::new(Datalake::new()), LdscRgConfig::new(vec![20.0], 5));
-        assert_eq!(node.node_type(), "ldsc_rg");
+        assert_eq!(node.kind(), "ldsc_rg");
         assert_eq!(node.meta().input_ports().len(), 2);
         assert_eq!(node.meta().output_ports().len(), 1);
     }
@@ -575,8 +579,17 @@ mod tests {
         let schema = output_schema();
         assert_eq!(schema.fields().len(), 11);
         for name in [
-            "rg", "rg_se", "rg_z", "rg_p", "gencov", "gencov_se", "h2_1", "h2_1_se", "h2_2",
-            "h2_2_se", "n_snp",
+            "rg",
+            "rg_se",
+            "rg_z",
+            "rg_p",
+            "gencov",
+            "gencov_se",
+            "h2_1",
+            "h2_1_se",
+            "h2_2",
+            "h2_2_se",
+            "n_snp",
         ] {
             assert!(schema.field_with_name(name).is_ok(), "missing {name}");
         }
@@ -591,11 +604,8 @@ mod tests {
         ]));
         let z = Float64Array::from(vec![Some(1.5), None, Some(-2.0)]);
         let rsid = StringArray::from(vec!["a", "b", "c"]);
-        let batch = RecordBatch::try_new(
-            schema,
-            vec![Arc::new(z) as _, Arc::new(rsid) as _],
-        )
-        .unwrap();
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(z) as _, Arc::new(rsid) as _]).unwrap();
         let v = extract_f64(&[batch], "z").unwrap();
         assert_eq!(v.len(), 3);
         assert!((v[0] - 1.5).abs() < 1e-12);
@@ -724,12 +734,8 @@ mod tests {
             .map(|i| format!("rs{}", 1_000_000 + i))
             .collect();
         let ctx = ctx_with_ld_panel(N_SNP);
-        let df1 = ctx
-            .read_batch(sumstats_batch(z1, &rsids, 1000.0))
-            .unwrap();
-        let df2 = ctx
-            .read_batch(sumstats_batch(z2, &rsids, 1000.0))
-            .unwrap();
+        let df1 = ctx.read_batch(sumstats_batch(z1, &rsids, 1000.0)).unwrap();
+        let df2 = ctx.read_batch(sumstats_batch(z2, &rsids, 1000.0)).unwrap();
         LdscRgNode::run_with_ctx(&ctx, &df1, &df2, "ukbb_eur", cfg)
             .await
             .expect("rg pipeline should succeed")
@@ -819,7 +825,11 @@ mod tests {
 
         let (rg, n_snp) = run_pipeline(&z1, &z2, &constrained_cfg()).await;
         assert_eq!(n_snp, N_SNP);
-        assert!(rg.rg_ratio.is_finite(), "rg={}, expected finite", rg.rg_ratio);
+        assert!(
+            rg.rg_ratio.is_finite(),
+            "rg={}, expected finite",
+            rg.rg_ratio
+        );
 
         assert!(
             (rg.hsq1.reg.tot - rg.hsq2.reg.tot).abs() < 1e-9,
@@ -925,15 +935,10 @@ mod tests {
         let z1: Vec<f64> = (0..50).map(|i| (i as f64) * 0.1).collect();
         let z2 = z1.clone();
 
-        let df1 = ctx
-            .read_batch(sumstats_batch(&z1, &rs1, 1000.0))
-            .unwrap();
-        let df2 = ctx
-            .read_batch(sumstats_batch(&z2, &rs2, 1000.0))
-            .unwrap();
+        let df1 = ctx.read_batch(sumstats_batch(&z1, &rs1, 1000.0)).unwrap();
+        let df2 = ctx.read_batch(sumstats_batch(&z2, &rs2, 1000.0)).unwrap();
 
-        let res =
-            LdscRgNode::run_with_ctx(&ctx, &df1, &df2, "ukbb_eur", &constrained_cfg()).await;
+        let res = LdscRgNode::run_with_ctx(&ctx, &df1, &df2, "ukbb_eur", &constrained_cfg()).await;
         assert!(
             res.is_err(),
             "disjoint rsid sets must error, not silently return NaN"

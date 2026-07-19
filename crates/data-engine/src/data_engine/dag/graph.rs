@@ -316,7 +316,7 @@ impl DAG {
                 let node_type = self
                     .nodes
                     .get(id)
-                    .map(|n| n.node_type())
+                    .map(|n| n.kind())
                     .unwrap_or("unknown")
                     .to_string();
 
@@ -921,6 +921,9 @@ mod tests {
 
     fn dummy_meta() -> super::super::NodeMeta {
         super::super::NodeMeta::new()
+            .add_input_port(None)
+            .add_output_port(None)
+            .set_fixed_input(false)
     }
 
     fn get_diamond_dag() -> DAG {
@@ -947,7 +950,7 @@ mod tests {
         fn clone_box(&self) -> Box<dyn super::super::DagNode> {
             Box::new((*self).clone())
         }
-        fn kind() -> &'static str where Self: Sized { "echo" }
+        fn kind(&self) -> &'static str { "echo" }
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -1086,7 +1089,7 @@ mod tests {
         fn clone_box(&self) -> Box<dyn super::super::DagNode> {
             Box::new((*self).clone())
         }
-        fn kind() -> &'static str where Self: Sized { "ported" }
+        fn kind(&self) -> &'static str { "ported" }
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }

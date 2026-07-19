@@ -12,7 +12,7 @@ use arrow_array::{Float64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
 use datalake::Datalake;
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -199,7 +199,7 @@ pub struct LdscHsqNodeFactory {}
 
 impl NodeFactory for LdscHsqNodeFactory {
     fn kind(&self) -> &'static str {
-        <LdscHsqNode as DagNode>::kind()
+        "ldsc"
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -228,10 +228,7 @@ impl LdscHsqNode {
     ///
     /// The upstream `DataFrame` must expose columns `Z` (Float64), `N`
     /// (Float64), and `rsid` (Utf8) — enforced by the input port schema.
-    pub fn new(
-        datalake: Arc<Datalake>,
-        ldsc_hsq: LdscHsqConfig,
-    ) -> Self {
+    pub fn new(datalake: Arc<Datalake>, ldsc_hsq: LdscHsqConfig) -> Self {
         // Fixed, typed ports: a single input carrying GWAS sumstats (Z, N,
         // rsid) and a single output with the fixed h² summary schema.
         // Declaring the schemas lets the DAG validate edge compatibility
@@ -266,10 +263,7 @@ impl DagNode for LdscHsqNode {
         Box::new((*self).clone())
     }
 
-    fn kind() -> &'static str
-    where
-        Self: Sized,
-    {
+    fn kind(&self) -> &'static str {
         "ldsc"
     }
 
@@ -291,8 +285,7 @@ impl DagNode for LdscHsqNode {
         let ctx = self.datalake.get_ctx().await.map_err(LdscNodeError::from)?;
 
         // TODO: Auto select LD score panel table by population
-        let result =
-            Self::run_with_ctx(&ctx, &input.data, "ukbb_eur", &self.ldsc_hsq).await?;
+        let result = Self::run_with_ctx(&ctx, &input.data, "ukbb_eur", &self.ldsc_hsq).await?;
 
         // 2. Build a single-row summary RecordBatch and return.
         let batch = build_result_batch(&result)?;
@@ -387,8 +380,11 @@ mod tests {
     /// Construct the node and assert its kind and single-in/single-out topology.
     #[tokio::test]
     async fn test_ldsc_hsq_node_structure() {
-        let node = LdscHsqNode::new(Arc::new(Datalake::new()), LdscHsqConfig::new(vec![20.0], 5, None));
-        assert_eq!(node.node_type(), "ldsc");
+        let node = LdscHsqNode::new(
+            Arc::new(Datalake::new()),
+            LdscHsqConfig::new(vec![20.0], 5, None),
+        );
+        assert_eq!(node.kind(), "ldsc");
         assert_eq!(node.meta().input_ports().len(), 1);
         assert_eq!(node.meta().output_ports().len(), 1);
     }
@@ -398,8 +394,17 @@ mod tests {
     fn test_output_schema_has_all_columns() {
         let schema = output_schema();
         for name in [
-            "h2", "h2_se", "intercept", "intercept_se", "ratio", "ratio_se", "mean_chisq",
-            "lambda_gc", "n_snp", "coef", "coef_se",
+            "h2",
+            "h2_se",
+            "intercept",
+            "intercept_se",
+            "ratio",
+            "ratio_se",
+            "mean_chisq",
+            "lambda_gc",
+            "n_snp",
+            "coef",
+            "coef_se",
         ] {
             assert!(schema.field_with_name(name).is_ok(), "missing {name}");
         }
@@ -440,7 +445,9 @@ mod tests {
             Field::new("ld_score", DataType::Float64, false),
             Field::new(
                 "locus",
-                DataType::Struct(vec![Arc::new(Field::new("position", DataType::Int64, false))].into()),
+                DataType::Struct(
+                    vec![Arc::new(Field::new("position", DataType::Int64, false))].into(),
+                ),
                 false,
             ),
         ]));
@@ -553,7 +560,11 @@ mod tests {
         );
         // λ_GC is the median χ² / 0.4549; with a linear, increasing χ² the
         // median sits at the middle LD score — just assert finiteness & > 0.
-        assert!(r.lambda_gc.is_finite() && r.lambda_gc > 0.0, "lambda_gc={}", r.lambda_gc);
+        assert!(
+            r.lambda_gc.is_finite() && r.lambda_gc > 0.0,
+            "lambda_gc={}",
+            r.lambda_gc
+        );
     }
 
     /// The production default config (free intercept + two-step cutoff 30) on a
@@ -569,7 +580,10 @@ mod tests {
         // Build χ² = 1 + 1.0·ld directly (slope 1 ⇒ h² = M·1/N = 0.2).
         let slope = 1.0_f64;
         let z: Vec<f64> = ld.iter().map(|l| (1.0 + slope * l).sqrt()).collect();
-        assert!((target_h2 - m * slope / N_SAMP).abs() < 1e-12, "fixture self-check");
+        assert!(
+            (target_h2 - m * slope / N_SAMP).abs() < 1e-12,
+            "fixture self-check"
+        );
 
         let cfg = LdscHsqConfig::new(vec![m], 20, None);
         let r = run_pipeline(&z, &cfg).await;
@@ -650,7 +664,10 @@ mod tests {
     /// A missing input must surface a clear error before any catalog work.
     #[tokio::test]
     async fn e2e_missing_input_yields_error() {
-        let mut node = LdscHsqNode::new(Arc::new(Datalake::new()), LdscHsqConfig::new(vec![20.0], 5, None));
+        let mut node = LdscHsqNode::new(
+            Arc::new(Datalake::new()),
+            LdscHsqConfig::new(vec![20.0], 5, None),
+        );
         let res = node.execute(&[]).await;
         assert!(res.is_err(), "missing input must error");
     }

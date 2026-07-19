@@ -44,7 +44,7 @@ pub struct MockNodeFactory {}
 
 impl NodeFactory for MockNodeFactory {
     fn kind(&self) -> &'static str {
-        <MockNode as DagNode>::kind()
+        "mock"
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -79,10 +79,7 @@ impl DagNode for MockNode {
         Box::new((*self).clone())
     }
 
-    fn kind() -> &'static str
-    where
-        Self: Sized,
-    {
+    fn kind(&self) -> &'static str {
         "mock"
     }
 

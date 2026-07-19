@@ -51,7 +51,7 @@ pub struct SqlNodeFactory {}
 
 impl NodeFactory for SqlNodeFactory {
     fn kind(&self) -> &'static str {
-        <SqlNode as DagNode>::kind()
+        "sql"
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -104,10 +104,7 @@ impl DagNode for SqlNode {
         Box::new((*self).clone())
     }
 
-    fn kind() -> &'static str
-    where
-        Self: Sized,
-    {
+    fn kind(&self) -> &'static str {
         "sql"
     }
 
