@@ -12,7 +12,7 @@ pub enum Error {
     MissDatalake,
 
     #[error(transparent)]
-    Dag(#[from] crate::data_engine::dag::DagError),
+    Dag(#[from] crate::dag::DagError),
 
     #[error(transparent)]
     NodeRegistry(#[from] crate::node_registry::error::Error),

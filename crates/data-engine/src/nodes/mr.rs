@@ -27,7 +27,7 @@ use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodeMeta};
 use crate::{
-    data_engine::dag::{DagError, graph::PortOutputs},
+    dag::{DagError, graph::PortOutputs},
     node_registry::registry::{NodeCtx, NodeFactory},
 };
 

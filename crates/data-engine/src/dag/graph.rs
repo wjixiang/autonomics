@@ -13,9 +13,9 @@ use petgraph::visit::EdgeRef;
 use tokio::sync::{Semaphore, mpsc};
 use tracing::{debug, warn};
 
-use crate::data_engine::dag::utils::{build_inputs, cascade_skip};
+use super::utils::{build_inputs, cascade_skip};
 
-use super::super::nodes::sink::SinkNode;
+use crate::nodes::sink::SinkNode;
 use super::error::DagError;
 use super::runtime::{NodeReport, RunReport, RuntimeStatus, SchedulerConfig};
 use super::{DagNode, NodeId};
@@ -342,7 +342,7 @@ impl DAG {
                     .get(id)
                     .and_then(|n| n.as_any().downcast_ref::<SinkNode>())
                     .and_then(|sn| match sn.sink() {
-                        super::super::Sink::File { path, .. } => Some(path.clone()),
+                        crate::nodes::Sink::File { path, .. } => Some(path.clone()),
                         _ => None,
                     });
 
@@ -914,13 +914,13 @@ fn schema_compatible(
 
 #[cfg(test)]
 mod tests {
-    use crate::data_engine::dag::NodeMeta;
+    use crate::dag::{NodeMeta, NodeInput};
     use std::assert_matches;
 
     use super::*;
 
-    fn dummy_meta() -> super::super::NodeMeta {
-        super::super::NodeMeta::new()
+    fn dummy_meta() -> NodeMeta {
+        NodeMeta::new()
             .add_input_port(None)
             .add_output_port(None)
             .set_fixed_input(false)
@@ -941,13 +941,13 @@ mod tests {
 
     // A no-op node so tests can build a real DAG without touching IO.
     #[derive(Clone)]
-    struct EchoNode(super::super::NodeMeta);
+    struct EchoNode(NodeMeta);
     #[async_trait::async_trait]
-    impl super::super::DagNode for EchoNode {
-        fn meta(&self) -> &super::super::NodeMeta {
+    impl super::DagNode for EchoNode {
+        fn meta(&self) -> &NodeMeta {
             &self.0
         }
-        fn clone_box(&self) -> Box<dyn super::super::DagNode> {
+        fn clone_box(&self) -> Box<dyn super::DagNode> {
             Box::new((*self).clone())
         }
         fn kind(&self) -> &'static str { "echo" }
@@ -956,8 +956,8 @@ mod tests {
         }
         async fn execute(
             &mut self,
-            _inputs: &[super::super::NodeInput],
-        ) -> std::result::Result<PortOutputs, super::super::DagError> {
+            _inputs: &[NodeInput],
+        ) -> std::result::Result<PortOutputs, super::DagError> {
             Ok(HashMap::new())
         }
     }
@@ -1079,14 +1079,14 @@ mod tests {
 
     /// A no-op node with caller-supplied port topology (for schema/port tests).
     #[derive(Clone)]
-    struct PortedNode(super::super::NodeMeta);
+    struct PortedNode(NodeMeta);
 
     #[async_trait::async_trait]
-    impl super::super::DagNode for PortedNode {
-        fn meta(&self) -> &super::super::NodeMeta {
+    impl super::DagNode for PortedNode {
+        fn meta(&self) -> &NodeMeta {
             &self.0
         }
-        fn clone_box(&self) -> Box<dyn super::super::DagNode> {
+        fn clone_box(&self) -> Box<dyn super::DagNode> {
             Box::new((*self).clone())
         }
         fn kind(&self) -> &'static str { "ported" }
@@ -1095,8 +1095,8 @@ mod tests {
         }
         async fn execute(
             &mut self,
-            _inputs: &[super::super::NodeInput],
-        ) -> std::result::Result<PortOutputs, super::super::DagError> {
+            _inputs: &[NodeInput],
+        ) -> std::result::Result<PortOutputs, super::DagError> {
             Ok(HashMap::new())
         }
     }
@@ -1140,14 +1140,14 @@ mod tests {
         dag.add_node(
             "src".into(),
             Box::new(PortedNode(
-                super::super::NodeMeta::new().add_output_port(Some(out_schema)),
+                NodeMeta::new().add_output_port(Some(out_schema)),
             )),
         )
         .unwrap();
         dag.add_node(
             "dst".into(),
             Box::new(PortedNode(
-                super::super::NodeMeta::new().add_input_port(Some(in_schema)),
+                NodeMeta::new().add_input_port(Some(in_schema)),
             )),
         )
         .unwrap();
@@ -1332,14 +1332,14 @@ mod tests {
         dag.add_node(
             "src".into(),
             Box::new(PortedNode(
-                super::super::NodeMeta::new().add_output_port(Some(out_schema)),
+                NodeMeta::new().add_output_port(Some(out_schema)),
             )),
         )
         .unwrap();
         dag.add_node(
             "dst".into(),
             Box::new(PortedNode(
-                super::super::NodeMeta::new().add_input_port(Some(in_schema.clone())),
+                NodeMeta::new().add_input_port(Some(in_schema.clone())),
             )),
         )
         .unwrap();
@@ -1347,7 +1347,7 @@ mod tests {
 
         // Replace "dst" with a node that has NO declared input ports → the
         // existing edge references port 0 which no longer exists.
-        let no_ports = Box::new(PortedNode(super::super::NodeMeta::new()));
+        let no_ports = Box::new(PortedNode(NodeMeta::new()));
         let err = dag.replace_node("dst", no_ports).unwrap_err();
         assert!(
             matches!(err, DagError::PortNotFound { ref node, port, .. } if node == "dst" && port == 0),

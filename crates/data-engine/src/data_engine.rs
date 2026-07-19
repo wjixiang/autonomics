@@ -3,17 +3,15 @@ use std::sync::Arc;
 use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
 use fs::OpendalFileStorage;
 
-use crate::data_engine::dag::{DAG, DagError, RunReport, SchedulerConfig};
+use crate::dag::{DAG, DagError, RunReport, SchedulerConfig};
 use crate::data_engine::error::{Error, Result};
-use crate::data_engine::nodes::DagNode;
+use crate::nodes::DagNode;
 use crate::node_registry::registry::NodeRegistry;
 use datalake::Datalake;
 
-pub mod dag;
 pub mod error;
-pub mod nodes;
 
-pub use nodes::{
+pub use crate::nodes::{
     FileFormat, LdscHsqConfig, LdscHsqNode, LinearRegressionNode, Sink, SinkMode, SinkNode, Source,
     SourceNode, SqlNode, WriteFormat,
 };
@@ -190,7 +188,7 @@ impl DataEngine {
     pub async fn get_output(
         &self,
         node_id: impl Into<String>,
-    ) -> Option<crate::data_engine::dag::graph::PortOutputs> {
+    ) -> Option<crate::dag::graph::PortOutputs> {
         self.dag.output(node_id.into().as_ref())
     }
 }
@@ -237,10 +235,10 @@ mod tests {
     use std::sync::Arc;
 
     use super::DataEngine;
-    use crate::data_engine::dag::graph::PortOutputs;
-    use crate::data_engine::dag::{DagError, RuntimeStatus, SchedulerConfig};
+    use crate::dag::graph::PortOutputs;
+    use crate::dag::{DagError, RuntimeStatus, SchedulerConfig};
     use crate::data_engine::error::Error;
-    use crate::data_engine::nodes::{DagNode, NodeInput, NodeMeta};
+    use crate::nodes::{DagNode, NodeInput, NodeMeta};
     use datafusion::common::HashMap;
     use datafusion::prelude::CsvReadOptions;
     use fs::OpendalFileStorage;

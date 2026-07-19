@@ -1,6 +1,6 @@
 //! Unified sink node: consumes an upstream `DataFrame` and writes it out.
 //!
-//! Symmetric to [`crate::data_engine::nodes::SourceNode`]: a [`SinkNode`] has
+//! Symmetric to [`crate::nodes::SourceNode`]: a [`SinkNode`] has
 //! exactly one input and produces no output. The destination is described by
 //! [`Sink`] — a file (CSV / Parquet) or an Iceberg table.
 
@@ -22,8 +22,8 @@ use thiserror::Error;
 use super::meta::{DagNode, NodeInput, NodeMeta};
 use super::source::normalize_path;
 use crate::{
-    data_engine::dag::DagError,
-    data_engine::dag::graph::PortOutputs,
+    dag::DagError,
+    dag::graph::PortOutputs,
     node_registry::registry::{NodeCtx, NodeFactory},
 };
 
@@ -499,9 +499,9 @@ mod tests {
     use datafusion::prelude::{DataFrame, SessionContext};
     use datalake::Datalake;
 
-    use crate::data_engine::{
+    use crate::nodes::{
         Sink, SinkMode, SinkNode, WriteFormat,
-        dag::{DagNode, NodeInput},
+        meta::{DagNode, NodeInput},
     };
 
     /// Build a small in-memory [`DataFrame`] for sink tests.
@@ -641,7 +641,7 @@ mod tests {
             Sink::Iceberg {
                 ident: "gwas.test4".to_string(),
             },
-            crate::data_engine::nodes::sink::SinkMode::Overwrite,
+            crate::nodes::sink::SinkMode::Overwrite,
             ctx,
             datalake,
         );

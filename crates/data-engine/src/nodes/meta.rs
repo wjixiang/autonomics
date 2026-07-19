@@ -10,7 +10,7 @@ use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use datafusion::{common::HashMap, prelude::DataFrame};
 
-use crate::data_engine::dag::{DagError, graph::PortOutputs};
+use crate::dag::{DagError, graph::PortOutputs};
 
 /// Unique identifier for a node in the DAG.
 pub type NodeId = String;

@@ -144,7 +144,7 @@ impl DataEngineClient {
         .await
     }
 
-    pub async fn run_dag(&self) -> Result<crate::data_engine::dag::RunReport> {
+    pub async fn run_dag(&self) -> Result<crate::dag::RunReport> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(DataEngineCmd::RunDag { reply: reply_tx }, reply_rx)
             .await
@@ -153,7 +153,7 @@ impl DataEngineClient {
     pub async fn get_output(
         &self,
         id: String,
-    ) -> Result<Option<crate::data_engine::dag::graph::PortOutputs>> {
+    ) -> Result<Option<crate::dag::graph::PortOutputs>> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::GetOutput {

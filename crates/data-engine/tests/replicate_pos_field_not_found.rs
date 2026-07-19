@@ -43,8 +43,8 @@ use std::sync::Arc;
 
 use arrow_array::{ArrayRef, Int32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
-use data_engine::data_engine::dag::DagNode;
-use data_engine::data_engine::nodes::{NodeInput, Sink, SinkMode, SinkNode};
+use data_engine::dag::DagNode;
+use data_engine::nodes::{NodeInput, Sink, SinkMode, SinkNode};
 use datafusion::prelude::SessionContext;
 use datalake::Datalake;
 use iceberg::metadata_columns::{

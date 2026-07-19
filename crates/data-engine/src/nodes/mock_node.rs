@@ -6,7 +6,7 @@ use schemars::{schema_for, JsonSchema};
 use serde::Deserialize;
 
 use crate::{
-    data_engine::dag::{DagError, DagNode, NodeInput, NodeMeta, graph::PortOutputs},
+    dag::{DagError, DagNode, NodeInput, NodeMeta, graph::PortOutputs},
     dataset::{BuiltinDataset, get_builtin_dataset},
     node_registry::registry::{NodeCtx, NodeFactory},
 };
