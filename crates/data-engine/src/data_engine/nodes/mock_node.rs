@@ -37,8 +37,6 @@ impl From<&str> for MockNodeError {
     }
 }
 
-const MOCK_NODE_KIND: &str = "mock";
-
 #[derive(Debug, JsonSchema, Deserialize)]
 pub struct MockNodeSpec {}
 
@@ -46,7 +44,7 @@ pub struct MockNodeFactory {}
 
 impl NodeFactory for MockNodeFactory {
     fn kind(&self) -> &'static str {
-        MOCK_NODE_KIND
+        <MockNode as DagNode>::kind()
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -81,7 +79,10 @@ impl DagNode for MockNode {
         Box::new((*self).clone())
     }
 
-    fn node_type(&self) -> &str {
+    fn kind() -> &'static str
+    where
+        Self: Sized,
+    {
         "mock"
     }
 

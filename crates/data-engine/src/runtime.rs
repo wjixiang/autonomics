@@ -77,6 +77,9 @@ impl DataEngineServer {
             } => {
                 let _ = reply.send(self.engine.add_node_from_registry(id, &kind, spec));
             }
+            DataEngineCmd::UpdateNode { id, spec, reply } => {
+                let _ = reply.send(self.engine.update_node(id, spec));
+            }
         }
     }
 }
@@ -204,6 +207,21 @@ impl DataEngineClient {
             DataEngineCmd::AddNode {
                 id,
                 kind,
+                spec,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
+    }
+
+    /// Update an existing node's spec in-place. The kind is discovered from
+    /// the node's current `node_type()`, so only the new spec is needed.
+    pub async fn update_node(&self, id: String, spec: serde_json::Value) -> Result<()> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::UpdateNode {
+                id,
                 spec,
                 reply: reply_tx,
             },

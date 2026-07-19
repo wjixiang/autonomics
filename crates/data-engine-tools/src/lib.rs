@@ -1,6 +1,7 @@
 mod add_edge_tool;
 mod add_node_tool;
 mod clear_dag_tool;
+mod update_node_tool;
 mod get_node_spec_tool;
 mod get_output_tool;
 mod list_node_factories_tool;
@@ -152,6 +153,7 @@ pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
         )),
         ToolRegistration::from(get_node_spec_tool::GetNodeSpecTool::new(client.clone())),
         ToolRegistration::from(add_node_tool::AddNodeTool::new(client.clone())),
+        ToolRegistration::from(update_node_tool::UpdateNodeTool::new(client.clone())),
         ToolRegistration::from(add_edge_tool::AddEdgeTool::new(client.clone())),
         ToolRegistration::from(run_dag_tool::RunDagTool::new(client.clone())),
         ToolRegistration::from(get_output_tool::GetOutputTool::new(client.clone())),

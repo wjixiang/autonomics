@@ -142,8 +142,6 @@ impl SourceNode {
     }
 }
 
-const SOURCE_NODE_KIND: &str = "source";
-
 #[derive(Debug, JsonSchema, Deserialize)]
 #[serde(tag = "type")]
 pub enum SourceNodeSpec {
@@ -162,7 +160,7 @@ pub struct SourceNodeFactory {}
 
 impl NodeFactory for SourceNodeFactory {
     fn kind(&self) -> &'static str {
-        SOURCE_NODE_KIND
+        <SourceNode as DagNode>::kind()
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -207,7 +205,10 @@ impl DagNode for SourceNode {
         Box::new((*self).clone())
     }
 
-    fn node_type(&self) -> &str {
+    fn kind() -> &'static str
+    where
+        Self: Sized,
+    {
         "source"
     }
 
