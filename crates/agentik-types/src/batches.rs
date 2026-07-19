@@ -36,6 +36,7 @@ pub enum BatchStatus {
 }
 
 impl BatchStatus {
+    #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
@@ -46,6 +47,7 @@ impl BatchStatus {
         )
     }
 
+    #[must_use]
     pub fn is_processing(&self) -> bool {
         matches!(
             self,
@@ -62,15 +64,17 @@ pub struct BatchRequestCounts {
 }
 
 impl BatchRequestCounts {
+    #[must_use]
     pub fn pending(&self) -> u32 {
         self.total.saturating_sub(self.completed + self.failed)
     }
 
+    #[must_use]
     pub fn completion_percentage(&self) -> f64 {
         if self.total == 0 {
             0.0
         } else {
-            (self.completed as f64 / self.total as f64) * 100.0
+            (f64::from(self.completed) / f64::from(self.total)) * 100.0
         }
     }
 }
@@ -84,7 +88,9 @@ pub struct BatchRequest {
 }
 
 impl BatchRequest {
-    pub fn new(
+    /// Create a [`BatchRequestBuilder`] for constructing a batch request.
+    #[must_use]
+    pub fn builder(
         custom_id: impl Into<String>,
         model: impl Into<String>,
         max_tokens: u32,
@@ -120,6 +126,7 @@ pub struct BatchRequestBuilder {
 }
 
 impl BatchRequestBuilder {
+    #[must_use]
     pub fn user(mut self, content: impl Into<String>) -> Self {
         self.body.messages.push(MessageParam {
             role: Role::User,
@@ -128,6 +135,7 @@ impl BatchRequestBuilder {
         self
     }
 
+    #[must_use]
     pub fn assistant(mut self, content: impl Into<String>) -> Self {
         self.body.messages.push(MessageParam {
             role: Role::Assistant,
@@ -136,46 +144,55 @@ impl BatchRequestBuilder {
         self
     }
 
+    #[must_use]
     pub fn system(mut self, system: impl Into<String>) -> Self {
         self.body.system = Some(system.into());
         self
     }
 
+    #[must_use]
     pub fn temperature(mut self, temperature: f32) -> Self {
         self.body.temperature = Some(temperature);
         self
     }
 
+    #[must_use]
     pub fn top_p(mut self, top_p: f32) -> Self {
         self.body.top_p = Some(top_p);
         self
     }
 
+    #[must_use]
     pub fn top_k(mut self, top_k: u32) -> Self {
         self.body.top_k = Some(top_k);
         self
     }
 
+    #[must_use]
     pub fn stop_sequences(mut self, stop_sequences: Vec<String>) -> Self {
         self.body.stop_sequences = Some(stop_sequences);
         self
     }
 
+    #[must_use]
     pub fn tools(mut self, tools: Vec<ToolDefinition>) -> Self {
         self.body.tools = Some(tools);
         self
     }
 
+    #[must_use]
     pub fn tool_choice(mut self, tool_choice: ToolChoice) -> Self {
         self.body.tool_choice = Some(tool_choice);
         self
     }
 
+    #[must_use]
     pub fn metadata(mut self, metadata: HashMap<String, String>) -> Self {
         self.body.metadata = Some(metadata);
         self
     }
 
+    #[must_use]
     pub fn build(self) -> BatchRequest {
         BatchRequest {
             custom_id: self.custom_id,
@@ -226,6 +243,7 @@ pub struct BatchCreateParams {
 }
 
 impl BatchCreateParams {
+    #[must_use]
     pub fn new(requests: Vec<BatchRequest>) -> Self {
         Self {
             requests,
@@ -234,11 +252,13 @@ impl BatchCreateParams {
         }
     }
 
+    #[must_use]
     pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
         self.metadata = metadata;
         self
     }
 
+    #[must_use]
     pub fn with_completion_window(mut self, hours: u32) -> Self {
         self.completion_window = Some(hours);
         self
@@ -254,15 +274,18 @@ pub struct BatchListParams {
 }
 
 impl BatchListParams {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn after(mut self, after: impl Into<String>) -> Self {
         self.after = Some(after.into());
         self
     }
 
+    #[must_use]
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit.clamp(1, 100));
         self
@@ -278,10 +301,12 @@ pub struct BatchList {
 }
 
 impl MessageBatch {
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         self.processing_status == BatchStatus::Completed
     }
 
+    #[must_use]
     pub fn has_failed(&self) -> bool {
         matches!(
             self.processing_status,
@@ -289,14 +314,17 @@ impl MessageBatch {
         )
     }
 
+    #[must_use]
     pub fn can_cancel(&self) -> bool {
         self.processing_status.is_processing()
     }
 
+    #[must_use]
     pub fn completion_percentage(&self) -> f64 {
         self.request_counts.completion_percentage()
     }
 
+    #[must_use]
     pub fn pending_requests(&self) -> u32 {
         self.request_counts.pending()
     }
@@ -317,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_batch_request_builder() {
-        let request = BatchRequest::new("test1", "claude-3-5-sonnet-latest", 1024)
+        let request = BatchRequest::builder("test1", "claude-3-5-sonnet-latest", 1024)
             .user("Hello, world!")
             .system("You are a helpful assistant")
             .temperature(0.7)
@@ -351,7 +379,7 @@ mod tests {
     #[test]
     fn test_batch_create_params() {
         let requests = vec![
-            BatchRequest::new("req1", "claude-3-5-sonnet-latest", 1024)
+            BatchRequest::builder("req1", "claude-3-5-sonnet-latest", 1024)
                 .user("Hello")
                 .build(),
         ];

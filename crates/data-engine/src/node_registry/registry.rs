@@ -9,14 +9,9 @@ use super::error::{Error, Result};
 
 use crate::dag::DagNode;
 use crate::nodes::{
-    ldsc_hsq::LdscHsqNodeFactory,
-    ldsc_rg::LdscRgNodeFactory,
-    linear_regression::LinearRegressionNodeFactory,
-    mock_node::MockNodeFactory,
-    mr::MrNodeFactory,
-    sink::SinkNodeFactory,
-    source::SourceNodeFactory,
-    sql_node::SqlNodeFactory,
+    ldsc_hsq::LdscHsqNodeFactory, ldsc_rg::LdscRgNodeFactory,
+    linear_regression::LinearRegressionNodeFactory, mock_node::MockNodeFactory, mr::MrNodeFactory,
+    sink::SinkNodeFactory, source::SourceNodeFactory, sql_node::SqlNodeFactory,
 };
 
 pub trait NodeFactory: Send + Sync {
@@ -53,6 +48,7 @@ pub struct NodeRegistry {
 }
 
 impl NodeRegistry {
+    /// NOTE: currently all nodes are directly registered in this function. In future,
     pub fn new(ctx: SessionContext, datalake: Arc<Datalake>) -> Self {
         let node_ctx = NodeCtx {
             session: ctx,
@@ -119,7 +115,9 @@ mod tests {
         match kind {
             "sql" => serde_json::json!({"sql_query": "SELECT 1"}),
             "source" => serde_json::json!({"type": "file", "path": "/tmp/dummy.csv"}),
-            "sink" => serde_json::json!({"type": "file", "path": "/tmp/dummy_out.csv", "format": "csv"}),
+            "sink" => {
+                serde_json::json!({"type": "file", "path": "/tmp/dummy_out.csv", "format": "csv"})
+            }
             "linear_regression" => {
                 serde_json::json!({"x_columns": ["x"], "y_column": "y"})
             }

@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_batch_request_creation() {
-        let request = BatchRequest::new("test_req", "claude-3-5-sonnet-latest", 1024)
+        let request = BatchRequest::builder("test_req", "claude-3-5-sonnet-latest", 1024)
             .user("Hello, world!")
             .system("You are helpful")
             .temperature(0.7)

@@ -4,10 +4,12 @@ use serde::{Deserialize, Serialize};
 pub struct RequestId(pub String);
 
 impl RequestId {
+    #[must_use]
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -39,10 +41,12 @@ pub struct ServerToolUsage {
 }
 
 impl Usage {
+    #[must_use]
     pub fn total_tokens(&self) -> u64 {
         self.input_tokens + self.output_tokens
     }
 
+    #[must_use]
     pub fn total_input_tokens(&self) -> u64 {
         self.input_tokens
             + self.cache_creation_input_tokens.unwrap_or(0)

@@ -31,7 +31,7 @@ pub enum AgentEvent {
     /// The LLM stream started (carries initial message metadata).
     StreamStart { message: Message },
 
-    /// A content block began (text, thinking, tool_use, …).
+    /// A content block began (text, thinking, `tool_use`, …).
     ContentBlockStart {
         index: usize,
         content_block_kind: ContentBlockKind,
@@ -40,7 +40,7 @@ pub enum AgentEvent {
     /// A content block ended.
     ContentBlockStop { index: usize },
 
-    /// The LLM indicated a stop reason (end_turn, tool_use, max_tokens, …).
+    /// The LLM indicated a stop reason (`end_turn`, `tool_use`, `max_tokens`, …).
     StreamDelta { stop_reason: Option<StopReason> },
 
     // ── Aggregated LLM responses (emitted after stream completes) ──
@@ -110,6 +110,7 @@ impl AgentEvent {
     /// Returns `None` for events that carry no useful information for
     /// external observers (e.g. `MessageStop` — the agent emits `Done`
     /// itself based on lifecycle state, not on the stream protocol).
+    #[must_use]
     pub fn from_stream_event(event: &MessageStreamEvent) -> Option<Self> {
         match event {
             MessageStreamEvent::MessageStart { message } => Some(AgentEvent::StreamStart {

@@ -85,7 +85,7 @@ impl Anthropic {
     /// let client = Anthropic::from_env()?;
     ///
     /// let requests = vec![
-    ///     BatchRequest::new("req1", "claude-3-5-sonnet-latest", 1024)
+    ///     BatchRequest::builder("req1", "claude-3-5-sonnet-latest", 1024)
     ///         .user("Hello, world!")
     ///         .build(),
     /// ];

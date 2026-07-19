@@ -199,76 +199,91 @@ pub struct CostBreakdown {
 }
 
 impl ModelListParams {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn before_id(mut self, before_id: impl Into<String>) -> Self {
         self.before_id = Some(before_id.into());
         self
     }
 
+    #[must_use]
     pub fn after_id(mut self, after_id: impl Into<String>) -> Self {
         self.after_id = Some(after_id.into());
         self
     }
 
+    #[must_use]
     pub fn limit(mut self, limit: u32) -> Self {
-        self.limit = Some(limit.min(1000).max(1));
+        self.limit = Some(limit.clamp(1, 1000));
         self
     }
 }
 
 impl ModelRequirements {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn max_input_cost_per_token(mut self, cost: f64) -> Self {
         self.max_input_cost_per_token = Some(cost);
         self
     }
 
+    #[must_use]
     pub fn max_output_cost_per_token(mut self, cost: f64) -> Self {
         self.max_output_cost_per_token = Some(cost);
         self
     }
 
+    #[must_use]
     pub fn min_context_length(mut self, length: u64) -> Self {
         self.min_context_length = Some(length);
         self
     }
 
+    #[must_use]
     pub fn require_capability(mut self, capability: ModelCapability) -> Self {
         self.required_capabilities.push(capability);
         self
     }
 
+    #[must_use]
     pub fn capabilities(mut self, capabilities: Vec<ModelCapability>) -> Self {
         self.required_capabilities = capabilities;
         self
     }
 
+    #[must_use]
     pub fn preferred_family(mut self, family: impl Into<String>) -> Self {
         self.preferred_family = Some(family.into());
         self
     }
 
+    #[must_use]
     pub fn require_vision(mut self) -> Self {
         self.requires_vision = Some(true);
         self
     }
 
+    #[must_use]
     pub fn require_tools(mut self) -> Self {
         self.requires_tools = Some(true);
         self
     }
 
+    #[must_use]
     pub fn min_quality_score(mut self, score: u8) -> Self {
         self.min_quality_score = Some(score.min(10));
         self
     }
 
+    #[must_use]
     pub fn min_speed_score(mut self, score: u8) -> Self {
         self.min_speed_score = Some(score.min(10));
         self
@@ -276,10 +291,12 @@ impl ModelRequirements {
 }
 
 impl ModelObject {
+    #[must_use]
     pub fn is_alias(&self) -> bool {
         self.id.contains("latest") || self.id.ends_with("-0")
     }
 
+    #[must_use]
     pub fn family(&self) -> String {
         let parts: Vec<&str> = self.id.split('-').collect();
         if parts.len() >= 3 {
@@ -289,10 +306,12 @@ impl ModelObject {
         }
     }
 
+    #[must_use]
     pub fn is_family(&self, family: &str) -> bool {
         self.id.starts_with(family)
     }
 
+    #[must_use]
     pub fn model_size(&self) -> Option<String> {
         if self.id.contains("opus") {
             Some("opus".to_string())
@@ -307,6 +326,7 @@ impl ModelObject {
 }
 
 impl ModelComparison {
+    #[must_use]
     pub fn best_for_speed(&self) -> Option<&ModelObject> {
         self.performance
             .iter()
@@ -314,6 +334,7 @@ impl ModelComparison {
             .and_then(|p| self.models.iter().find(|m| m.id == p.model_id))
     }
 
+    #[must_use]
     pub fn best_for_quality(&self) -> Option<&ModelObject> {
         self.performance
             .iter()
@@ -321,6 +342,7 @@ impl ModelComparison {
             .and_then(|p| self.models.iter().find(|m| m.id == p.model_id))
     }
 
+    #[must_use]
     pub fn most_cost_effective(&self) -> Option<&ModelObject> {
         self.performance
             .iter()
@@ -330,6 +352,7 @@ impl ModelComparison {
 }
 
 impl CostEstimation {
+    #[must_use]
     pub fn cost_per_1k_tokens(&self) -> f64 {
         let total_tokens = self.input_tokens + self.output_tokens;
         if total_tokens > 0 {
@@ -339,6 +362,7 @@ impl CostEstimation {
         }
     }
 
+    #[must_use]
     pub fn savings_percentage(&self) -> f64 {
         let original_cost = self.input_cost_usd + self.output_cost_usd;
         if original_cost > 0.0 {

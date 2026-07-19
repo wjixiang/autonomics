@@ -150,6 +150,7 @@ pub struct MessageCreateBuilder {
 }
 
 impl MessageCreateBuilder {
+    #[must_use]
     pub fn new(model: impl Into<String>, max_tokens: u32) -> Self {
         Self {
             params: MessageCreateParams {
@@ -169,6 +170,7 @@ impl MessageCreateBuilder {
         }
     }
 
+    #[must_use]
     pub fn message(mut self, role: Role, content: impl Into<MessageContent>) -> Self {
         self.params.messages.push(MessageParam {
             role,
@@ -177,59 +179,71 @@ impl MessageCreateBuilder {
         self
     }
 
+    #[must_use]
     pub fn user(self, content: impl Into<MessageContent>) -> Self {
         self.message(Role::User, content)
     }
 
+    #[must_use]
     pub fn assistant(self, content: impl Into<MessageContent>) -> Self {
         self.message(Role::Assistant, content)
     }
 
+    #[must_use]
     pub fn system(mut self, system: impl Into<String>) -> Self {
         self.params.system = Some(system.into());
         self
     }
 
+    #[must_use]
     pub fn temperature(mut self, temperature: f32) -> Self {
         self.params.temperature = Some(temperature);
         self
     }
 
+    #[must_use]
     pub fn top_p(mut self, top_p: f32) -> Self {
         self.params.top_p = Some(top_p);
         self
     }
 
+    #[must_use]
     pub fn top_k(mut self, top_k: u32) -> Self {
         self.params.top_k = Some(top_k);
         self
     }
 
+    #[must_use]
     pub fn stop_sequences(mut self, stop_sequences: Vec<String>) -> Self {
         self.params.stop_sequences = Some(stop_sequences);
         self
     }
 
+    #[must_use]
     pub fn stream(mut self, stream: bool) -> Self {
         self.params.stream = Some(stream);
         self
     }
 
+    #[must_use]
     pub fn tools(mut self, tools: Vec<ToolDefinition>) -> Self {
         self.params.tools = Some(tools);
         self
     }
 
+    #[must_use]
     pub fn tool_choice(mut self, tool_choice: ToolChoice) -> Self {
         self.params.tool_choice = Some(tool_choice);
         self
     }
 
+    #[must_use]
     pub fn metadata(mut self, metadata: std::collections::HashMap<String, String>) -> Self {
         self.params.metadata = Some(metadata);
         self
     }
 
+    #[must_use]
     pub fn build(self) -> MessageCreateParams {
         self.params
     }
@@ -254,10 +268,12 @@ impl From<Vec<ContentBlockParam>> for MessageContent {
 }
 
 impl ContentBlockParam {
+    #[must_use]
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
 
+    #[must_use]
     pub fn image_base64(media_type: impl Into<String>, data: impl Into<String>) -> Self {
         Self::Image {
             source: ImageSource::Base64 {
@@ -267,6 +283,7 @@ impl ContentBlockParam {
         }
     }
 
+    #[must_use]
     pub fn image_url(url: impl Into<String>) -> Self {
         Self::Image {
             source: ImageSource::Url { url: url.into() },

@@ -71,17 +71,15 @@ impl ToolInputSchema {
     /// `additional` flatten. The `"$schema"` meta-URI and generated `"title"`
     /// are stripped — they are schemars bookkeeping that some provider APIs
     /// reject.
+    #[must_use]
     pub fn from_root_schema(mut root: Value) -> Self {
-        let obj = match root.as_object_mut() {
-            Some(o) => o,
-            None => {
-                return Self {
-                    schema_type: "object".to_string(),
-                    properties: Map::new(),
-                    required: Vec::new(),
-                    additional: Map::new(),
-                };
-            }
+        let Some(obj) = root.as_object_mut() else {
+            return Self {
+                schema_type: "object".to_string(),
+                properties: Map::new(),
+                required: Vec::new(),
+                additional: Map::new(),
+            };
         };
         obj.remove("$schema");
         obj.remove("title");
@@ -160,28 +158,29 @@ pub enum ImageSource {
 }
 
 impl ToolResult {
+    #[must_use]
     pub fn from_pending_task(tool_use_id: &str) -> Self {
         Self {
             tool_use_id: tool_use_id.to_string(),
             content: ToolResultContent::Text(format!(
-                "Task '{}' is running in backend",
-                tool_use_id
+                "Task '{tool_use_id}' is running in backend"
             )),
             is_error: None,
         }
     }
 
+    #[must_use]
     pub fn task_finish_notification(tool_use_id: &str) -> Self {
         Self {
             tool_use_id: tool_use_id.to_string(),
             content: ToolResultContent::Text(format!(
-                "Task '{}' has finished, use tool to view output",
-                tool_use_id
+                "Task '{tool_use_id}' has finished, use tool to view output"
             )),
             is_error: None,
         }
     }
 
+    #[must_use]
     pub fn with_id<T: Into<String>>(mut self, id: T) -> Self {
         self.tool_use_id = id.into();
         self
@@ -198,6 +197,7 @@ pub struct ToolDefinitionBuilder {
 }
 
 impl ToolDefinitionBuilder {
+    #[must_use]
     pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -208,6 +208,7 @@ impl ToolDefinitionBuilder {
         }
     }
 
+    #[must_use]
     pub fn parameter(
         mut self,
         name: impl Into<String>,
@@ -223,6 +224,7 @@ impl ToolDefinitionBuilder {
         self
     }
 
+    #[must_use]
     pub fn enum_parameter(
         mut self,
         name: impl Into<String>,
@@ -239,6 +241,7 @@ impl ToolDefinitionBuilder {
         self
     }
 
+    #[must_use]
     pub fn array_parameter(
         mut self,
         name: impl Into<String>,
@@ -257,6 +260,7 @@ impl ToolDefinitionBuilder {
         self
     }
 
+    #[must_use]
     pub fn object_parameter(
         mut self,
         name: impl Into<String>,
@@ -273,6 +277,7 @@ impl ToolDefinitionBuilder {
         self
     }
 
+    #[must_use]
     pub fn required(mut self, name: impl Into<String>) -> Self {
         let param_name = name.into();
         if !self.required.contains(&param_name) {
@@ -281,11 +286,13 @@ impl ToolDefinitionBuilder {
         self
     }
 
+    #[must_use]
     pub fn additional_property(mut self, key: impl Into<String>, value: Value) -> Self {
         self.additional.insert(key.into(), value);
         self
     }
 
+    #[must_use]
     pub fn default(mut self, name: impl Into<String>, value: Value) -> Self {
         let param_name = name.into();
         if let Some(obj) = self
@@ -298,6 +305,7 @@ impl ToolDefinitionBuilder {
         self
     }
 
+    #[must_use]
     pub fn build(self) -> ToolDefinition {
         ToolDefinition {
             name: self.name,
@@ -335,6 +343,13 @@ pub struct FieldOverride {
 ///
 /// Subschemas are inlined (`inline_subschemas = true`) so the result contains
 /// no `$ref` / `$defs`, which several provider APIs do not resolve.
+#[must_use]
+/// # Panics
+///
+/// # Panics
+///
+/// Panics if the schemars-generated schema fails to serialize to JSON,
+/// which should never happen for valid types.
 pub fn tool_definition_from_schema<T: JsonSchema>(
     name: &str,
     description: &str,
@@ -352,11 +367,10 @@ pub fn tool_definition_from_schema<T: JsonSchema>(
             let Some(prop) = props.get_mut(ov.name).and_then(|v| v.as_object_mut()) else {
                 continue;
             };
-            if let Some(desc) = &ov.description {
-                if !desc.is_empty() {
+            if let Some(desc) = &ov.description
+                && !desc.is_empty() {
                     prop.insert("description".to_string(), Value::String(desc.clone()));
                 }
-            }
             if let Some(default) = &ov.default {
                 prop.insert("default".to_string(), default.clone());
             }
@@ -389,6 +403,7 @@ pub fn tool_definition_from_schema<T: JsonSchema>(
 }
 
 impl ToolDefinition {
+    #[must_use]
     pub fn builder() -> ToolDefinitionBuilder {
         ToolDefinitionBuilder {
             name: String::new(),
@@ -398,6 +413,15 @@ impl ToolDefinition {
             additional: Map::new(),
         }
     }
+    /// Validate a JSON input against this tool's schema.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ToolValidationError`] if:
+    /// - the input is not a JSON object
+    /// - a required field is missing
+    /// - a field's value type does not match the schema
+    /// - a field's schema is missing a `type` key
     pub fn validate_input(&self, input: &Value) -> Result<(), ToolValidationError> {
         if let Value::Object(input_obj) = input {
             // 1. validate input object doesn't miss required fields.
@@ -454,7 +478,7 @@ impl ToolDefinition {
         } else {
             return Err(ToolValidationError::MissingSchema {
                 field: field_name.to_string(),
-                tool: self.name.to_string(),
+                tool: self.name.clone(),
                 schema: schema.clone(),
                 actual: match value {
                     Value::Null => "null".to_string(),
@@ -472,20 +496,24 @@ impl ToolDefinition {
 }
 
 impl ToolChoice {
+    #[must_use]
     pub fn auto() -> Self {
         Self::Auto
     }
 
+    #[must_use]
     pub fn any() -> Self {
         Self::Any
     }
 
+    #[must_use]
     pub fn tool(name: impl Into<String>) -> Self {
         Self::Tool { name: name.into() }
     }
 }
 
 impl ToolResult {
+    #[must_use]
     pub fn success(content: impl Into<String>) -> Self {
         Self {
             tool_use_id: String::new(),
@@ -494,6 +522,7 @@ impl ToolResult {
         }
     }
 
+    #[must_use]
     pub fn success_json(content: Value) -> Self {
         Self {
             tool_use_id: String::new(),
@@ -502,6 +531,7 @@ impl ToolResult {
         }
     }
 
+    #[must_use]
     pub fn error(error_message: impl Into<String>) -> Self {
         Self {
             tool_use_id: String::new(),
@@ -510,6 +540,7 @@ impl ToolResult {
         }
     }
 
+    #[must_use]
     pub fn with_blocks(blocks: Vec<ToolResultBlock>) -> Self {
         Self {
             tool_use_id: String::new(),
@@ -518,7 +549,8 @@ impl ToolResult {
         }
     }
 
-    /// Create an error result with a specific tool_use_id (for orchestration layer).
+    /// Create an error result with a specific `tool_use_id` (for orchestration layer).
+    #[must_use]
     pub fn error_with_id(tool_use_id: impl Into<String>, error_message: impl Into<String>) -> Self {
         Self {
             tool_use_id: tool_use_id.into(),
@@ -528,6 +560,7 @@ impl ToolResult {
     }
 
     /// Extract text content, joining multiple text segments. Non-text (images) are skipped.
+    #[must_use]
     pub fn text_content(&self) -> String {
         match &self.content {
             ToolResultContent::Text(s) => s.clone(),
@@ -545,10 +578,12 @@ impl ToolResult {
 }
 
 impl ToolResultBlock {
+    #[must_use]
     pub fn text(text: impl Into<String>) -> Self {
         Self::Text { text: text.into() }
     }
 
+    #[must_use]
     pub fn image_base64(media_type: impl Into<String>, data: impl Into<String>) -> Self {
         Self::Image {
             source: ImageSource::Base64 {
@@ -610,10 +645,12 @@ pub struct WebSearchParameters {
 }
 
 impl ServerTool {
+    #[must_use]
     pub fn web_search() -> Self {
         Self::WebSearch { parameters: None }
     }
 
+    #[must_use]
     pub fn web_search_with_params(parameters: WebSearchParameters) -> Self {
         Self::WebSearch {
             parameters: Some(parameters),
@@ -622,6 +659,7 @@ impl ServerTool {
 }
 
 impl WebSearchParameters {
+    #[must_use]
     pub fn with_max_results(max_results: u32) -> Self {
         Self {
             max_results: Some(max_results),
@@ -630,11 +668,13 @@ impl WebSearchParameters {
         }
     }
 
+    #[must_use]
     pub fn language(mut self, language: impl Into<String>) -> Self {
         self.language = Some(language.into());
         self
     }
 
+    #[must_use]
     pub fn region(mut self, region: impl Into<String>) -> Self {
         self.region = Some(region.into());
         self

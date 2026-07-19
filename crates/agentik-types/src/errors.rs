@@ -58,6 +58,7 @@ pub enum AnthropicError {
 }
 
 impl AnthropicError {
+    #[must_use]
     pub fn from_status(status: u16, message: String) -> Self {
         match status {
             400 => Self::BadRequest { message, status },
@@ -71,6 +72,7 @@ impl AnthropicError {
         }
     }
 
+    #[must_use]
     pub fn status_code(&self) -> Option<u16> {
         match self {
             Self::BadRequest { status, .. }
@@ -98,7 +100,7 @@ impl From<reqwest::Error> for AnthropicError {
             }
         } else if err.is_request() {
             Self::HttpError {
-                status: err.status().map(|s| s.as_u16()).unwrap_or(0),
+                status: err.status().map_or(0, |s| s.as_u16()),
                 message: err.to_string(),
             }
         } else {
@@ -110,13 +112,13 @@ impl From<reqwest::Error> for AnthropicError {
 #[cfg(feature = "http")]
 impl From<serde_json::Error> for AnthropicError {
     fn from(err: serde_json::Error) -> Self {
-        Self::Other(format!("JSON serialization/deserialization error: {}", err))
+        Self::Other(format!("JSON serialization/deserialization error: {err}"))
     }
 }
 
 #[cfg(feature = "http")]
 impl From<chrono::OutOfRangeError> for AnthropicError {
     fn from(err: chrono::OutOfRangeError) -> Self {
-        Self::Other(format!("Date/time out of range error: {}", err))
+        Self::Other(format!("Date/time out of range error: {err}"))
     }
 }

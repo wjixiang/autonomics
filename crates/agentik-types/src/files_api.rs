@@ -30,6 +30,7 @@ pub enum FilePurpose {
 }
 
 impl FilePurpose {
+    #[must_use]
     pub fn all() -> Vec<FilePurpose> {
         vec![
             FilePurpose::BatchInput,
@@ -40,6 +41,7 @@ impl FilePurpose {
         ]
     }
 
+    #[must_use]
     pub fn supports_mime_type(&self, mime_type: &str) -> bool {
         match self {
             FilePurpose::BatchInput => mime_type == "application/json" || mime_type == "text/plain",
@@ -69,14 +71,17 @@ pub enum FileStatus {
 }
 
 impl FileStatus {
+    #[must_use]
     pub fn is_ready(&self) -> bool {
         *self == FileStatus::Processed
     }
 
+    #[must_use]
     pub fn has_error(&self) -> bool {
         *self == FileStatus::Error
     }
 
+    #[must_use]
     pub fn is_deleted(&self) -> bool {
         *self == FileStatus::Deleted
     }
@@ -92,6 +97,7 @@ pub struct FileUploadParams {
 }
 
 impl FileUploadParams {
+    #[must_use]
     pub fn new(
         content: Vec<u8>,
         filename: impl Into<String>,
@@ -107,16 +113,24 @@ impl FileUploadParams {
         }
     }
 
+    #[must_use]
     pub fn with_metadata(mut self, metadata: HashMap<String, String>) -> Self {
         self.metadata = metadata;
         self
     }
 
+    #[must_use]
     pub fn with_meta(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.insert(key.into(), value.into());
         self
     }
 
+    /// Validate file upload parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exceeds the maximum size (100 MB),
+    /// the filename is empty, or the MIME type is not supported for the given purpose.
     pub fn validate(&self) -> Result<(), AnthropicError> {
         const MAX_SIZE: u64 = 100 * 1024 * 1024;
         if self.content.len() as u64 > MAX_SIZE {
@@ -157,25 +171,30 @@ pub struct FileListParams {
 }
 
 impl FileListParams {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn purpose(mut self, purpose: FilePurpose) -> Self {
         self.purpose = Some(purpose);
         self
     }
 
+    #[must_use]
     pub fn after(mut self, after: impl Into<String>) -> Self {
         self.after = Some(after.into());
         self
     }
 
+    #[must_use]
     pub fn limit(mut self, limit: u32) -> Self {
         self.limit = Some(limit.clamp(1, 100));
         self
     }
 
+    #[must_use]
     pub fn order(mut self, order: FileOrder) -> Self {
         self.order = Some(order);
         self
@@ -207,6 +226,7 @@ pub struct UploadProgress {
 }
 
 impl UploadProgress {
+    #[must_use]
     pub fn new(bytes_uploaded: u64, total_bytes: u64) -> Self {
         let percentage = if total_bytes > 0 {
             (bytes_uploaded as f64 / total_bytes as f64) * 100.0
@@ -223,6 +243,7 @@ impl UploadProgress {
         }
     }
 
+    #[must_use]
     pub fn with_speed(mut self, speed_bps: f64) -> Self {
         self.speed_bps = Some(speed_bps);
 
@@ -234,14 +255,17 @@ impl UploadProgress {
         self
     }
 
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         self.bytes_uploaded >= self.total_bytes
     }
 
+    #[must_use]
     pub fn percentage_string(&self) -> String {
         format!("{:.1}%", self.percentage)
     }
 
+    #[must_use]
     pub fn size_string(&self) -> String {
         format!(
             "{} / {}",
@@ -250,15 +274,17 @@ impl UploadProgress {
         )
     }
 
+    #[must_use]
     pub fn speed_string(&self) -> Option<String> {
         self.speed_bps
             .map(|speed| format!("{}/s", format_bytes(speed as u64)))
     }
 
+    #[must_use]
     pub fn eta_string(&self) -> Option<String> {
         self.eta_seconds.map(|eta| {
             if eta < 60.0 {
-                format!("{:.0}s", eta)
+                format!("{eta:.0}s")
             } else if eta < 3600.0 {
                 format!("{:.0}m {:.0}s", eta / 60.0, eta % 60.0)
             } else {
@@ -278,6 +304,7 @@ pub struct StorageInfo {
 }
 
 impl StorageInfo {
+    #[must_use]
     pub fn usage_percentage(&self) -> f64 {
         if self.quota_bytes > 0 {
             (self.used_bytes as f64 / self.quota_bytes as f64) * 100.0
@@ -286,18 +313,22 @@ impl StorageInfo {
         }
     }
 
+    #[must_use]
     pub fn is_nearly_full(&self) -> bool {
         self.usage_percentage() > 90.0
     }
 
+    #[must_use]
     pub fn is_full(&self) -> bool {
         self.used_bytes >= self.quota_bytes
     }
 
+    #[must_use]
     pub fn quota_string(&self) -> String {
         format_bytes(self.quota_bytes)
     }
 
+    #[must_use]
     pub fn usage_string(&self) -> String {
         format!(
             "{} / {} ({:.1}%)",
@@ -339,10 +370,21 @@ pub struct FileDownload {
 }
 
 impl FileDownload {
+    /// Decode file content as UTF-8 string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file content is not valid UTF-8.
     pub fn as_string(&self) -> Result<String, std::string::FromUtf8Error> {
         String::from_utf8(self.content.clone())
     }
 
+    /// Parse file content as JSON into a typed value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file content is not valid JSON or cannot be
+    /// deserialized into the target type `T`.
     pub fn as_json<T>(&self) -> Result<T, serde_json::Error>
     where
         T: for<'de> Deserialize<'de>,

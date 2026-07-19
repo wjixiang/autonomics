@@ -32,6 +32,7 @@ pub enum Model {
 }
 
 impl Model {
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Claude3_5SonnetLatest => "claude-3-5-sonnet-latest",
@@ -48,6 +49,7 @@ impl Model {
         }
     }
 
+    #[must_use]
     pub fn family(&self) -> &'static str {
         match self {
             Self::Claude3_5SonnetLatest
@@ -62,18 +64,14 @@ impl Model {
         }
     }
 
+    #[must_use]
     pub fn supports_vision(&self) -> bool {
-        match self {
-            Self::Claude2_1 | Self::Claude2_0 => false,
-            _ => true,
-        }
+        !matches!(self, Self::Claude2_1 | Self::Claude2_0)
     }
 
+    #[must_use]
     pub fn supports_tools(&self) -> bool {
-        match self {
-            Self::Claude2_1 | Self::Claude2_0 => false,
-            _ => true,
-        }
+        !matches!(self, Self::Claude2_1 | Self::Claude2_0)
     }
 }
 
