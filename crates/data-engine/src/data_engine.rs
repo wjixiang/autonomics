@@ -865,6 +865,7 @@ mod tests {
             "ldsc",
             "linear_regression",
             "mock",
+            "mr",
         ] {
             assert!(
                 kinds.contains(&expected),
@@ -884,6 +885,7 @@ mod tests {
             "ldsc",
             "linear_regression",
             "mock",
+            "mr",
         ] {
             let schema = engine
                 .get_node_spec(kind)

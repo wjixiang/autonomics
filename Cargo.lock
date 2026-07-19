@@ -1672,6 +1672,7 @@ dependencies = [
  "iceberg",
  "iceberg-catalog-rest",
  "ldsc",
+ "mr",
  "nanoid",
  "parquet",
  "petgraph",
