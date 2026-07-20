@@ -244,6 +244,17 @@ impl NodeFactory for LinearRegressionNodeFactory {
         "linear_regression"
     }
 
+    fn desc(&self) -> &'static str {
+        "Fits an OLS linear regression and outputs coefficients, SE, t-stats, and p-values."
+    }
+
+    fn doc(&self) -> &'static str {
+        "A transform node that fits an OLS linear regression on the input \
+        DataFrame. Accepts named X columns and a Y column, optionally with an \
+        intercept term. Outputs a summary table with coefficients, standard \
+        errors, t-statistics, p-values, R², and the number of observations."
+    }
+
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(LinearRegressionNodeSpec)
     }

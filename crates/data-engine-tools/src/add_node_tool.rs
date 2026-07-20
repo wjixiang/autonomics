@@ -27,7 +27,7 @@ use crate::ExecError;
                   - \"source\":         {\"type\": \"iceberg\", \"ident\": \"gwas.study\"} \
                   - \"sink\":           {\"type\": \"file\", \"path\": \"/out/result.csv\", \"format\": \"csv\", \"mode\": \"overwrite\"} \
                   - \"linear_regression\": {\"x_columns\": [\"x1\"], \"y_column\": \"y\", \"intercept\": true} \
-                  - \"ldsc\":           {\"m\": [1000000.0], \"n_blocks\": 200, \"intercept\": null} \
+                  - \"ldsc\":           {\"n_blocks\": 200, \"intercept\": null} \
                   - \"mock\":           {} \
                   \
                   WARNING — DO NOT combine `add_node` and `add_edge` in the same \

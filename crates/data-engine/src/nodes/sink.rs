@@ -284,6 +284,17 @@ impl NodeFactory for SinkNodeFactory {
         "sink"
     }
 
+    fn desc(&self) -> &'static str {
+        "Writes an upstream DataFrame to a file (CSV/Parquet) or Iceberg table."
+    }
+
+    fn doc(&self) -> &'static str {
+        "A data sink node that consumes an upstream DataFrame and writes it to \
+        an external destination: local/remote files (CSV or Parquet) or Iceberg \
+        tables via the catalog. Supports both append and overwrite modes. \
+        One untyped input port; no output ports."
+    }
+
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(SinkNodeSpec)
     }

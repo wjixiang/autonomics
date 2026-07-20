@@ -39,6 +39,16 @@ impl NodeFactory for EchoNodeFactory {
         "echo"
     }
 
+    fn desc(&self) -> &'static str {
+        "No-op pass-through: echoes each input DataFrame to the corresponding output port."
+    }
+
+    fn doc(&self) -> &'static str {
+        "A no-op pass-through node that copies every upstream DataFrame to its \
+        corresponding output port unchanged. Supports variadic inputs and outputs. \
+        Useful as a placeholder in DAG topology tests and integration wiring checks."
+    }
+
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(EchoNodeSpec)
     }

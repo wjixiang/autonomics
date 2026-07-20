@@ -145,15 +145,10 @@ fn build_result_batch(
 /// Configuration for the LDSC rg estimation algorithm.
 ///
 /// Bundles the parameters that govern the bivariate LD Score Regression
-/// itself. Datalake and sumstats column names are orthogonal and live on the
-/// node directly.
+/// itself.  M (the number of SNPs in the LD score annotation) is derived at
+/// execution time by counting the rows in the LD score panel table.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LdscRgConfig {
-    /// Per-annotation M: the number of SNPs in each LD score annotation
-    /// category, in the same order as the LD score panel column. For baseline
-    /// LDSC (single annotation, the current node wiring) pass
-    /// `vec![total_snps]` matching the panel's SNP count.
-    pub m: Vec<f64>,
     /// Number of block-jackknife blocks used by [`ldsc::regress::RG`] to
     /// compute standard errors and intercepts. A typical value is 200.
     pub n_blocks: usize,
@@ -174,9 +169,8 @@ pub struct LdscRgConfig {
 impl LdscRgConfig {
     /// Construct an [`LdscRgConfig`] with free intercepts and the default
     /// two-step cutoff.
-    pub fn new(m: Vec<f64>, n_blocks: usize) -> Self {
+    pub fn new(n_blocks: usize) -> Self {
         Self {
-            m,
             n_blocks,
             intercept_hsq1: None,
             intercept_hsq2: None,
@@ -189,7 +183,6 @@ impl LdscRgConfig {
 impl Default for LdscRgConfig {
     fn default() -> Self {
         Self {
-            m: Vec::new(),
             n_blocks: 200,
             intercept_hsq1: None,
             intercept_hsq2: None,
@@ -235,6 +228,19 @@ pub struct LdscRgNodeFactory {}
 impl NodeFactory for LdscRgNodeFactory {
     fn kind(&self) -> &'static str {
         LDSC_RG_NODE_KIND
+    }
+
+    fn desc(&self) -> &'static str {
+        "Bivariate LDSC for genetic correlation (rg) between two GWAS traits."
+    }
+
+    fn doc(&self) -> &'static str {
+        "Bivariate LD Score Regression transform node for genetic correlation (rg) \
+        estimation between two GWAS traits. Takes two upstream summary statistics \
+        DataFrames (trait 1 on port 0, trait 2 on port 1, each with Z, N, rsid), \
+        queries the Iceberg data lake for the LD score panel, 3-way joins on rsid, \
+        and runs bivariate LDSC. Outputs a single-row summary with rg, its SE/z/p, \
+        cross-trait gencov, and each trait's h²."
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -460,13 +466,14 @@ impl LdscRgNode {
         // 6. Resolve config, applying the LDSC two-step default of 30 when no
         //    intercept is constrained (matching the h² node).
         let LdscRgConfig {
-            m,
             n_blocks,
             intercept_hsq1,
             intercept_hsq2,
             intercept_gencov,
             two_step,
         } = cfg;
+        // Derive M from the LD score panel SNP count.
+        let m = vec![count_panel_snp(ctx, ld_table).await? as f64];
         let two_step = two_step.or(
             if intercept_hsq1.is_none() && intercept_hsq2.is_none() && intercept_gencov.is_none() {
                 Some(30.0)
@@ -483,7 +490,7 @@ impl LdscRgNode {
             &w_ld,
             &n1,
             &n2,
-            m,
+            &m,
             *intercept_hsq1,
             *intercept_hsq2,
             *intercept_gencov,
@@ -568,6 +575,36 @@ fn push_numeric(col: &dyn Array, out: &mut Vec<f64>) {
     cast!(col, Float64Array);
 }
 
+/// Count the total number of SNPs in the LD score panel table to derive M.
+async fn count_panel_snp(
+    ctx: &datafusion::prelude::SessionContext,
+    ld_table: &str,
+) -> Result<usize, LdscRgNodeError> {
+    let sql = format!(r#"SELECT COUNT(*) AS "n" FROM iceberg.ld_score.{ld_table}"#);
+    let df = ctx.sql(&sql).await.map_err(LdscRgNodeError::ReadBatch)?;
+    let batches = df.collect().await.map_err(LdscRgNodeError::ReadBatch)?;
+    let batch = batches.first().ok_or(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+        "count_panel_snp: no batches returned".into(),
+    )))?;
+    let idx = batch.schema().index_of("n").map_err(|_| {
+        LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+            "count_panel_snp: missing column 'n'".into(),
+        ))
+    })?;
+    let col = batch.column(idx);
+    let dtype = col.data_type();
+    let n = match dtype {
+        DataType::UInt64 => col.as_any().downcast_ref::<arrow_array::UInt64Array>().unwrap().value(0) as usize,
+        DataType::Int64 => col.as_any().downcast_ref::<arrow_array::Int64Array>().unwrap().value(0) as usize,
+        DataType::UInt32 => col.as_any().downcast_ref::<arrow_array::UInt32Array>().unwrap().value(0) as usize,
+        DataType::Int32 => col.as_any().downcast_ref::<arrow_array::Int32Array>().unwrap().value(0) as usize,
+        _ => return Err(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
+            "count_panel_snp: unsupported dtype {dtype}"
+        )))),
+    };
+    Ok(n)
+}
+
 // =====================================================================
 // Tests
 // =====================================================================
@@ -592,7 +629,7 @@ mod tests {
         let node = LdscRgNode::new(
             datafusion::prelude::SessionContext::new().runtime_env(),
             None,
-            LdscRgConfig::new(vec![20.0], 5),
+            LdscRgConfig::new(5),
         );
         assert_eq!(node.kind(), "ldsc_rg");
         assert_eq!(node.ports().input_ports().len(), 2);
@@ -740,7 +777,6 @@ mod tests {
     /// no two-step. Under the analytic ±Z construction this yields rg = ∓1.
     fn constrained_cfg() -> LdscRgConfig {
         LdscRgConfig {
-            m: vec![N_SNP as f64],
             n_blocks: 20,
             intercept_hsq1: Some(1.0),
             intercept_hsq2: Some(1.0),
@@ -898,7 +934,7 @@ mod tests {
         let z1: Vec<f64> = ld.iter().map(|l| l * 0.2).collect();
         let z2: Vec<f64> = z1.iter().map(|z| -z).collect();
 
-        let cfg = LdscRgConfig::new(vec![N_SNP as f64], 20);
+        let cfg = LdscRgConfig::new(20);
         assert!(cfg.two_step.is_none(), "fixture precondition");
         // run_with_ctx applies the LDSC default two_step = 30 internally.
 

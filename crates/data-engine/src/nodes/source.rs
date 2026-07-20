@@ -182,6 +182,17 @@ impl NodeFactory for SourceNodeFactory {
         "source"
     }
 
+    fn desc(&self) -> &'static str {
+        "Reads external data (files or Iceberg tables) into the DAG as a DataFrame."
+    }
+
+    fn doc(&self) -> &'static str {
+        "A data source node that reads external data into the DAG as a DataFrame. \
+        Supports local/remote files (CSV, Parquet) and bioinformatics formats \
+        (VCF, BAM, BED, GTF, FASTA, etc.) via biofusion, as well as Iceberg \
+        tables by identifier. No input ports; one untyped output port."
+    }
+
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(SourceNodeSpec)
     }

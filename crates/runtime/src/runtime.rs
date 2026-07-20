@@ -49,7 +49,13 @@ proactively rather than answering from memory alone.
 - Build and execute data processing pipelines: add data sources, apply SQL transforms, \
   connect nodes into a DAG, run the pipeline, and retrieve output.
 - Use this when a task requires multi-step data processing or transformation.
-- **DAG construction order**: always add all nodes first, then connect them with add_edge, then run_dag.
+- **Build incrementally, layer by layer — never construct the full DAG in one shot.** \
+  Start with just the data source node, run_dag, and inspect the output columns to \
+  understand what you have. Then add the next processing node (a SQL transform, a filter, \
+  an analysis), wire it, run again, and verify the output matches expectations before \
+  extending further. Repeat until the pipeline reaches the final analysis. \
+  This feedback loop catches schema mismatches, wrong column names, and type errors \
+  early — a single-shot full-DAG construction fails silently and wastes time debugging.
 - **Inspect ports before wiring**: every node kind declares typed input/output ports — \
   `list_node_factories` returns each kind's `ports` (input/output port count, whether input \
   is variadic, and the per-port column schema: name + data_type + nullable). Read the \

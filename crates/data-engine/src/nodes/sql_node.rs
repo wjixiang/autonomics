@@ -68,6 +68,17 @@ impl NodeFactory for SqlNodeFactory {
         "sql"
     }
 
+    fn desc(&self) -> &'static str {
+        "Registers upstream DataFrames as named tables (port_0, port_1, …) and executes a SQL query."
+    }
+
+    fn doc(&self) -> &'static str {
+        "A transform node that registers each upstream input as a named table \
+        (port_0, port_1, …) and runs a user-supplied SQL query over them. \
+        Supports variadic inputs for multi-table joins and set operations. \
+        Single untyped output port."
+    }
+
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(SqlNodeSpec)
     }
@@ -237,11 +248,12 @@ mod tests {
     /// * `test_struct_subfield_query` — runs a `WHERE info['age'] > 28`
     ///   / `SELECT info['name']` query through SqlNode and pins the
     ///   correct output. This is the regression test for the original
-    ///   gap where SqlNode's per-execution SessionState didn't carry
+    ///   gap where SqlNode's per-execution `SessionState` didn't carry
     ///   DataFusion's default features, so the bracket-syntax lowering
-    ///   (`RawFieldAccessExpr` → `get_field()`) and the `get_field` UDF
-    ///   itself were unreachable. The fix is `with_default_features()`
-    ///   on the builder in `SqlNode::execute`.
+    ///   (`RawFieldAccessExpr` → `get_field()`) and the `array_element`
+    ///   UDF for list indexing were unreachable. The fix is
+    ///   `SessionStateBuilder::new().with_default_features()` in
+    ///   `new_isolated_ctx` (shared by all node kinds).
     fn build_struct_dataframe(ctx: &SessionContext) -> DataFrame {
         let info_fields = Fields::from(vec![
             Field::new("name", DataType::Utf8, false),
@@ -304,9 +316,9 @@ mod tests {
         // Filter on `info['age']` and project `info['name']`. Bracket
         // syntax parses to `RawFieldAccessExpr`, which `FieldAccessPlanner`
         // lowers to `get_field(...)`; both live behind DataFusion's
-        // `with_default_features()`, which `SqlNode::execute` must
-        // install into its per-execution SessionState — see the
-        // `.with_default_features()` call on the builder there.
+        // `with_default_features()`, which `new_isolated_ctx` must
+        // install into the per-execution SessionState — see the
+        // `.with_default_features()` call in `registry::new_isolated_ctx`.
         let sql = "SELECT id, info.name AS name \
                    FROM port_0 \
                    WHERE info['age'] > 28 \

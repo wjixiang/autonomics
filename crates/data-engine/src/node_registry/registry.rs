@@ -3,7 +3,7 @@ use std::sync::Arc;
 use datafusion::{
     catalog::CatalogProvider,
     common::HashMap,
-    execution::runtime_env::RuntimeEnv,
+    execution::{runtime_env::RuntimeEnv, session_state::SessionStateBuilder},
     prelude::{SessionConfig, SessionContext},
 };
 use datalake::Datalake;
@@ -15,9 +15,8 @@ use crate::dag::DagNode;
 use crate::nodes::meta::NodePorts;
 use crate::nodes::{
     echo_node::EchoNodeFactory, ldsc_hsq::LdscHsqNodeFactory, ldsc_rg::LdscRgNodeFactory,
-    linear_regression::LinearRegressionNodeFactory, mr::MrNodeFactory,
-    sink::SinkNodeFactory, source::SourceNodeFactory, sql_node::SqlNodeFactory,
-    test_source::TestSourceFactory,
+    linear_regression::LinearRegressionNodeFactory, mr::MrNodeFactory, sink::SinkNodeFactory,
+    source::SourceNodeFactory, sql_node::SqlNodeFactory, test_source::TestSourceFactory,
 };
 
 /// Build a fresh, isolated [`SessionContext`].
@@ -32,7 +31,12 @@ pub fn new_isolated_ctx(
     runtime_env: Arc<RuntimeEnv>,
     iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
 ) -> SessionContext {
-    let ctx = SessionContext::new_with_config_rt(SessionConfig::new(), runtime_env);
+    let state = SessionStateBuilder::new()
+        .with_default_features()
+        .with_config(SessionConfig::new())
+        .with_runtime_env(runtime_env)
+        .build();
+    let ctx = SessionContext::new_with_state(state);
     if let Some(cat) = iceberg_catalog {
         ctx.register_catalog("iceberg", cat);
     }
@@ -41,6 +45,8 @@ pub fn new_isolated_ctx(
 
 pub trait NodeFactory: Send + Sync {
     fn kind(&self) -> &'static str;
+    fn desc(&self) -> &'static str;
+    fn doc(&self) -> &'static str;
     fn spec_schema(&self) -> schemars::Schema;
     /// The static port layout for this node kind — the input/output ports
     /// every instance of this kind will declare. Queryable without
@@ -156,8 +162,13 @@ impl NodeRegistry {
         Ok(node)
     }
 
+    /// Return the JSON Schema that validates [`kind`]'s node spec.
     pub fn get_node_spec(&self, node_kind: &str) -> Result<schemars::Schema> {
         Ok(self.get_node_factory(node_kind)?.spec_schema())
+    }
+
+    pub fn get_node_ports(&self, node_kind: &str) -> Result<()> {
+        todo!()
     }
 
     /// Return metadata of every registered node kind (kind + JSON Schema + ports).
@@ -189,8 +200,8 @@ mod tests {
             "linear_regression" => {
                 serde_json::json!({"x_columns": ["x"], "y_column": "y"})
             }
-            "ldsc" => serde_json::json!({"m": [1000000.0], "n_blocks": 200}),
-            "ldsc_rg" => serde_json::json!({"m": [1000000.0], "n_blocks": 200}),
+            "ldsc" => serde_json::json!({"n_blocks": 200}),
+            "ldsc_rg" => serde_json::json!({"n_blocks": 200}),
             "mr" => serde_json::json!({"action": 2, "method_list": ["mr_egger_regression"]}),
             "echo" => serde_json::json!({}),
             "test_source" => serde_json::json!({"dataset": "iris"}),
@@ -258,13 +269,13 @@ mod tests {
     #[test]
     fn ldsc_rg_malformed_llm_spec_builds() {
         let registry = test_registry();
+        // Numeric-string coercion: "200" → 200 (usize).
         let malformed = serde_json::json!({
-            "m": { "item": "23960350" },
             "n_blocks": "200"
         });
-        let node = registry.build_node("ldsc_rg", malformed).expect(
-            "malformed ldsc_rg spec should be normalized and build successfully",
-        );
+        let node = registry
+            .build_node("ldsc_rg", malformed)
+            .expect("malformed ldsc_rg spec should be normalized and build successfully");
         assert_eq!(node.kind(), "ldsc_rg");
     }
 
@@ -276,9 +287,11 @@ mod tests {
     fn node_info_ports_serialize() {
         let registry = test_registry();
 
-        let serialized = serde_json::to_value(registry.list_nodes())
-            .expect("NodeInfo list must serialize");
-        let arr = serialized.as_array().expect("list_nodes serializes to an array");
+        let serialized =
+            serde_json::to_value(registry.list_nodes()).expect("NodeInfo list must serialize");
+        let arr = serialized
+            .as_array()
+            .expect("list_nodes serializes to an array");
         assert!(!arr.is_empty(), "registry should have registered nodes");
 
         // ldsc_rg has two typed input ports + one typed output — the strongest

@@ -159,21 +159,12 @@ pub struct LdscHsqNode {
 
 /// Configuration for the LDSC h² estimation algorithm.
 ///
-/// Bundles the three parameters that govern the LDSC regression itself.
-/// All other [`LdscHsqNode`] parameters (datalake, sumstats column names)
-/// are orthogonal and live on the node directly.
+/// Bundles the parameters that govern the LDSC regression itself.  M (the
+/// number of SNPs in the LD score annotation) is derived at execution time by
+/// counting the rows in the LD score panel table, so the caller does not need
+/// to supply it.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LdscHsqConfig {
-    /// Per-annotation M: the number of SNPs in each LD score annotation
-    /// category, in the same order as `HsqColumns::ref_ld`. M is the
-    /// normalising constant in the LDSC regression
-    /// `E[chi²] = a + N·τ·l_j / M + N·b`.
-    ///
-    /// For baseline LDSC (single annotation, the current node wiring)
-    /// pass `vec![total_snps]`, where `total_snps` matches the SNP
-    /// count of the LD score panel. For partitioned LDSC pass one
-    /// element per annotation category.
-    pub m: Vec<f64>,
     /// Number of block-jackknife blocks used by
     /// [`ldsc::hsq::estimate_h2`] to compute standard errors and the
     /// intercept. A typical value is 200.
@@ -189,12 +180,8 @@ pub struct LdscHsqConfig {
 
 impl LdscHsqConfig {
     /// Construct an [`LdscHsqConfig`].
-    pub fn new(m: Vec<f64>, n_blocks: usize, intercept: Option<f64>) -> Self {
-        Self {
-            m,
-            n_blocks,
-            intercept,
-        }
+    pub fn new(n_blocks: usize, intercept: Option<f64>) -> Self {
+        Self { n_blocks, intercept }
     }
 }
 
@@ -212,6 +199,19 @@ fn port_layout() -> NodePorts {
 impl NodeFactory for LdscHsqNodeFactory {
     fn kind(&self) -> &'static str {
         "ldsc"
+    }
+
+    fn desc(&self) -> &'static str {
+        "LD Score Regression for SNP-heritability (h²) estimation from GWAS summary statistics."
+    }
+
+    fn doc(&self) -> &'static str {
+        "LD Score Regression (LDSC) transform node for SNP-heritability (h²) \
+        estimation. Takes a single upstream GWAS summary statistics DataFrame \
+        (with Z, N, rsid columns), queries the Iceberg data lake for LD score \
+        panel data, joins on rsid, and runs LDSC via block-jackknife. Outputs a \
+        single-row summary with h², intercept, ratio, and per-annotation \
+        coefficients."
     }
 
     fn spec_schema(&self) -> schemars::Schema {
@@ -344,7 +344,15 @@ impl LdscHsqNode {
         ctx.register_table("sumstats", input.clone().into_view())
             .map_err(LdscNodeError::ReadBatch)?;
 
-        // 2. Build SQL: join sumstats with LD score panel on rsid.
+        // 2. Count the total SNPs in the LD score panel to derive M — the
+        //    normalising constant in the LDSC regression.
+        let count_sql = format!(r#"SELECT COUNT(*) AS "n" FROM iceberg.ld_score.{ld_table}"#);
+        let count_df = ctx.sql(&count_sql).await.map_err(LdscNodeError::ReadBatch)?;
+        let count_batches = count_df.collect().await.map_err(LdscNodeError::ReadBatch)?;
+        let panel_count = extract_scalar_u64(&count_batches, "n")?;
+        let m = vec![panel_count as f64];
+
+        // 3. Build SQL: join sumstats with LD score panel on rsid.
         //    ld_score is used for both ref_ld and w_ld (single-annotation baseline).
         let sql = format!(
             r#"SELECT s."{z}" AS "{Z}", s."{n}" AS "{N}", l.ld_score AS "{REF}", l.ld_score AS "{WLD}"
@@ -362,10 +370,10 @@ impl LdscHsqNode {
             WLD = LD_WLD_COL,
         );
 
-        // 3. Execute the join.
+        // 4. Execute the join.
         let joined_df = ctx.sql(&sql).await.map_err(LdscNodeError::ReadBatch)?;
 
-        // 4. Build the LDSC column-name descriptor and run LDSC.
+        // 5. Build the LDSC column-name descriptor and run LDSC.
         let cols = ldsc::hsq::HsqColumns {
             snp: "", // not consumed by the computation
             z: LD_Z_COL,
@@ -374,15 +382,44 @@ impl LdscHsqNode {
             w_ld: LD_WLD_COL,
         };
         let LdscHsqConfig {
-            m,
             n_blocks,
             intercept,
         } = cfg;
-        let result = ldsc::hsq::estimate_h2(joined_df, cols, m, *n_blocks, *intercept)
+        let result = ldsc::hsq::estimate_h2(joined_df, cols, &m, *n_blocks, *intercept)
             .await
             .map_err(LdscNodeError::from)?;
 
         Ok(result)
+    }
+}
+
+/// Extract a single u64 scalar from a one-row, one-column `RecordBatch` result.
+fn extract_scalar_u64(batches: &[RecordBatch], col: &str) -> Result<u64, LdscNodeError> {
+    let batch = batches
+        .first()
+        .ok_or(LdscNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+            "extract_scalar_u64: no batches".into(),
+        )))?;
+    let idx = batch.schema().index_of(col).map_err(|_| {
+        LdscNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
+            "missing column '{col}'"
+        )))
+    })?;
+    let arr = batch.column(idx);
+    if arr.is_null(0) {
+        return Err(LdscNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+            "extract_scalar_u64: null value".into(),
+        )));
+    }
+    let dtype = arr.data_type();
+    match dtype {
+        DataType::UInt64 => Ok(arr.as_any().downcast_ref::<arrow_array::UInt64Array>().unwrap().value(0)),
+        DataType::Int64 => Ok(arr.as_any().downcast_ref::<arrow_array::Int64Array>().unwrap().value(0) as u64),
+        DataType::UInt32 => Ok(arr.as_any().downcast_ref::<arrow_array::UInt32Array>().unwrap().value(0) as u64),
+        DataType::Int32 => Ok(arr.as_any().downcast_ref::<arrow_array::Int32Array>().unwrap().value(0) as u64),
+        _ => Err(LdscNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
+            "extract_scalar_u64: unsupported dtype {dtype} for column '{col}'"
+        )))),
     }
 }
 
@@ -409,7 +446,7 @@ mod tests {
         let node = LdscHsqNode::new(
             datafusion::prelude::SessionContext::new().runtime_env(),
             None,
-            LdscHsqConfig::new(vec![20.0], 5, None),
+            LdscHsqConfig::new(5, None),
         );
         assert_eq!(node.kind(), "ldsc");
         assert_eq!(node.ports().input_ports().len(), 1);
@@ -559,7 +596,7 @@ mod tests {
         let target_h2 = 0.5;
         let m = N_SNP as f64;
         let z = z_from_linear_model(&ld, target_h2, m);
-        let cfg = LdscHsqConfig::new(vec![m], 20, Some(1.0));
+        let cfg = LdscHsqConfig::new(20, Some(1.0));
 
         let r = run_pipeline(&z, &cfg).await;
 
@@ -612,7 +649,7 @@ mod tests {
             "fixture self-check"
         );
 
-        let cfg = LdscHsqConfig::new(vec![m], 20, None);
+        let cfg = LdscHsqConfig::new(20, None);
         let r = run_pipeline(&z, &cfg).await;
 
         assert_eq!(r.n_snp, N_SNP);
@@ -637,7 +674,7 @@ mod tests {
     async fn e2e_result_batch_has_declared_schema() {
         let ld: Vec<f64> = (0..N_SNP).map(|i| 1.0 + 0.1 * i as f64).collect();
         let z = z_from_linear_model(&ld, 0.5, N_SNP as f64);
-        let r = run_pipeline(&z, &LdscHsqConfig::new(vec![N_SNP as f64], 20, Some(1.0))).await;
+        let r = run_pipeline(&z, &LdscHsqConfig::new(20, Some(1.0))).await;
 
         let batch = build_result_batch(&r).unwrap();
         assert_eq!(batch.schema(), output_schema());
@@ -679,7 +716,7 @@ mod tests {
             &ctx,
             &df,
             "ukbb_eur",
-            &LdscHsqConfig::new(vec![N_SNP as f64], 20, None),
+            &LdscHsqConfig::new(20, None),
         )
         .await;
         assert!(
@@ -694,7 +731,7 @@ mod tests {
         let mut node = LdscHsqNode::new(
             datafusion::prelude::SessionContext::new().runtime_env(),
             None,
-            LdscHsqConfig::new(vec![20.0], 5, None),
+            LdscHsqConfig::new(5, None),
         );
         let res = node.execute(&[]).await;
         assert!(res.is_err(), "missing input must error");

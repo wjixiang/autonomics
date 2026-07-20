@@ -57,6 +57,17 @@ impl NodeFactory for TestSourceFactory {
         "test_source"
     }
 
+    fn desc(&self) -> &'static str {
+        "Loads a built-in test dataset by name for integration testing."
+    }
+
+    fn doc(&self) -> &'static str {
+        "A testing source node that loads a built-in dataset by name (e.g. \
+        \"iris\"). No input ports; one untyped output port. Intended for \
+        integration tests and registry wiring checks where a real file source \
+        is unnecessary."
+    }
+
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(TestSourceSpec)
     }

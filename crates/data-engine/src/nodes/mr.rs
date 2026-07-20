@@ -476,6 +476,18 @@ impl NodeFactory for MrNodeFactory {
         MR_NODE_KIND
     }
 
+    fn desc(&self) -> &'static str {
+        "Mendelian Randomisation: harmonises alleles and dispatches causal inference methods."
+    }
+
+    fn doc(&self) -> &'static str {
+        "Mendelian Randomisation (MR) transform node. Takes a single upstream \
+        DataFrame of SNP-merged exposure-outcome summary statistics, performs \
+        allele harmonisation, and dispatches user-selected MR methods (IVW, \
+        weighted median, MR-Egger, etc.). Outputs one row per \
+        (exposure, outcome, method) with estimate, SE, p-value, and SNP count."
+    }
+
     fn spec_schema(&self) -> schemars::Schema {
         schema_for!(MrNodeSpec)
     }
