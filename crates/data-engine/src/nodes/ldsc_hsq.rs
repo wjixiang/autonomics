@@ -83,12 +83,12 @@ fn output_schema() -> SchemaRef {
 /// The fixed input column names for the upstream GWAS sumstats `DataFrame`.
 /// All upstream data must use these exact column names; they are enforced by
 /// [`input_schema`] so the DAG rejects misshaped edges at `add_edge` time.
-const INPUT_Z_COL: &str = "Z";
-const INPUT_N_COL: &str = "N";
+const INPUT_Z_COL: &str = "z";
+const INPUT_N_COL: &str = "n";
 const INPUT_RSID_COL: &str = "rsid";
 
 /// Build the input port schema with the fixed upstream sumstats column names:
-/// per-SNP Z-score (`Z`, Float64), sample size (`N`, Float64), and rsid join
+/// per-SNP Z-score (`z`, Float64), sample size (`n`, Float64), and rsid join
 /// key (`rsid`, Utf8). These are exactly the columns the internal SQL join
 /// reads, so typing the input port lets the DAG reject misshaped upstream
 /// edges at `add_edge` time.
@@ -138,8 +138,8 @@ fn build_result_batch(r: &ldsc::hsq::HsqResult) -> Result<RecordBatch, LdscNodeE
 /// Accepts raw GWAS summary statistics as input, queries the Iceberg data lake
 /// for LD score panel data, performs the join internally, and runs LDSC.
 ///
-/// The upstream `DataFrame` must have columns named exactly `Z` (Float64),
-/// `N` (Float64), and `rsid` (Utf8) — enforced by the node's input port schema.
+/// The upstream `DataFrame` must have columns named exactly `z` (Float64),
+/// `n` (Float64), and `rsid` (Utf8) — enforced by the node's input port schema.
 #[derive(Clone)]
 pub struct LdscHsqNode {
     /// DAG node metadata (id, ports).
@@ -188,7 +188,7 @@ impl LdscHsqConfig {
 pub struct LdscHsqNodeFactory {}
 
 /// Static port layout for every [`LdscHsqNode`]: a single typed input carrying
-/// GWAS sumstats (Z, N, rsid) and a single typed output with the fixed h²
+/// GWAS sumstats (z, n, rsid) and a single typed output with the fixed h²
 /// summary schema.
 fn port_layout() -> NodePorts {
     NodePorts::new()
@@ -208,7 +208,7 @@ impl NodeFactory for LdscHsqNodeFactory {
     fn doc(&self) -> &'static str {
         "LD Score Regression (LDSC) transform node for SNP-heritability (h²) \
         estimation. Takes a single upstream GWAS summary statistics DataFrame \
-        (with Z, N, rsid columns), queries the Iceberg data lake for LD score \
+        (with z, n, rsid columns), queries the Iceberg data lake for LD score \
         panel data, joins on rsid, and runs LDSC via block-jackknife. Outputs a \
         single-row summary with h², intercept, ratio, and per-annotation \
         coefficients."
@@ -248,14 +248,14 @@ impl LdscHsqNode {
     ///   so the join SQL resolves `iceberg.ld_score.*`.
     /// * `ldsc_hsq` — algorithm configuration; see [`LdscHsqConfig`].
     ///
-    /// The upstream `DataFrame` must expose columns `Z` (Float64), `N`
+    /// The upstream `DataFrame` must expose columns `z` (Float64), `n`
     /// (Float64), and `rsid` (Utf8) — enforced by the input port schema.
     pub fn new(
         runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
         iceberg_catalog: Option<Arc<dyn datafusion::catalog::CatalogProvider>>,
         ldsc_hsq: LdscHsqConfig,
     ) -> Self {
-        // Fixed, typed ports: a single input carrying GWAS sumstats (Z, N,
+        // Fixed, typed ports: a single input carrying GWAS sumstats (z, n,
         // rsid) and a single output with the fixed h² summary schema.
         // Declaring the schemas lets the DAG validate edge compatibility
         // at `add_edge`/`validate` time.
@@ -272,10 +272,10 @@ impl LdscHsqNode {
 /// [`ldsc::hsq::HsqColumns`]. The SQL aliases output columns to these names
 /// so the downstream LDSC computation is independent of the user-facing
 /// column names.
-const LD_Z_COL: &str = "Z";
-const LD_N_COL: &str = "N";
-const LD_REF_COL: &str = "L2_0";
-const LD_WLD_COL: &str = "WLD";
+const LD_Z_COL: &str = "z";
+const LD_N_COL: &str = "n";
+const LD_REF_COL: &str = "l2_0";
+const LD_WLD_COL: &str = "wld";
 
 #[async_trait]
 impl DagNode for LdscHsqNode {
@@ -526,12 +526,12 @@ mod tests {
         .unwrap()
     }
 
-    /// Synthetic single-trait GWAS sumstats `RecordBatch` (`Z`, `N`, `rsid`).
+    /// Synthetic single-trait GWAS sumstats `RecordBatch` (`z`, `n`, `rsid`).
     fn sumstats_batch(z: &[f64], rsids: &[String]) -> RecordBatch {
         let n: Vec<f64> = vec![N_SAMP; z.len()];
         let schema = Arc::new(Schema::new(vec![
-            Field::new("Z", DataType::Float64, false),
-            Field::new("N", DataType::Float64, false),
+            Field::new("z", DataType::Float64, false),
+            Field::new("n", DataType::Float64, false),
             Field::new("rsid", DataType::Utf8, false),
         ]));
         RecordBatch::try_new(

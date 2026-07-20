@@ -10,11 +10,11 @@ use crate::ExecError;
 
 #[tool(
     name = "list_node_factories",
-    description = "List all registered node kinds with their JSON Schemas. \
-                  Each entry reports the node `kind` (used when creating nodes) \
-                  and the `schema` describing the parameters the node accepts. \
-                  Use this to discover what node types are available before \
-                  calling add_node."
+    description = "List all registered node kinds (name + short description). \
+                  Returns lightweight metadata only — no JSON Schema or port layout. \
+                  To configure a node, first discover kinds here, then call \
+                  get_node_spec (for parameters), get_node_ports (for wiring), \
+                  and get_node_doc (for usage) with the chosen `kind`."
 )]
 pub struct ListNodeFactoriesInput {}
 

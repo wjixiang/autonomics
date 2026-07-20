@@ -117,6 +117,16 @@ impl DataEngine {
         Ok(self.node_registry.get_node_spec(kind)?)
     }
 
+    /// Query the input/output port layout of a registered node kind.
+    pub fn get_node_ports(&self, kind: &str) -> Result<crate::nodes::meta::NodePorts> {
+        Ok(self.node_registry.get_node_ports(kind)?)
+    }
+
+    /// Query the documentation string of a registered node kind.
+    pub fn get_node_doc(&self, kind: &str) -> Result<String> {
+        Ok(self.node_registry.get_node_doc(kind)?)
+    }
+
     /// List metadata of every registered node kind (kind + JSON Schema).
     pub fn list_nodes(&self) -> Vec<crate::node_registry::NodeInfo> {
         self.node_registry.list_nodes()

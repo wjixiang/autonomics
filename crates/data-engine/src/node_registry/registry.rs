@@ -80,9 +80,10 @@ pub struct NodeCtx {
 #[derive(Debug, Clone, Serialize)]
 pub struct NodeInfo {
     pub kind: String,
-    pub schema: schemars::Schema,
-    /// Static input/output port layout for this kind.
-    pub ports: NodePorts,
+    pub desc: String,
+    // pub schema: schemars::Schema,
+    // /// Static input/output port layout for this kind.
+    // pub ports: NodePorts,
 }
 
 /// The single source of truth of "which node kinds exist and how to build one from spec."
@@ -167,8 +168,12 @@ impl NodeRegistry {
         Ok(self.get_node_factory(node_kind)?.spec_schema())
     }
 
-    pub fn get_node_ports(&self, node_kind: &str) -> Result<()> {
-        todo!()
+    pub fn get_node_ports(&self, node_kind: &str) -> Result<NodePorts> {
+        Ok(self.get_node_factory(node_kind)?.ports())
+    }
+
+    pub fn get_node_doc(&self, node_kind: &str) -> Result<String> {
+        Ok(self.get_node_factory(node_kind)?.doc().to_string())
     }
 
     /// Return metadata of every registered node kind (kind + JSON Schema + ports).
@@ -177,11 +182,16 @@ impl NodeRegistry {
             .iter()
             .map(|(kind, factory)| NodeInfo {
                 kind: kind.clone(),
-                schema: factory.spec_schema(),
-                ports: factory.ports(),
+                desc: factory.desc().to_string(),
+                // schema: factory.spec_schema(),
+                // ports: factory.ports(),
             })
             .collect()
     }
+}
+
+pub struct ListNodeFilter {
+    keyword: String,
 }
 
 #[cfg(test)]

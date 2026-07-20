@@ -48,4 +48,12 @@ pub enum DataEngineCmd {
         spec: serde_json::Value,
         reply: oneshot::Sender<EngineResult<()>>,
     },
+    GetNodePorts {
+        kind: String,
+        reply: oneshot::Sender<EngineResult<crate::nodes::meta::NodePorts>>,
+    },
+    GetNodeDoc {
+        kind: String,
+        reply: oneshot::Sender<EngineResult<String>>,
+    },
 }

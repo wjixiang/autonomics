@@ -13,15 +13,16 @@ use crate::ExecError;
     description = "Add a node to the DAG by its registered kind and a JSON spec. \
                   \
                   WORKFLOW — discover then create: \
-                  1. Use `list_node_factories` to see available node kinds and their \
-                     JSON Schemas. \
-                  2. (Optional) Use `get_node_spec` to inspect the full JSON Schema \
-                     for a specific kind. \
-                  3. Pass the node `id`, `kind`, and a `spec` object conforming to \
-                     the schema into this tool. \
+                  1. Use `list_node_factories` to see available node kinds and \
+                     their short descriptions. \
+                  2. Use `get_node_spec` to fetch the full JSON Schema for the \
+                     chosen kind — this tells you exactly which fields the `spec` \
+                     object requires. \
+                  3. Pass the node `id`, `kind`, and a `spec` object conforming \
+                     to the schema into this tool. \
                   \
-                  Each node kind expects different spec fields — match the JSON \
-                  Schema exactly. Common examples: \
+                  Each node kind expects different spec fields — always call \
+                  `get_node_spec` first. Common examples: \
                   - \"sql\":            {\"sql_query\": \"SELECT * FROM port_0\"} \
                   - \"source\":         {\"type\": \"file\", \"path\": \"/data/sample.vcf.gz\", \"format\": null} \
                   - \"source\":         {\"type\": \"iceberg\", \"ident\": \"gwas.study\"} \

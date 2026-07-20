@@ -80,6 +80,12 @@ impl DataEngineServer {
             DataEngineCmd::UpdateNode { id, spec, reply } => {
                 let _ = reply.send(self.engine.update_node(id, spec));
             }
+            DataEngineCmd::GetNodePorts { kind, reply } => {
+                let _ = reply.send(self.engine.get_node_ports(&kind));
+            }
+            DataEngineCmd::GetNodeDoc { kind, reply } => {
+                let _ = reply.send(self.engine.get_node_doc(&kind));
+            }
         }
     }
 }
@@ -234,6 +240,30 @@ impl DataEngineClient {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(DataEngineCmd::ClearDag { reply: reply_tx }, reply_rx)
             .await
+    }
+
+    pub async fn get_node_ports(&self, kind: String) -> Result<crate::nodes::meta::NodePorts> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::GetNodePorts {
+                kind,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
+    }
+
+    pub async fn get_node_doc(&self, kind: String) -> Result<String> {
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        self.request(
+            DataEngineCmd::GetNodeDoc {
+                kind,
+                reply: reply_tx,
+            },
+            reply_rx,
+        )
+        .await
     }
 }
 

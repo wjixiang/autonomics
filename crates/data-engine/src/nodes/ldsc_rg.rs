@@ -97,12 +97,12 @@ fn output_schema() -> SchemaRef {
 /// The fixed input column names each upstream GWAS sumstats `DataFrame` must
 /// expose. Both input ports share this schema; it is enforced by
 /// [`input_schema`] so the DAG rejects mis-shaped edges at `add_edge` time.
-const INPUT_Z_COL: &str = "Z";
-const INPUT_N_COL: &str = "N";
+const INPUT_Z_COL: &str = "z";
+const INPUT_N_COL: &str = "n";
 const INPUT_RSID_COL: &str = "rsid";
 
-/// Input port schema (shared by both ports): per-SNP Z-score (`Z`, Float64),
-/// sample size (`N`, Float64), rsid join key (`rsid`, Utf8). See
+/// Input port schema (shared by both ports): per-SNP Z-score (`z`, Float64),
+/// sample size (`n`, Float64), rsid join key (`rsid`, Utf8). See
 /// [`super::ldsc_hsq`] for the rationale behind pinning these names.
 fn input_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
@@ -206,8 +206,8 @@ const LDSC_RG_NODE_KIND: &str = "ldsc_rg";
 /// on rsid (so only SNPs shared by both traits and the panel are used), and
 /// runs the bivariate regression.
 ///
-/// Each upstream `DataFrame` must have columns named exactly `Z` (Float64),
-/// `N` (Float64), and `rsid` (Utf8) — enforced by the input port schemas.
+/// Each upstream `DataFrame` must have columns named exactly `z` (Float64),
+/// `n` (Float64), and `rsid` (Utf8) — enforced by the input port schemas.
 #[derive(Clone)]
 pub struct LdscRgNode {
     /// DAG node metadata (id, ports): two typed inputs, one typed output.
@@ -237,7 +237,7 @@ impl NodeFactory for LdscRgNodeFactory {
     fn doc(&self) -> &'static str {
         "Bivariate LD Score Regression transform node for genetic correlation (rg) \
         estimation between two GWAS traits. Takes two upstream summary statistics \
-        DataFrames (trait 1 on port 0, trait 2 on port 1, each with Z, N, rsid), \
+        DataFrames (trait 1 on port 0, trait 2 on port 1, each with z, n, rsid), \
         queries the Iceberg data lake for the LD score panel, 3-way joins on rsid, \
         and runs bivariate LDSC. Outputs a single-row summary with rg, its SE/z/p, \
         cross-trait gencov, and each trait's h²."
@@ -275,7 +275,7 @@ impl LdscRgNode {
     ///   so the join SQL resolves `iceberg.ld_score.*`.
     /// * `ldsc_rg` — algorithm configuration; see [`LdscRgConfig`].
     ///
-    /// Both upstream `DataFrame`s must expose columns `Z` (Float64), `N`
+    /// Both upstream `DataFrame`s must expose columns `z` (Float64), `n`
     /// (Float64), and `rsid` (Utf8) — enforced by the input port schemas.
     pub fn new(
         runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
@@ -308,12 +308,12 @@ fn port_layout() -> NodePorts {
 /// The fixed column names produced by the internal 3-way SQL join. The SQL
 /// aliases output columns to these names so the downstream vector extraction is
 /// independent of the user-facing column names.
-const LD_Z1_COL: &str = "Z1";
-const LD_Z2_COL: &str = "Z2";
-const LD_N1_COL: &str = "N1";
-const LD_N2_COL: &str = "N2";
-const LD_REF_COL: &str = "L2_0";
-const LD_WLD_COL: &str = "WLD";
+const LD_Z1_COL: &str = "z1";
+const LD_Z2_COL: &str = "z2";
+const LD_N1_COL: &str = "n1";
+const LD_N2_COL: &str = "n2";
+const LD_REF_COL: &str = "l2_0";
+const LD_WLD_COL: &str = "wld";
 
 #[async_trait]
 impl DagNode for LdscRgNode {
@@ -732,13 +732,13 @@ mod tests {
         .unwrap()
     }
 
-    /// Build a synthetic GWAS sumstats `RecordBatch` (`Z`, `N`, `rsid`) for one
+    /// Build a synthetic GWAS sumstats `RecordBatch` (`z`, `n`, `rsid`) for one
     /// trait, given a per-SNP Z vector.
     fn sumstats_batch(z: &[f64], rsids: &[String], n_samp: f64) -> RecordBatch {
         let n: Vec<f64> = vec![n_samp; z.len()];
         let schema = Arc::new(Schema::new(vec![
-            Field::new("Z", DataType::Float64, false),
-            Field::new("N", DataType::Float64, false),
+            Field::new("z", DataType::Float64, false),
+            Field::new("n", DataType::Float64, false),
             Field::new("rsid", DataType::Utf8, false),
         ]));
         RecordBatch::try_new(
