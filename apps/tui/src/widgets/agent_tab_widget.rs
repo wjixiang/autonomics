@@ -113,7 +113,6 @@ impl Widget for AgentTabWidget<'_> {
             match ts.input_mode {
                 InputMode::Browse => "Type a message, or press Enter to edit…",
                 InputMode::Input => "Type a message…",
-                InputMode::Normal => "— NORMAL —  (i insert, Esc back)",
             }
         };
         let title = ""; // surfaced by the footer hint line instead
@@ -174,13 +173,10 @@ fn render_footer_hint(
     } else {
         match mode {
             InputMode::Browse => {
-                " Enter edit  j/k scroll  gg top  G bottom  Ctrl+C quit ".to_string()
+                " Enter edit  ↑↓ scroll  PageUp/PageDown  Home/End  Ctrl+C quit ".to_string()
             }
             InputMode::Input => {
-                " Insert  Esc normal  Enter send  Shift+Enter newline  Ctrl+R history ".to_string()
-            }
-            InputMode::Normal => {
-                " NORMAL  i/a/o insert  h j k l w b e 0 $ gg G  x dd dw D u  Esc exit ".to_string()
+                " Insert  Esc exit  Enter send  Shift+Enter newline  Ctrl+R history ".to_string()
             }
         }
     };

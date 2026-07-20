@@ -98,16 +98,14 @@ pub enum AgentStatus {
 
 /// Modal state of the agent tab's input surface.
 ///
-/// The composer is vim-modal: `Browse` scrolls the transcript, `Input` is
-/// insert mode (typing), and `Normal` is vim normal mode (motions/edits).
+/// `Browse` scrolls the transcript; `Input` is the composing mode where
+/// keystrokes insert text and Enter sends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InputMode {
     #[default]
     Browse,
     /// Insert mode — keystrokes insert text; Enter sends.
     Input,
-    /// Vim normal mode — keystrokes are motions or edit commands.
-    Normal,
 }
 
 /// Mutable state for the Agent tab.
@@ -136,15 +134,6 @@ pub struct AgentTabState {
     pub input_mode: InputMode,
     /// When true, `clamp_scroll` forces offset to the bottom each frame.
     pub auto_scroll: bool,
-    /// Tracks a pending first `g` press (in browse or vim normal mode) so a
-    /// second `g` (i.e. `gg`) jumps to the top.
-    pub vim_pending_g: bool,
-    /// Accumulated count prefix typed in vim normal mode (e.g. the `3` in
-    /// `3dd`). `0` means no count; commands default to 1.
-    pub vim_count: usize,
-    /// Pending operator awaiting its motion/target in vim normal mode
-    /// (`Some('d')` after pressing `d`, `Some('c')` after pressing `c`).
-    pub vim_pending_op: Option<char>,
     /// True while an incremental Ctrl+R history search is in progress.
     pub in_history_search: bool,
     /// The current Ctrl+R search query (typed by the user).
@@ -190,9 +179,6 @@ impl Default for AgentTabState {
             cache_read_tokens: 0,
             input_mode: InputMode::Browse,
             auto_scroll: true,
-            vim_pending_g: false,
-            vim_count: 0,
-            vim_pending_op: None,
             in_history_search: false,
             history_search_query: String::new(),
             history_search_matches: Vec::new(),

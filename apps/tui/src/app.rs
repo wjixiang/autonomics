@@ -25,7 +25,7 @@ use runtime::AgentRuntime;
 const POLL_TIMEOUT_ACTIVE: Duration = Duration::from_millis(16);
 const POLL_TIMEOUT_IDLE: Duration = Duration::from_millis(100);
 
-/// Lines scrolled by a vim-style half-page motion (`d` / `u` in browse mode).
+/// Lines scrolled by a half-page motion (PageDown / PageUp in browse mode).
 const HALF_PAGE: usize = 12;
 
 /// If the user presses Ctrl+C again within this window after a cooperative
@@ -460,209 +460,51 @@ impl App {
         match ts.input_mode {
             InputMode::Browse => self.handle_browse_key(key),
             InputMode::Input => self.handle_input_key(key),
-            InputMode::Normal => self.handle_normal_key(key),
         }
     }
 
-    /// Key handling in browse mode (always vim-style): j/k scroll line-by-line,
-    /// d/u half-page, gg top, G bottom, Enter enters the composer (insert mode).
+    /// Key handling in browse mode: Up/Down scroll line-by-line,
+    /// PageDown/PageUp half-page, Home/End jump to top/bottom,
+    /// Enter enters the composer (input mode).
     fn handle_browse_key(&mut self, key: &KeyEvent) {
         let ts = &mut self.state.agent_tab_state;
-        // A non-`g` key cancels a pending first `g` of `gg`.
-        let mut cancel_g = true;
 
         match key.code {
-            // j / Down: scroll down (show later content)
-            KeyCode::Char('j') | KeyCode::Down => {
+            // Down / PageDown: scroll down (show later content)
+            KeyCode::Down => {
                 ts.scroll_offset = ts.scroll_offset.saturating_add(1);
                 ts.auto_scroll = false;
             }
-            // k / Up: scroll up (show earlier content)
-            KeyCode::Char('k') | KeyCode::Up => {
+            // Up: scroll up (show earlier content)
+            KeyCode::Up => {
                 ts.scroll_offset = ts.scroll_offset.saturating_sub(1);
                 ts.auto_scroll = false;
             }
-            // G (Shift+g): jump to bottom, re-enable auto-scroll
-            KeyCode::Char('G') => {
+            // End: jump to bottom, re-enable auto-scroll
+            KeyCode::End => {
                 ts.auto_scroll = true;
             }
-            // g: first press primes `gg`; second press jumps to top.
-            KeyCode::Char('g') => {
-                if ts.vim_pending_g {
-                    ts.scroll_offset = 0;
-                    ts.auto_scroll = false;
-                    ts.vim_pending_g = false;
-                } else {
-                    ts.vim_pending_g = true;
-                    cancel_g = false;
-                }
+            // Home: jump to top
+            KeyCode::Home => {
+                ts.scroll_offset = 0;
+                ts.auto_scroll = false;
             }
-            // d: half-page down; u: half-page up (vim-style).
-            KeyCode::Char('d') => {
+            // PageDown: half-page down
+            KeyCode::PageDown => {
                 ts.scroll_offset = ts.scroll_offset.saturating_add(HALF_PAGE);
                 ts.auto_scroll = false;
             }
-            KeyCode::Char('u') => {
+            // PageUp: half-page up
+            KeyCode::PageUp => {
                 ts.scroll_offset = ts.scroll_offset.saturating_sub(HALF_PAGE);
                 ts.auto_scroll = false;
             }
-            // Enter / i: enter the composer in insert mode.
-            KeyCode::Enter | KeyCode::Char('i') => {
+            // Enter: enter the composer in input mode.
+            KeyCode::Enter => {
                 ts.input_mode = InputMode::Input;
             }
             _ => {}
         }
-
-        if cancel_g {
-            ts.vim_pending_g = false;
-        }
-    }
-
-    /// Key handling in vim **normal mode** for the composer. Implements a
-    /// pragmatic vim subset: counts, motions (`h j k l w b e 0 $ gg G`),
-    /// operators (`d`/`c` with `d/w/$/0/b/e`), and insert-entry commands
-    /// (`i a I A o O`). `Esc` exits the composer back to browse.
-    fn handle_normal_key(&mut self, key: &KeyEvent) {
-        let ts = &mut self.state.agent_tab_state;
-
-        // Ctrl+R: incremental history search (works from normal mode too).
-        if !ts.in_history_search
-            && ts.status == AgentStatus::Idle
-            && !ts.input_history.is_empty()
-            && key.modifiers.contains(KeyModifiers::CONTROL)
-            && key.code == KeyCode::Char('r')
-        {
-            ts.in_history_search = true;
-            ts.history_search_query.clear();
-            ts.history_search_draft = Some(ts.input.value());
-            ts.history_search_matches = compute_search_matches(&ts.input_history, "");
-            ts.history_search_selected = 0;
-            load_selected_history_match(ts);
-            reset_vim(ts);
-            return;
-        }
-
-        let c = match key.code {
-            KeyCode::Char(c) => c,
-            // Esc from normal mode leaves the composer entirely.
-            KeyCode::Esc => {
-                reset_vim(ts);
-                ts.input_mode = InputMode::Browse;
-                return;
-            }
-            // Non-character keys are ignored in normal mode.
-            _ => return,
-        };
-
-        // Count prefix. A lone `0` (when no count is pending) is the
-        // "line start" motion instead.
-        if c.is_ascii_digit() {
-            if c == '0' && ts.vim_count == 0 {
-                if let Some(op) = ts.vim_pending_op {
-                    apply_vim_operator(ts, op, '0', 1);
-                } else {
-                    ts.input.cursor_line_start();
-                    reset_vim(ts);
-                }
-                return;
-            }
-            ts.vim_count = ts
-                .vim_count
-                .saturating_mul(10)
-                .saturating_add((c as u8 - b'0') as usize);
-            return;
-        }
-
-        // A pending operator (`d` / `c`) is awaiting its motion/target.
-        if let Some(op) = ts.vim_pending_op {
-            apply_vim_operator(ts, op, c, ts.vim_count.max(1));
-            return;
-        }
-
-        let count = ts.vim_count.max(1);
-
-        match c {
-            // ── motions ──
-            'h' => repeat(count, |t| t.input.cursor_left(), ts),
-            'l' => repeat(count, |t| t.input.cursor_right(), ts),
-            'j' => repeat(count, |t| t.input.cursor_down(), ts),
-            'k' => repeat(count, |t| t.input.cursor_up(), ts),
-            'w' => repeat(count, |t| t.input.cursor_word_forward(), ts),
-            'b' => repeat(count, |t| t.input.cursor_word_back(), ts),
-            'e' => repeat(count, |t| t.input.cursor_word_end(), ts),
-            '0' => ts.input.cursor_line_start(),
-            '$' => ts.input.cursor_line_end(),
-            '^' => ts.input.cursor_line_start(),
-            'G' => ts.input.cursor_bottom(),
-            'g' => {
-                if ts.vim_pending_g {
-                    ts.input.cursor_top();
-                    reset_vim(ts);
-                } else {
-                    ts.vim_pending_g = true;
-                    return; // keep any count for the second `g`
-                }
-            }
-            // ── deletions / changes ──
-            'x' => repeat(count, |t| t.input.delete_char_forward(), ts),
-            'D' => ts.input.delete_to_line_end(),
-            'C' => {
-                ts.input.delete_to_line_end();
-                enter_insert(ts);
-                return;
-            }
-            's' => {
-                repeat(count, |t| t.input.delete_char_forward(), ts);
-                enter_insert(ts);
-                return;
-            }
-            'S' => {
-                ts.input.change_line();
-                enter_insert(ts);
-                return;
-            }
-            'd' => {
-                ts.vim_pending_op = Some('d');
-                return; // keep count for the motion
-            }
-            'c' => {
-                ts.vim_pending_op = Some('c');
-                return;
-            }
-            'u' => repeat(count, |t| t.input.undo(), ts),
-            // ── insert entry ──
-            'i' => {
-                enter_insert(ts);
-                return;
-            }
-            'I' => {
-                ts.input.cursor_line_start();
-                enter_insert(ts);
-                return;
-            }
-            'a' => {
-                ts.input.cursor_right();
-                enter_insert(ts);
-                return;
-            }
-            'A' => {
-                ts.input.cursor_line_end();
-                enter_insert(ts);
-                return;
-            }
-            'o' => {
-                repeat(count, |t| t.input.open_below(), ts);
-                enter_insert(ts);
-                return;
-            }
-            'O' => {
-                repeat(count, |t| t.input.open_above(), ts);
-                enter_insert(ts);
-                return;
-            }
-            _ => {}
-        }
-        reset_vim(ts);
     }
 
     /// Key handling in input mode: typing goes to input, Enter sends, Esc exits.
@@ -695,13 +537,11 @@ impl App {
         }
 
         match key.code {
-            // Esc: leave insert mode for vim normal mode. The buffer is kept
-            // (so Esc→normal→edit→i→type is a fluid vim loop). Any in-progress
+            // Esc: leave input mode, return to browse. Any in-progress
             // Up/Down history recall is collapsed first.
             KeyCode::Esc => {
                 history_clear_recall(&mut ts.input_draft, &mut ts.input_recall);
-                reset_vim(ts);
-                ts.input_mode = InputMode::Normal;
+                ts.input_mode = InputMode::Browse;
             }
             // Enter: Shift/Alt+Enter inserts a newline (multiline compose);
             // a plain Enter sends the message and returns to browse mode.
@@ -942,80 +782,4 @@ fn end_history_search(ts: &mut crate::state::AgentTabState) {
     ts.history_search_matches.clear();
     ts.history_search_selected = 0;
     ts.history_search_draft = None;
-}
-
-// ── vim normal-mode helpers ───────────────────────────────
-
-/// Clear all transient vim state (count, pending operator, pending `g`).
-fn reset_vim(ts: &mut crate::state::AgentTabState) {
-    ts.vim_count = 0;
-    ts.vim_pending_op = None;
-    ts.vim_pending_g = false;
-}
-
-/// Clear vim state and switch the composer to insert mode.
-fn enter_insert(ts: &mut crate::state::AgentTabState) {
-    reset_vim(ts);
-    ts.input_mode = InputMode::Input;
-}
-
-/// Run a small vim edit/motion closure `n` times against the agent state.
-fn repeat<F: FnMut(&mut crate::state::AgentTabState)>(
-    n: usize,
-    mut f: F,
-    ts: &mut crate::state::AgentTabState,
-) {
-    for _ in 0..n {
-        f(ts);
-    }
-}
-
-/// Apply a pending vim operator (`d` or `c`) to a motion/target, then either
-/// return to normal mode (`d`) or drop into insert mode (`c`, for "change").
-/// Unknown motions cancel the operator and reset state.
-fn apply_vim_operator(ts: &mut crate::state::AgentTabState, op: char, motion: char, count: usize) {
-    let n = count.max(1);
-    let change = op == 'c';
-    let handled = match motion {
-        'd' if op == 'd' => {
-            for _ in 0..n {
-                ts.input.delete_line();
-            }
-            true
-        }
-        'c' if op == 'c' => {
-            ts.input.change_line();
-            true
-        }
-        'w' | 'e' => {
-            for _ in 0..n {
-                ts.input.delete_word_forward();
-            }
-            true
-        }
-        'b' => {
-            for _ in 0..n {
-                ts.input.delete_word_back();
-            }
-            true
-        }
-        '$' => {
-            ts.input.delete_to_line_end();
-            true
-        }
-        '0' | '^' => {
-            ts.input.delete_to_line_start();
-            true
-        }
-        _ => false,
-    };
-    if !handled {
-        reset_vim(ts);
-        return;
-    }
-    if change {
-        enter_insert(ts);
-    } else {
-        reset_vim(ts);
-    }
 }
