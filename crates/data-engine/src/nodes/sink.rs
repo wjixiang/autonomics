@@ -8,10 +8,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use datafusion::common::HashMap;
-use datafusion::common::config::{CsvOptions, TableParquetOptions};
-use datafusion::dataframe::{DataFrame, DataFrameWriteOptions};
-use datafusion::prelude::SessionContext;
+use datafusion::{
+    catalog::CatalogProvider,
+    common::HashMap,
+    common::config::{CsvOptions, TableParquetOptions},
+    dataframe::{DataFrame, DataFrameWriteOptions},
+    execution::runtime_env::RuntimeEnv,
+};
 use datalake::Datalake;
 use iceberg::arrow::arrow_schema_to_schema_auto_assign_ids;
 use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
@@ -24,7 +27,7 @@ use super::source::normalize_path;
 use crate::{
     dag::DagError,
     dag::graph::PortOutputs,
-    node_registry::registry::{NodeCtx, NodeFactory},
+    node_registry::registry::{NodeCtx, NodeFactory, new_isolated_ctx},
 };
 
 /// Where a [`SinkNode`] writes to.
@@ -85,7 +88,8 @@ pub struct SinkNode {
     meta: NodePorts,
     sink: Sink,
     mode: SinkMode,
-    ctx: SessionContext,
+    runtime_env: Arc<RuntimeEnv>,
+    iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
     datalake: Arc<Datalake>,
 }
 
@@ -166,14 +170,16 @@ impl SinkNode {
     pub fn new(
         sink: Sink,
         mode: SinkMode,
-        ctx: SessionContext,
+        runtime_env: Arc<RuntimeEnv>,
+        iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
         datalake: Arc<Datalake>,
     ) -> Self {
         Self {
             meta: port_layout(),
             sink,
             mode,
-            ctx,
+            runtime_env,
+            iceberg_catalog,
             datalake,
         }
     }
@@ -214,14 +220,13 @@ impl SinkNode {
             path: path.to_string(),
             source: e,
         };
+        let ctx = new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
         let existing = match format {
-            WriteFormat::Csv => self
-                .ctx
+            WriteFormat::Csv => ctx
                 .read_csv(path, CsvReadOptions::default())
                 .await
                 .map_err(read_err)?,
-            WriteFormat::Parquet => self
-                .ctx
+            WriteFormat::Parquet => ctx
                 .read_parquet(path, ParquetReadOptions::default())
                 .await
                 .map_err(read_err)?,
@@ -301,7 +306,7 @@ impl NodeFactory for SinkNodeFactory {
                 (Sink::Iceberg { ident }, mode)
             }
         };
-        let node = SinkNode::new(sink, mode, node_ctx.session, node_ctx.datalake);
+        let node = SinkNode::new(sink, mode, node_ctx.runtime_env, node_ctx.iceberg_catalog, node_ctx.datalake);
         Ok(Box::new(node))
     }
 }
@@ -317,7 +322,8 @@ impl DagNode for SinkNode {
             meta: self.meta.clone(),
             sink: self.sink.clone(),
             mode: self.mode,
-            ctx: self.ctx.clone(),
+            runtime_env: self.runtime_env.clone(),
+            iceberg_catalog: self.iceberg_catalog.clone(),
             datalake: self.datalake.clone(),
         };
 
@@ -447,22 +453,24 @@ impl DagNode for SinkNode {
                     }
                 }
 
-                // Re-register the iceberg catalog so the DataFusion planner
-                // discovers the table we just created through the REST API.
-                // The previous provider cached its table list at creation time,
-                // so a freshly-created table is invisible to it.
+                // Build a fresh context with the fresh iceberg provider so the
+                // planner discovers the table we just created through the REST
+                // API. The previous provider cached its table list at
+                // creation time, so a freshly-created table is invisible to it.
                 let fresh_provider = datalake
                     .get_provider()
                     .await
                     .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?;
-                self.ctx
-                    .register_catalog("iceberg", Arc::new(fresh_provider));
+                let ctx = new_isolated_ctx(
+                    self.runtime_env.clone(),
+                    Some(Arc::new(fresh_provider)),
+                );
 
                 // 4. Register the upstream DataFrame as a temp view and INSERT.
                 let src_name = format!("__sink_src_{:x}", std::process::id());
-                let _ = self.ctx.deregister_table(&src_name);
+                let _ = ctx.deregister_table(&src_name);
                 let view = df.into_view();
-                self.ctx
+                ctx
                     .register_table(&src_name, view)
                     .map_err(|e| SinkError::Write {
                         path: format!("iceberg://{ident}"),
@@ -478,7 +486,7 @@ impl DagNode for SinkNode {
                 let fqn = parts.join(".");
 
                 let sql = format!("INSERT INTO {fqn} SELECT * FROM {src_name}");
-                self.ctx
+                ctx
                     .sql(&sql)
                     .await
                     .map_err(|e| SinkError::Write {
@@ -492,7 +500,7 @@ impl DagNode for SinkNode {
                         source: e,
                     })?;
 
-                self.ctx.deregister_table(&src_name).ok();
+                ctx.deregister_table(&src_name).ok();
             }
         }
         Ok(HashMap::new())
@@ -645,13 +653,15 @@ mod tests {
     #[ignore]
     async fn test_sink_iceberg() {
         let ctx = Datalake::default().get_ctx().await.unwrap();
+        let provider = Datalake::default().get_provider().await.unwrap();
         let datalake = Arc::new(Datalake::default());
         let mut node = SinkNode::new(
             Sink::Iceberg {
                 ident: "gwas.test4".to_string(),
             },
             crate::nodes::sink::SinkMode::Overwrite,
-            ctx,
+            ctx.runtime_env(),
+            Some(Arc::new(provider)),
             datalake,
         );
 
@@ -720,6 +730,7 @@ mod tests {
     async fn test_sink_file_overwrite_replaces() {
         let ctx = SessionContext::new();
         let datalake = Arc::new(Datalake::default());
+        let runtime_env = ctx.runtime_env();
         let path = format!("/tmp/sink_overwrite_{}.csv", std::process::id(),);
 
         let sink = |df: DataFrame, mode| {
@@ -729,7 +740,8 @@ mod tests {
                     format: WriteFormat::Csv,
                 },
                 mode,
-                ctx.clone(),
+                runtime_env.clone(),
+                None,
                 datalake.clone(),
             );
             async move { node.execute(&[NodeInput { port: 0, data: df }]).await }
@@ -752,6 +764,7 @@ mod tests {
     async fn test_sink_file_append_accumulates() {
         let ctx = SessionContext::new();
         let datalake = Arc::new(Datalake::default());
+        let runtime_env = ctx.runtime_env();
         let path = format!("/tmp/sink_append_{}.csv", std::process::id());
 
         let write = |df: DataFrame| {
@@ -761,7 +774,8 @@ mod tests {
                     format: WriteFormat::Csv,
                 },
                 SinkMode::Append,
-                ctx.clone(),
+                runtime_env.clone(),
+                None,
                 datalake.clone(),
             );
             async move { node.execute(&[NodeInput { port: 0, data: df }]).await }

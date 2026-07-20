@@ -1,19 +1,43 @@
 use std::sync::Arc;
 
-use datafusion::{common::HashMap, prelude::SessionContext};
+use datafusion::{
+    catalog::CatalogProvider,
+    common::HashMap,
+    execution::runtime_env::RuntimeEnv,
+    prelude::{SessionConfig, SessionContext},
+};
 use datalake::Datalake;
 
 use serde::Serialize;
 
 use super::error::{Error, Result};
-
 use crate::dag::DagNode;
 use crate::nodes::meta::NodePorts;
 use crate::nodes::{
-    ldsc_hsq::LdscHsqNodeFactory, ldsc_rg::LdscRgNodeFactory,
-    linear_regression::LinearRegressionNodeFactory, mock_node::MockNodeFactory, mr::MrNodeFactory,
+    echo_node::EchoNodeFactory, ldsc_hsq::LdscHsqNodeFactory, ldsc_rg::LdscRgNodeFactory,
+    linear_regression::LinearRegressionNodeFactory, mr::MrNodeFactory,
     sink::SinkNodeFactory, source::SourceNodeFactory, sql_node::SqlNodeFactory,
+    test_source::TestSourceFactory,
 };
+
+/// Build a fresh, isolated [`SessionContext`].
+///
+/// Each call creates a **new** `CatalogList` (so `register_table("port_0", ...)`
+/// never collides with another node's registration), while sharing the
+/// engine-wide [`RuntimeEnv`] so object stores remain reachable.
+///
+/// If an `iceberg_catalog` is provided, it is registered under `"iceberg"`
+/// on the fresh context.
+pub fn new_isolated_ctx(
+    runtime_env: Arc<RuntimeEnv>,
+    iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
+) -> SessionContext {
+    let ctx = SessionContext::new_with_config_rt(SessionConfig::new(), runtime_env);
+    if let Some(cat) = iceberg_catalog {
+        ctx.register_catalog("iceberg", cat);
+    }
+    ctx
+}
 
 pub trait NodeFactory: Send + Sync {
     fn kind(&self) -> &'static str;
@@ -25,14 +49,24 @@ pub trait NodeFactory: Send + Sync {
     fn build(&self, spec: serde_json::Value, node_ctx: NodeCtx) -> Result<Box<dyn DagNode>>;
 }
 
-/// Context dependencies for DagNodes
+/// Ingredients for building an isolated [`SessionContext`] per node execution.
+///
+/// Instead of sharing a single `SessionContext` (which causes CatalogList
+/// collisions on `register_table`), nodes receive the `RuntimeEnv` and an
+/// optional `Iceberg` catalog, and construct their own context at execution
+/// time via [`new_isolated_ctx`].
 #[derive(Clone)]
 pub struct NodeCtx {
-    /// Datafusion SessionContext shared by whole data engine thread.
-    ///
-    /// TODO: Instead of passing whole SessionContext, it is better to provider ingrediants that
-    /// consititude SessionContext, then let nodes to build their own ctx by need.
-    pub session: SessionContext,
+    /// Shared object-store registry — all nodes reference the same
+    /// `RuntimeEnv` so file:// / s3:// stores registered by the engine
+    /// builder are reachable.
+    pub runtime_env: Arc<RuntimeEnv>,
+    /// Optional Iceberg `CatalogProvider`. Nodes that need to query
+    /// `iceberg.*` tables receive `Some`; others receive `None`.
+    pub iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
+    /// Iceberg REST catalog handle, used by LDSC nodes for table-level
+    /// operations (create/drop/load) that go through the Iceberg API
+    /// directly rather than DataFusion SQL.
     pub datalake: Arc<Datalake>,
 }
 
@@ -56,9 +90,14 @@ pub struct NodeRegistry {
 
 impl NodeRegistry {
     /// NOTE: currently all nodes are directly registered in this function.
-    pub fn new(ctx: SessionContext, datalake: Arc<Datalake>) -> Self {
+    pub fn new(
+        runtime_env: Arc<RuntimeEnv>,
+        iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
+        datalake: Arc<Datalake>,
+    ) -> Self {
         let node_ctx = NodeCtx {
-            session: ctx,
+            runtime_env,
+            iceberg_catalog,
             datalake,
         };
 
@@ -72,7 +111,8 @@ impl NodeRegistry {
         registry.register(Box::new(LdscHsqNodeFactory {}));
         registry.register(Box::new(LdscRgNodeFactory {}));
         registry.register(Box::new(LinearRegressionNodeFactory {}));
-        registry.register(Box::new(MockNodeFactory {}));
+        registry.register(Box::new(EchoNodeFactory {}));
+        registry.register(Box::new(TestSourceFactory {}));
         registry.register(Box::new(MrNodeFactory {}));
         registry
     }
@@ -132,9 +172,17 @@ mod tests {
             "ldsc" => serde_json::json!({"m": [1000000.0], "n_blocks": 200}),
             "ldsc_rg" => serde_json::json!({"m": [1000000.0], "n_blocks": 200}),
             "mr" => serde_json::json!({"action": 2, "method_list": ["mr_egger_regression"]}),
-            "mock" => serde_json::json!({}),
+            "echo" => serde_json::json!({}),
+            "test_source" => serde_json::json!({"dataset": "iris"}),
             other => panic!("no fixture spec for kind '{other}'"),
         }
+    }
+
+    /// Helper: build a `NodeRegistry` with a bare (no iceberg) context for tests.
+    fn test_registry() -> NodeRegistry {
+        let ctx = SessionContext::new();
+        let runtime_env = ctx.runtime_env();
+        NodeRegistry::new(runtime_env, None, Arc::new(Datalake::default()))
     }
 
     /// Invariant: every registered factory's `kind()` matches the
@@ -143,9 +191,7 @@ mod tests {
     /// but the test catches any future drift.
     #[test]
     fn all_factories_kind_matches_node_kind() {
-        let ctx = datafusion::prelude::SessionContext::new();
-        let datalake = std::sync::Arc::new(datalake::Datalake::default());
-        let registry = NodeRegistry::new(ctx, datalake);
+        let registry = test_registry();
 
         let nodes = registry.list_nodes();
         assert!(!nodes.is_empty(), "registry should have at least one kind");
@@ -192,9 +238,7 @@ mod tests {
     /// the agent relies on via `list_node_factories`.
     #[test]
     fn node_info_ports_serialize() {
-        let ctx = datafusion::prelude::SessionContext::new();
-        let datalake = std::sync::Arc::new(datalake::Datalake::default());
-        let registry = NodeRegistry::new(ctx, datalake);
+        let registry = test_registry();
 
         let serialized = serde_json::to_value(registry.list_nodes())
             .expect("NodeInfo list must serialize");

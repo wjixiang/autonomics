@@ -110,12 +110,14 @@ async fn write_to_iceberg(
     ident: &str,
     df: datafusion::prelude::DataFrame,
 ) {
+    let provider = datalake.get_provider().await.unwrap();
     let mut sink_node = SinkNode::new(
         Sink::Iceberg {
             ident: ident.to_string(),
         },
         SinkMode::Overwrite,
-        ctx.clone(),
+        ctx.runtime_env(),
+        Some(std::sync::Arc::new(provider)),
         datalake.clone(),
     );
     sink_node

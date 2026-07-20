@@ -7,11 +7,15 @@
 //! formats (VCF, BAM, BED, …) are read through `biofusion`, which already
 //! exposes them as DataFusion tables.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use biofusion::datasource::BioReadOptions;
 use biofusion::ext::DataFusionReadExt;
 use datafusion::{
+    catalog::CatalogProvider,
     common::HashMap,
+    execution::runtime_env::RuntimeEnv,
     prelude::{CsvReadOptions, DataFrame, ParquetReadOptions, SessionContext},
 };
 use schemars::{schema_for, JsonSchema};
@@ -21,7 +25,7 @@ use thiserror::Error;
 use super::meta::{DagNode, NodeInput, NodePorts};
 use crate::{
     dag::{DagError, graph::PortOutputs},
-    node_registry::registry::{NodeCtx, NodeFactory},
+    node_registry::registry::{NodeCtx, NodeFactory, new_isolated_ctx},
 };
 
 /// Where a [`SourceNode`] reads from.
@@ -131,16 +135,22 @@ impl From<SourceError> for DagError {
 pub struct SourceNode {
     meta: NodePorts,
     source: Source,
-    ctx: SessionContext,
+    runtime_env: Arc<RuntimeEnv>,
+    iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
 }
 
 impl SourceNode {
-    pub fn new(source: Source, ctx: SessionContext) -> Self {
+    pub fn new(
+        source: Source,
+        runtime_env: Arc<RuntimeEnv>,
+        iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
+    ) -> Self {
         // A source has no inputs and a single output port.
         Self {
             meta: port_layout(),
             source,
-            ctx,
+            runtime_env,
+            iceberg_catalog,
         }
     }
 }
@@ -190,7 +200,7 @@ impl NodeFactory for SourceNodeFactory {
             SourceNodeSpec::File { path, format } => Source::File { path, format },
             SourceNodeSpec::Iceberg { ident } => Source::Iceberg { ident },
         };
-        let node = SourceNode::new(source, node_ctx.session);
+        let node = SourceNode::new(source, node_ctx.runtime_env, node_ctx.iceberg_catalog);
         Ok(Box::new(node))
     }
 }
@@ -227,7 +237,7 @@ impl DagNode for SourceNode {
     }
 
     async fn execute(&mut self, _inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
-        let ctx = self.ctx.clone();
+        let ctx = new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
         let df = match &self.source {
             Source::File { path, format } => {
                 let path = normalize_path(path);
@@ -325,10 +335,11 @@ mod tests {
     #[ignore = "e2e test"]
     async fn test_load_from_iceberg() {
         let ctx = Datalake::default().get_ctx().await.unwrap();
+        let provider = Datalake::default().get_provider().await.unwrap();
         let source = Source::Iceberg {
             ident: "gwas.gwas_study".to_string(),
         };
-        let mut node = SourceNode::new(source, ctx);
+        let mut node = SourceNode::new(source, ctx.runtime_env(), Some(Arc::new(provider)));
         let res = node.execute(&[]).await.unwrap();
         let df = res.get(&0).unwrap().clone();
         df.limit(0, Some(10)).unwrap().show().await.unwrap();

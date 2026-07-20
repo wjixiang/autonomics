@@ -11,7 +11,6 @@ use std::sync::Arc;
 use arrow_array::{Float64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
-use datalake::Datalake;
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,7 +18,7 @@ use thiserror::Error;
 use super::meta::{DagNode, NodeInput, NodePorts};
 use crate::{
     dag::{DagError, graph::PortOutputs},
-    node_registry::registry::{NodeCtx, NodeFactory},
+    node_registry::registry::{NodeCtx, NodeFactory, new_isolated_ctx},
 };
 
 // =====================================================================
@@ -145,9 +144,13 @@ fn build_result_batch(r: &ldsc::hsq::HsqResult) -> Result<RecordBatch, LdscNodeE
 pub struct LdscHsqNode {
     /// DAG node metadata (id, ports).
     meta: NodePorts,
-    /// Iceberg data lake handle, used to fetch the LD score panel
-    /// (`iceberg.ld_score.*`) for the join against upstream sumstats.
-    datalake: Arc<Datalake>,
+    /// Shared object-store registry, used to build an isolated context for
+    /// the join SQL against upstream sumstats.
+    runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
+    /// Optional Iceberg catalog, registered under `"iceberg"` on the
+    /// per-execution context so the join SQL resolves
+    /// `iceberg.ld_score.*`.
+    iceberg_catalog: Option<Arc<dyn datafusion::catalog::CatalogProvider>>,
     /// Configuration for the LDSC h² estimation algorithm itself
     /// (per-annotation M, jackknife blocks, optional fixed intercept).
     /// See [`LdscHsqConfig`].
@@ -225,7 +228,11 @@ impl NodeFactory for LdscHsqNodeFactory {
         node_ctx: NodeCtx,
     ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
         let config: LdscHsqConfig = serde_json::from_value(spec)?;
-        let node = LdscHsqNode::new(node_ctx.datalake, config);
+        let node = LdscHsqNode::new(
+            node_ctx.runtime_env,
+            node_ctx.iceberg_catalog,
+            config,
+        );
         Ok(Box::new(node))
     }
 }
@@ -235,20 +242,27 @@ impl LdscHsqNode {
     ///
     /// # Arguments
     ///
-    /// * `datalake` — Iceberg data lake handle; the node queries the
-    ///   LD score panel from `genetics.ld_score.*` through it.
+    /// * `runtime_env` — shared object-store registry, used to build the
+    ///   per-execution context for the join SQL.
+    /// * `iceberg_catalog` — Iceberg catalog, registered under `"iceberg"`
+    ///   so the join SQL resolves `iceberg.ld_score.*`.
     /// * `ldsc_hsq` — algorithm configuration; see [`LdscHsqConfig`].
     ///
     /// The upstream `DataFrame` must expose columns `Z` (Float64), `N`
     /// (Float64), and `rsid` (Utf8) — enforced by the input port schema.
-    pub fn new(datalake: Arc<Datalake>, ldsc_hsq: LdscHsqConfig) -> Self {
+    pub fn new(
+        runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
+        iceberg_catalog: Option<Arc<dyn datafusion::catalog::CatalogProvider>>,
+        ldsc_hsq: LdscHsqConfig,
+    ) -> Self {
         // Fixed, typed ports: a single input carrying GWAS sumstats (Z, N,
         // rsid) and a single output with the fixed h² summary schema.
         // Declaring the schemas lets the DAG validate edge compatibility
         // at `add_edge`/`validate` time.
         Self {
             meta: port_layout(),
-            datalake,
+            runtime_env,
+            iceberg_catalog,
             ldsc_hsq,
         }
     }
@@ -288,11 +302,13 @@ impl DagNode for LdscHsqNode {
                 "no input DataFrame".into(),
             )))?;
 
-        // 1. Get a DataFusion context with the Iceberg catalog registered, then
-        //    delegate to the catalog-independent pipeline. Splitting here lets
-        //    the pipeline be exercised end-to-end against an in-memory catalog
-        //    (see `tests`).
-        let ctx = self.datalake.get_ctx().await.map_err(LdscNodeError::from)?;
+        // 1. Build an isolated DataFusion context with the Iceberg catalog
+        //    registered (under "iceberg"), then delegate to the
+        //    catalog-independent pipeline. Splitting here lets the pipeline
+        //    be exercised end-to-end against an in-memory catalog (see
+        //    `tests`).
+        let ctx =
+            new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
 
         // TODO: Auto select LD score panel table by population
         let result = Self::run_with_ctx(&ctx, &input.data, "ukbb_eur", &self.ldsc_hsq).await?;
@@ -391,7 +407,8 @@ mod tests {
     #[tokio::test]
     async fn test_ldsc_hsq_node_structure() {
         let node = LdscHsqNode::new(
-            Arc::new(Datalake::new()),
+            datafusion::prelude::SessionContext::new().runtime_env(),
+            None,
             LdscHsqConfig::new(vec![20.0], 5, None),
         );
         assert_eq!(node.kind(), "ldsc");
@@ -675,7 +692,8 @@ mod tests {
     #[tokio::test]
     async fn e2e_missing_input_yields_error() {
         let mut node = LdscHsqNode::new(
-            Arc::new(Datalake::new()),
+            datafusion::prelude::SessionContext::new().runtime_env(),
+            None,
             LdscHsqConfig::new(vec![20.0], 5, None),
         );
         let res = node.execute(&[]).await;

@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use datafusion::{execution::object_store::ObjectStoreUrl, prelude::SessionContext};
+use datafusion::{
+    catalog::CatalogProvider,
+    execution::{object_store::ObjectStoreUrl, runtime_env::RuntimeEnv},
+    prelude::SessionContext,
+};
 use fs::OpendalFileStorage;
 
 use crate::dag::{DAG, DagError, RunReport, SchedulerConfig};
@@ -21,6 +25,8 @@ pub use crate::nodes::{
 /// [`DAG`] of nodes executed by an async scheduler.
 pub struct DataEngine {
     ctx: SessionContext,
+    runtime_env: Arc<RuntimeEnv>,
+    iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
     datalake: Option<Arc<Datalake>>,
     dag: DAG,
     node_registry: NodeRegistry,
@@ -28,15 +34,23 @@ pub struct DataEngine {
 }
 
 impl DataEngine {
-    pub fn new(ctx: SessionContext, datalake: Option<Arc<Datalake>>) -> Self {
+    fn new_from_parts(
+        ctx: SessionContext,
+        runtime_env: Arc<RuntimeEnv>,
+        iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
+        datalake: Option<Arc<Datalake>>,
+    ) -> Self {
         let node_registry = NodeRegistry::new(
-            ctx.clone(),
+            runtime_env.clone(),
+            iceberg_catalog.clone(),
             datalake
                 .clone()
                 .unwrap_or_else(|| Arc::new(Datalake::default())),
         );
         Self {
             ctx,
+            runtime_env,
+            iceberg_catalog,
             datalake,
             dag: DAG::default(),
             node_registry,
@@ -208,14 +222,18 @@ impl DataEngine {
 }
 
 pub struct DataEngineBuilder {
-    ctx: SessionContext,
+    runtime_env: Arc<RuntimeEnv>,
+    iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
     datalake: Option<Arc<Datalake>>,
 }
 
 impl Default for DataEngineBuilder {
     fn default() -> Self {
+        let ctx = SessionContext::new();
+        let runtime_env = ctx.runtime_env();
         Self {
-            ctx: SessionContext::new(),
+            runtime_env,
+            iceberg_catalog: None,
             datalake: None,
         }
     }
@@ -225,7 +243,7 @@ impl DataEngineBuilder {
     pub fn register_opendal_fs(self, file_session: Arc<OpendalFileStorage>) -> Result<Self> {
         let object_url = ObjectStoreUrl::parse("file://")
             .map_err(|e| Error::Custom(format!("cannot parse datafusion url: {e}")))?;
-        self.ctx
+        self.runtime_env
             .register_object_store(object_url.as_ref(), file_session.clone());
         Ok(self)
     }
@@ -233,14 +251,24 @@ impl DataEngineBuilder {
     pub async fn register_iceberg(mut self) -> Result<Self> {
         let datalake = Arc::new(Datalake::default());
         let provider = datalake.get_provider().await?;
-        self.ctx.register_catalog("iceberg", Arc::new(provider));
+        self.iceberg_catalog = Some(Arc::new(provider));
         self.datalake = Some(datalake);
 
         Ok(self)
     }
 
     pub fn build(self) -> DataEngine {
-        DataEngine::new(self.ctx, self.datalake)
+        // Keep a backward-compatible ctx for tests / ad-hoc table registration.
+        let ctx = crate::node_registry::registry::new_isolated_ctx(
+            self.runtime_env.clone(),
+            self.iceberg_catalog.clone(),
+        );
+        DataEngine::new_from_parts(
+            ctx,
+            self.runtime_env,
+            self.iceberg_catalog,
+            self.datalake,
+        )
     }
 }
 
@@ -460,8 +488,8 @@ mod tests {
                         .add_input_port(None)
                         .add_output_port(None),
                     r#"SELECT COUNT(*) AS cnt FROM port_0"#.to_string(),
-                    engine.ctx(),
-                    // "result".to_string(),
+                    engine.runtime_env.clone(),
+                    engine.iceberg_catalog.clone(),
                 ),
             )
             .unwrap();
@@ -805,7 +833,8 @@ mod tests {
             "sink",
             "ldsc",
             "linear_regression",
-            "mock",
+            "echo",
+            "test_source",
             "mr",
         ] {
             assert!(
@@ -825,7 +854,8 @@ mod tests {
             "sink",
             "ldsc",
             "linear_regression",
-            "mock",
+            "echo",
+            "test_source",
             "mr",
         ] {
             let schema = engine
@@ -1020,13 +1050,13 @@ mod tests {
         assert_eq!(report.status("lr"), Some(RuntimeStatus::Success));
     }
 
-    /// mock node: creates with empty spec, returns Iris dataset.
+    /// test_source node: creates with spec, returns Iris dataset.
     #[tokio::test]
-    async fn registry_mock_node_runs() {
+    async fn registry_test_source_node_runs() {
         let mut engine = DataEngine::builder().build();
 
         engine
-            .add_node_from_registry("m", "mock", serde_json::json!({}))
+            .add_node_from_registry("m", "test_source", serde_json::json!({"dataset": "iris"}))
             .unwrap();
 
         let report = engine.run().await.expect("run should succeed");

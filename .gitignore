@@ -16,3 +16,8 @@ dendrite/
 notes/
 TwoSampleMR/
 MVMR/
+
+# infra (Python venv, caches)
+infra/.venv/
+infra/**/__pycache__/
+infra/**/*.pyc

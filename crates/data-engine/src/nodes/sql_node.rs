@@ -1,5 +1,11 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
-use datafusion::{common::HashMap, execution::SessionStateBuilder, prelude::SessionContext};
+use datafusion::{
+    catalog::CatalogProvider,
+    common::HashMap,
+    execution::runtime_env::RuntimeEnv,
+};
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use thiserror::Error;
@@ -8,7 +14,7 @@ use super::meta::{DagNode, NodeInput, NodePorts};
 
 use crate::{
     dag::{DagError, graph::PortOutputs},
-    node_registry::registry::NodeFactory,
+    node_registry::registry::{NodeCtx, NodeFactory, new_isolated_ctx},
 };
 
 #[derive(Debug, Error)]
@@ -39,7 +45,8 @@ impl From<SqlNodeError> for DagError {
 pub struct SqlNode {
     meta: NodePorts,
     sql_query: String,
-    ctx: SessionContext,
+    runtime_env: Arc<RuntimeEnv>,
+    iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
 }
 
 #[derive(Debug, JsonSchema, Deserialize)]
@@ -72,30 +79,41 @@ impl NodeFactory for SqlNodeFactory {
     fn build(
         &self,
         spec: serde_json::Value,
-        node_ctx: crate::node_registry::registry::NodeCtx,
+        node_ctx: NodeCtx,
     ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
         let node_spec: SqlNodeSpec = serde_json::from_value(spec)?;
-        let sql_node = SqlNode::new(node_spec.sql_query, node_ctx.session);
+        let sql_node = SqlNode::new(node_spec.sql_query, node_ctx.runtime_env, node_ctx.iceberg_catalog);
         Ok(Box::new(sql_node))
     }
 }
 
 impl SqlNode {
-    pub fn new(query: String, ctx: SessionContext) -> Self {
+    pub fn new(
+        query: String,
+        runtime_env: Arc<RuntimeEnv>,
+        iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
+    ) -> Self {
         Self {
             meta: port_layout(),
             sql_query: query,
-            ctx,
+            runtime_env,
+            iceberg_catalog,
         }
     }
 
     /// Create a [`SqlNode`] from a pre-built [`NodePorts`] (useful for
     /// multi-input join nodes that declare several input ports).
-    pub fn from_ports(ports: NodePorts, query: String, ctx: SessionContext) -> Self {
+    pub fn from_ports(
+        ports: NodePorts,
+        query: String,
+        runtime_env: Arc<RuntimeEnv>,
+        iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
+    ) -> Self {
         Self {
             meta: ports,
             sql_query: query,
-            ctx,
+            runtime_env,
+            iceberg_catalog,
         }
     }
 
@@ -130,25 +148,13 @@ impl DagNode for SqlNode {
             .into());
         }
 
-        let state = SessionStateBuilder::new()
-            .with_runtime_env(self.ctx.runtime_env())
-            .with_catalog_list(self.ctx.state().catalog_list().clone())
-            .with_default_features()
-            .build();
+        // Build a fresh, isolated context per execution — no shared CatalogList,
+        // so concurrent SqlNodes never collide on `port_N` registrations.
+        let ctx =
+            new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
 
-        let ctx = SessionContext::new_with_state(state);
         for inp in inputs {
-            // Register each upstream DataFrame under `port_{port}`. The fresh
-            // context isolates the table namespace so concurrent SqlNodes never
-            // collide on the same `port_N` slot, while sharing the engine's
-            // `RuntimeEnv` keeps its object stores reachable.
-            //
-            // `DataFrame::into_view()` discards the DataFrame's own
-            // `SessionState` and replans the scan against whichever context
-            // consumes the view, so this context MUST carry the object store:
-            // a bare `SessionContext::new()` registers only the default
-            // `LocalFileSystem` under `file://`, so a CSV-backed upstream
-            // ListingTable would find no file and silently return 0 rows.
+            // Register each upstream DataFrame under `port_{port}`.
             let view = inp.data.clone().into_view();
             ctx.register_table(format!("port_{}", inp.port), view)
                 .map_err(SqlNodeError::RegisterView)?;
@@ -166,8 +172,17 @@ mod tests {
 
     use arrow_array::{ArrayRef, Int32Array, RecordBatch, StringArray, StructArray};
     use arrow_schema::{DataType, Field, Fields, Schema};
-    use datafusion::prelude::DataFrame;
+    use datafusion::prelude::{DataFrame, SessionContext};
     use std::sync::Arc;
+
+    /// Helper: build a `NodeCtx` from a bare `SessionContext` for unit tests.
+    fn test_node_ctx(ctx: &SessionContext) -> NodeCtx {
+        NodeCtx {
+            runtime_env: ctx.runtime_env(),
+            iceberg_catalog: None,
+            datalake: std::sync::Arc::new(datalake::Datalake::default()),
+        }
+    }
 
     /// Create a [`SessionContext`] with a simple int32 column `x` (values `[1, 2, 3]`)
     /// registered as table `"src"`, and a [`SqlNode`] wired to the given `sql` query.
@@ -178,7 +193,7 @@ mod tests {
             RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))]).unwrap();
         let df = ctx.read_batch(batch).unwrap();
         ctx.register_table("src", df.clone().into_view()).unwrap();
-        let node = SqlNode::new(sql.into(), ctx.clone());
+        let node = SqlNode::new(sql.into(), ctx.runtime_env(), None);
         (ctx, node, df)
     }
 
@@ -296,7 +311,7 @@ mod tests {
                    FROM port_0 \
                    WHERE info['age'] > 28 \
                    ORDER BY id";
-        let mut node = SqlNode::new(sql.into(), ctx.clone());
+        let mut node = SqlNode::new(sql.into(), ctx.runtime_env(), None);
         let input = NodeInput { port: 0, data: df };
         let outputs = node.execute(&[input]).await.unwrap();
         let batches = outputs.get(&0).unwrap().clone().collect().await.unwrap();
@@ -311,5 +326,114 @@ mod tests {
         let names = rb.column(1).as_any().downcast_ref::<StringArray>().unwrap();
         assert_eq!(names.value(0), "Alice");
         assert_eq!(names.value(1), "Charlie");
+    }
+
+    /// Create two SqlNodes that each produce a DataFrame, then feed both
+    /// outputs into a third SqlNode that JOINs them. This validates the
+    /// full multi-input → SQL join path: each upstream result arrives on a
+    /// distinct port (`port_0`, `port_1`) and the downstream query can
+    /// reference both.
+    #[tokio::test]
+    async fn test_two_sql_nodes_into_one() {
+        let ctx = SessionContext::new();
+
+        // --- upstream node A: produces an `id, name` table ---
+        let a_schema =
+            Arc::new(Schema::new(vec![
+                Field::new("id", DataType::Int32, false),
+                Field::new("name", DataType::Utf8, false),
+            ]));
+        let a_batch = RecordBatch::try_new(
+            a_schema,
+            vec![
+                Arc::new(Int32Array::from(vec![1, 2, 3])),
+                Arc::new(StringArray::from(vec!["Alice", "Bob", "Charlie"])),
+            ],
+        )
+        .unwrap();
+        let a_df = ctx.read_batch(a_batch).unwrap();
+
+        let mut node_a = SqlNode::new("SELECT * FROM port_0 WHERE id <= 2".into(), ctx.runtime_env(), None);
+        let a_out = node_a
+            .execute(&[NodeInput { port: 0, data: a_df }])
+            .await
+            .unwrap();
+        let a_result: DataFrame = a_out.get(&0).unwrap().clone();
+
+        // --- upstream node B: produces an `id, score` table ---
+        let b_schema =
+            Arc::new(Schema::new(vec![
+                Field::new("id", DataType::Int32, false),
+                Field::new("score", DataType::Int32, false),
+            ]));
+        let b_batch = RecordBatch::try_new(
+            b_schema,
+            vec![
+                Arc::new(Int32Array::from(vec![1, 2, 4])),
+                Arc::new(Int32Array::from(vec![90, 85, 70])),
+            ],
+        )
+        .unwrap();
+        let b_df = ctx.read_batch(b_batch).unwrap();
+
+        let mut node_b = SqlNode::new("SELECT * FROM port_0 WHERE score > 80".into(), ctx.runtime_env(), None);
+        let b_out = node_b
+            .execute(&[NodeInput { port: 0, data: b_df }])
+            .await
+            .unwrap();
+        let b_result: DataFrame = b_out.get(&0).unwrap().clone();
+
+        // --- downstream node C: JOINs both outputs ---
+        let mut node_c = SqlNode::new(
+            "SELECT a.id, a.name, b.score \
+             FROM port_0 AS a JOIN port_1 AS b ON a.id = b.id \
+             ORDER BY a.id"
+                .into(),
+            ctx.runtime_env(),
+            None,
+        );
+        let c_out = node_c
+            .execute(&[
+                NodeInput {
+                    port: 0,
+                    data: a_result,
+                },
+                NodeInput {
+                    port: 1,
+                    data: b_result,
+                },
+            ])
+            .await
+            .unwrap();
+
+        let batches = c_out.get(&0).unwrap().clone().collect().await.unwrap();
+        assert_eq!(batches.len(), 1);
+
+        let rb = &batches[0];
+        // node_a filtered id <= 2 → [1, 2], node_b filtered score > 80 → [1(90), 2(85)]
+        // JOIN on id yields both rows.
+        assert_eq!(rb.num_rows(), 2);
+
+        let ids = rb
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        assert_eq!(ids.values(), &[1, 2]);
+
+        let names = rb
+            .column(1)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(names.value(0), "Alice");
+        assert_eq!(names.value(1), "Bob");
+
+        let scores = rb
+            .column(2)
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .unwrap();
+        assert_eq!(scores.values(), &[90, 85]);
     }
 }

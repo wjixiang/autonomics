@@ -114,6 +114,10 @@ impl DAG {
     /// Uses [`DagNode::clone_box`] to copy node payloads into spawned tasks so
     /// the original nodes stay in the DAG for re-runs / iterative optimisation.
     pub async fn run(&mut self, cfg: &SchedulerConfig) -> Result<RunReport> {
+        // Release output data to avoid memory leak
+        self.outputs.clear();
+        self.statuses.clear();
+
         self.validate()?;
         // Topological order is computed mainly to validate the graph and to seed a
         // deterministic processing order for the ready queue.
@@ -975,16 +979,10 @@ fn schema_compatible(
 #[cfg(test)]
 mod tests {
     use crate::dag::{NodeInput, NodePorts};
+    use crate::nodes::EchoNode;
     use std::assert_matches;
 
     use super::*;
-
-    fn dummy_ports() -> NodePorts {
-        NodePorts::new()
-            .add_input_port(None)
-            .add_output_port(None)
-            .set_fixed_input(false)
-    }
 
     fn get_diamond_dag() -> DAG {
         let mut dag = DAG::default();
@@ -999,33 +997,8 @@ mod tests {
         dag
     }
 
-    // A no-op node so tests can build a real DAG without touching IO.
-    #[derive(Clone)]
-    struct EchoNode(NodePorts);
-    #[async_trait::async_trait]
-    impl super::DagNode for EchoNode {
-        fn ports(&self) -> &NodePorts {
-            &self.0
-        }
-        fn clone_box(&self) -> Box<dyn super::DagNode> {
-            Box::new((*self).clone())
-        }
-        fn kind(&self) -> &'static str {
-            "echo"
-        }
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-        async fn execute(
-            &mut self,
-            _inputs: &[NodeInput],
-        ) -> std::result::Result<PortOutputs, super::DagError> {
-            Ok(HashMap::new())
-        }
-    }
-
     fn add(dag: &mut DAG, id: &str) {
-        dag.add_node(id.into(), Box::new(EchoNode(dummy_ports())))
+        dag.add_node(id.into(), Box::new(EchoNode::default()))
             .unwrap();
     }
 
@@ -1072,7 +1045,7 @@ mod tests {
         ));
         // duplicate id
         assert!(matches!(
-            dag.add_node("a".into(), Box::new(EchoNode(dummy_ports()))),
+            dag.add_node("a".into(), Box::new(EchoNode::default())),
             Err(DagError::DuplicateNode(_))
         ));
     }
@@ -1349,7 +1322,7 @@ mod tests {
     fn replace_node_preserves_edges() {
         let mut dag = get_diamond_dag(); // a→b, a→c, b→d, c→d
         // Replace node "b" with a new EchoNode (same port topology).
-        let new_b = Box::new(EchoNode(dummy_ports()));
+        let new_b = Box::new(EchoNode::default());
         dag.replace_node("b", new_b).unwrap();
 
         // All four nodes still present.
@@ -1369,7 +1342,7 @@ mod tests {
         dag.outputs.insert("x".to_string(), HashMap::new());
         assert!(dag.output("x").is_some());
 
-        dag.replace_node("x", Box::new(EchoNode(dummy_ports())))
+        dag.replace_node("x", Box::new(EchoNode::default()))
             .unwrap();
         // Output must be cleared after replacement.
         assert!(dag.output("x").is_none());
@@ -1379,7 +1352,7 @@ mod tests {
     fn replace_node_unknown_id_rejected() {
         let mut dag = DAG::default();
         let err = dag
-            .replace_node("ghost", Box::new(EchoNode(dummy_ports())))
+            .replace_node("ghost", Box::new(EchoNode::default()))
             .unwrap_err();
         assert!(matches!(err, DagError::UnknownNode(_)));
     }
@@ -1489,5 +1462,42 @@ mod tests {
         dbg!(dag.incoming_edges_with_ports("c"));
         // c is still connected to a.
         assert_eq!(dag.incoming_edges_with_ports("c").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn multi_input_tmp_df_register() {
+        let mut dag = DAG::default();
+        dag.add_node(
+            "a".into(),
+            Box::new(EchoNode::from_ports(NodePorts::new().add_output_port(None))),
+        )
+        .unwrap();
+        dag.add_node(
+            "b".into(),
+            Box::new(EchoNode::from_ports(NodePorts::new().add_output_port(None))),
+        )
+        .unwrap();
+        dag.add_node(
+            "c".into(),
+            Box::new(EchoNode::from_ports(
+                NodePorts::new()
+                    .add_input_port(None)
+                    .add_input_port(None)
+                    .set_fixed_input(true),
+            )),
+        )
+        .unwrap();
+        dag.add_edge("a", "c", 0, 0).unwrap();
+        dag.add_edge("b", "c", 0, 1).unwrap();
+        dag.validate().unwrap();
+        assert_eq!(dag.node_ids().len(), 3);
+        assert_eq!(dag.successors("a").len(), 1);
+        assert_eq!(dag.predecessors("c").len(), 2);
+
+        // Validate input dataframe has been correctly assigned to port_x.
+        let node_c = dag.get_node("c").unwrap();
+        dag.run(&SchedulerConfig::default()).await.unwrap();
+        let output = dag.output("c").unwrap();
+        dbg!(output);
     }
 }
