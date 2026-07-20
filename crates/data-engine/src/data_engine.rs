@@ -263,12 +263,7 @@ impl DataEngineBuilder {
             self.runtime_env.clone(),
             self.iceberg_catalog.clone(),
         );
-        DataEngine::new_from_parts(
-            ctx,
-            self.runtime_env,
-            self.iceberg_catalog,
-            self.datalake,
-        )
+        DataEngine::new_from_parts(ctx, self.runtime_env, self.iceberg_catalog, self.datalake)
     }
 }
 

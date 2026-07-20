@@ -28,11 +28,11 @@ pub struct AddEdgeInput {
     #[desc = "ID of the upstream (source) node"]
     pub from: String,
     #[desc = "Optional output port name on the 'from' node. Omit for single-output nodes."]
-    pub from_port: Option<String>,
+    pub from_port: Option<u8>,
     #[desc = "ID of the downstream (target) node"]
     pub to: String,
     #[desc = "Optional input port name on the 'to' node. Omit for single-input nodes."]
-    pub to_port: Option<String>,
+    pub to_port: Option<u8>,
 }
 
 pub struct AddEdgeTool {
@@ -59,12 +59,12 @@ impl ToolFunction for AddEdgeTool {
 
         let res = match (input.from_port, input.to_port) {
             (Some(fp), Some(tp)) => {
-                let fp: u8 = fp
-                    .parse()
-                    .map_err(|_| ExecError::Format(format!("invalid from_port: {fp}")))?;
-                let tp: u8 = tp
-                    .parse()
-                    .map_err(|_| ExecError::Format(format!("invalid to_port: {tp}")))?;
+                // let fp: u8 = fp;
+                // .parse()
+                // .map_err(|_| ExecError::Format(format!("invalid from_port: {fp}")))?;
+                // let tp: u8 = tp
+                //     .parse()
+                //     .map_err(|_| ExecError::Format(format!("invalid to_port: {tp}")))?;
                 self.client
                     .add_edge_port(input.from, fp, input.to, tp)
                     .await

@@ -132,7 +132,27 @@ impl NodeRegistry {
 
     pub fn build_node(&self, node_kind: &str, spec: serde_json::Value) -> Result<Box<dyn DagNode>> {
         let node_factory = self.get_node_factory(node_kind)?;
-        let node = node_factory.build(spec, self.node_ctx.clone())?;
+        // Repair common LLM spec pathologies (object-wrapped arrays like
+        // `{"item": x}`, numeric strings for number fields) against the
+        // factory's own JSON Schema before deserializing. Schema-driven, so
+        // well-formed specs pass through unchanged.
+        let schema = serde_json::to_value(node_factory.spec_schema()).map_err(|e| {
+            Error::Unknown(format!(
+                "failed to serialize spec schema for kind '{node_kind}': {e}"
+            ))
+        })?;
+        let spec = super::spec_normalize::normalize_against_schema(spec, &schema);
+        // If the factory still can't deserialize the spec, upgrade the bare
+        // serde error into an agent-facing SpecRejection carrying the kind,
+        // the expected schema, and concrete remediation guidance.
+        let node = node_factory
+            .build(spec, self.node_ctx.clone())
+            .map_err(|err| match err {
+                super::error::Error::SpecDeserialize { source } => {
+                    super::error::Error::spec_rejection_from(node_kind, &schema, source)
+                }
+                other => other,
+            })?;
         Ok(node)
     }
 
@@ -230,6 +250,22 @@ mod tests {
                 "kind '{kind}': factory.ports() input-fixed flag must match built node's"
             );
         }
+    }
+
+    /// The exact malformed payload weak LLMs emit for `ldsc_rg` — `m` wrapped
+    /// as `{"item": "23960350"}` and `n_blocks` as a string. The schema-guided
+    /// normalizer in `build_node` must repair both so the spec deserializes.
+    #[test]
+    fn ldsc_rg_malformed_llm_spec_builds() {
+        let registry = test_registry();
+        let malformed = serde_json::json!({
+            "m": { "item": "23960350" },
+            "n_blocks": "200"
+        });
+        let node = registry.build_node("ldsc_rg", malformed).expect(
+            "malformed ldsc_rg spec should be normalized and build successfully",
+        );
+        assert_eq!(node.kind(), "ldsc_rg");
     }
 
     /// `NodeInfo` (returned by `list_nodes`) must serialize, and each entry's
