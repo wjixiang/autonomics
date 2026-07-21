@@ -654,12 +654,12 @@ pub fn read_annot(
                     for fh in fh_list {
                         let sub = sub_chr(fh, c);
                         let (sfx, _c2) =
-                            which_compression(&format!("{sub}{annot_suffix}")).unwrap();
+                            which_compression(&format!("{sub}{annot_suffix}"))?;
                         paths.push(format!("{sub}{annot_suffix}{sfx}"));
                     }
-                    (c, paths)
+                    Ok((c, paths))
                 })
-                .collect()
+                .collect::<Result<Vec<_>>>()?
         }
     };
 

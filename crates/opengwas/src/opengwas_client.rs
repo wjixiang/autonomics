@@ -112,8 +112,8 @@ impl OpengwasClient {
     /// Pass an explicit directory via [`with_cache_dir`](Self::with_cache_dir)
     /// if you want a different location.
     ///
-    /// Panics if no token can be resolved.
-    pub fn new(token: Option<&str>) -> Self {
+    /// Returns [`OpengwasError::InvalidToken`] if no token can be resolved.
+    pub fn new(token: Option<&str>) -> Result<Self> {
         Self::with_cache_dir(token, default_cache_dir())
     }
 
@@ -122,7 +122,7 @@ impl OpengwasClient {
     /// Only public endpoints (`/status`, `/batches`) will work. Uses the
     /// default on-disk cache directory — see [`with_cache_dir`](Self::with_cache_dir)
     /// to override.
-    pub fn new_no_auth() -> Self {
+    pub fn new_no_auth() -> Result<Self> {
         Self::with_cache_dir_no_auth(default_cache_dir())
     }
 
@@ -132,43 +132,45 @@ impl OpengwasClient {
     /// across process restarts. The directory is created lazily on first
     /// access if it does not yet exist.
     ///
-    /// See [`new`](Self::new) for token-resolution rules. Panics if no
-    /// token can be resolved.
-    pub fn with_cache_dir(token: Option<&str>, cache_dir: impl Into<PathBuf>) -> Self {
+    /// See [`new`](Self::new) for token-resolution rules. Returns
+    /// [`OpengwasError::InvalidToken`] if no token can be resolved.
+    pub fn with_cache_dir(token: Option<&str>, cache_dir: impl Into<PathBuf>) -> Result<Self> {
         let token = match token {
             Some(t) => Some(t.to_string()),
             None => std::env::var("OPENGWAS_TOKEN").ok(),
         };
         let full = format!(
             "Bearer {}",
-            token.expect("no token provided and OPENGWAS_TOKEN env var not set")
+            token.ok_or_else(|| {
+                OpengwasError::InvalidToken(
+                    "no token provided and OPENGWAS_TOKEN env var not set".into(),
+                )
+            })?
         );
         let mut headers = header::HeaderMap::new();
-        let mut auth = header::HeaderValue::from_str(&full).expect("invalid token");
+        let mut auth = header::HeaderValue::from_str(&full)
+            .map_err(|e| OpengwasError::InvalidToken(format!("invalid token: {e}")))?;
         auth.set_sensitive(true);
         headers.insert(header::AUTHORIZATION, auth);
         let client = Client::builder()
             .default_headers(headers)
-            .build()
-            .expect("failed to build HTTP client");
-        Self {
+            .build()?;
+        Ok(Self {
             client,
             cache_dir: cache_dir.into(),
             db: Mutex::new(None),
-        }
+        })
     }
 
     /// Create a client without authentication that persists the gwasinfo
     /// cache to `cache_dir`. See [`with_cache_dir`](Self::with_cache_dir).
-    pub fn with_cache_dir_no_auth(cache_dir: impl Into<PathBuf>) -> Self {
-        let client = Client::builder()
-            .build()
-            .expect("failed to build HTTP client");
-        Self {
+    pub fn with_cache_dir_no_auth(cache_dir: impl Into<PathBuf>) -> Result<Self> {
+        let client = Client::builder().build()?;
+        Ok(Self {
             client,
             cache_dir: cache_dir.into(),
             db: Mutex::new(None),
-        }
+        })
     }
 
     /// Return the directory used for the persistent gwasinfo cache.
@@ -343,7 +345,9 @@ impl OpengwasClient {
                 Self::bulk_insert(&guard, &infos)
             })
             .await
-            .expect("spawn_blocking task panicked")?;
+            // JoinError (panic in blocking task) → OpengwasError::TaskJoin;
+            // the inner rusqlite::Error → OpengwasError::Sqlite (both via From).
+            .map_err(OpengwasError::from)??;
         }
 
         // Cache the open handle. Another concurrent caller may have raced
@@ -448,7 +452,9 @@ impl OpengwasClient {
             rows.collect::<rusqlite::Result<Vec<_>>>()
         })
         .await
-        .expect("spawn_blocking task panicked")
+        // JoinError (panic in blocking task) → OpengwasError::TaskJoin;
+        // the inner rusqlite::Error is converted by the trailing map_err.
+        .map_err(OpengwasError::from)?
         .map_err(Into::into)
     }
 
@@ -486,7 +492,9 @@ impl OpengwasClient {
             rows.collect::<rusqlite::Result<Vec<_>>>()
         })
         .await
-        .expect("spawn_blocking task panicked")
+        // JoinError (panic in blocking task) → OpengwasError::TaskJoin;
+        // the inner rusqlite::Error is converted by the trailing map_err.
+        .map_err(OpengwasError::from)?
         .map_err(Into::into)
     }
 
@@ -583,7 +591,9 @@ impl OpengwasClient {
             guard.query_row("SELECT COUNT(*) FROM gwasinfo", [], |row| row.get(0))
         })
         .await
-        .expect("spawn_blocking task panicked")
+        // JoinError (panic in blocking task) → OpengwasError::TaskJoin;
+        // the inner rusqlite::Error is converted by the trailing map_err.
+        .map_err(OpengwasError::from)?
         .map_err(Into::into)
     }
 
@@ -671,7 +681,9 @@ impl OpengwasClient {
             rows.collect::<rusqlite::Result<Vec<_>>>()
         })
         .await
-        .expect("spawn_blocking task panicked")
+        // JoinError (panic in blocking task) → OpengwasError::TaskJoin;
+        // the inner rusqlite::Error is converted by the trailing map_err.
+        .map_err(OpengwasError::from)?
         .map_err(Into::into)
     }
 
@@ -982,14 +994,15 @@ mod tests {
     use tempfile::TempDir;
 
     fn get_client() -> OpengwasClient {
-        OpengwasClient::new(None)
+        OpengwasClient::new(None).expect("opengwas client")
     }
 
     /// Build a client pointing at a temporary cache directory so tests
     /// never touch the real `$HOME/.cache/opengwas` file.
     fn client_with_temp_cache() -> (TempDir, OpengwasClient) {
         let tmp = TempDir::new().expect("tempdir");
-        let client = OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf());
+        let client =
+            OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf()).expect("opengwas client");
         (tmp, client)
     }
 
@@ -1051,7 +1064,8 @@ mod tests {
         }
 
         // Second "session": brand-new client instance, same cache dir.
-        let client2 = OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf());
+        let client2 =
+            OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf()).expect("opengwas client");
         let db = client2.init_db().expect("init_db second session");
         let guard = db.lock().unwrap();
         let count: i64 = guard
@@ -1109,7 +1123,8 @@ mod tests {
         );
 
         // Re-opening the client should still work and see an empty cache.
-        let client2 = OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf());
+        let client2 =
+            OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf()).expect("opengwas client");
         let db2 = client2.init_db().expect("init_db after clear");
         let n: i64 = db2
             .lock()

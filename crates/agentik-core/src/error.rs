@@ -6,7 +6,7 @@ use agentik_sdk::types::tools::ToolUse;
 
 use crate::tools::ToolError;
 
-use crate::memory::MemoryError;
+use crate::memory::error::Error as MemoryError;
 
 pub trait Retryable {
     fn is_retryable(&self) -> bool;

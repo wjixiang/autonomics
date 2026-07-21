@@ -22,6 +22,9 @@ pub enum RuntimeError {
 
     #[error("{0}")]
     Engine(#[from] data_engine::data_engine::error::Error),
+
+    #[error("OpenGWAS setup failed: {0}")]
+    Opengwas(#[from] opengwas::OpengwasError),
 }
 
 pub type Result<T> = std::result::Result<T, RuntimeError>;
@@ -132,7 +135,7 @@ impl AgentRuntime {
                 file_storage,
                 datalake,
                 Arc::new(data_engine_client),
-            );
+            )?;
 
             let mut agent = Agent::builder()
                 .with_model_pool(Arc::new(model_pool))

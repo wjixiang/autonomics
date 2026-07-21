@@ -10,7 +10,7 @@ fn require_client() -> Option<OpengwasClient> {
         eprintln!("OPENGWAS_TOKEN not set — skipping authenticated test");
         return None;
     }
-    Some(OpengwasClient::new(None))
+    Some(OpengwasClient::new(None).expect("opengwas client"))
 }
 
 // ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ fn require_client() -> Option<OpengwasClient> {
 
 #[tokio::test]
 async fn test_status() {
-    let client = OpengwasClient::new_no_auth();
+    let client = OpengwasClient::new_no_auth().expect("opengwas client");
     let resp = client.status().await.unwrap();
     // The API returns a JSON object with service statuses.
     assert!(resp.is_object());
@@ -27,7 +27,7 @@ async fn test_status() {
 
 #[tokio::test]
 async fn test_batches() {
-    let client = OpengwasClient::new_no_auth();
+    let client = OpengwasClient::new_no_auth().expect("opengwas client");
     let resp = client.batches().await.unwrap();
     assert!(resp.is_array() || resp.is_object());
 }

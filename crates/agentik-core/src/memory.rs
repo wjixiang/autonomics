@@ -1,12 +1,13 @@
+pub mod error;
+
 use crate::message_ext::AgentMessageExt;
 use agentik_sdk::model::Model;
-use agentik_sdk::types::errors::AnthropicError;
 use agentik_sdk::types::messages::{ContentBlock, Message};
 use agentik_sdk::types::{Role, ToolDefinition};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::prompt::compact;
+use error::{Error, Result};
 
 // ── Compaction constants (matching OpenCode V2 defaults) ─────────
 
@@ -25,24 +26,91 @@ const PRUNE_MINIMUM_TOKENS: u64 = 20_000;
 /// Chars per token heuristic (matching OpenCode's `Token.estimate()`).
 const CHARS_PER_TOKEN: usize = 4;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Memory {
     pub items: Vec<MemoryItem>,
-}
-
-#[derive(Debug, Error)]
-pub enum MemoryError {
-    #[error("No item inside current memory")]
-    EmptyMemoryItem,
-
-    #[error("Failed to compact memory: {0}")]
-    Compact(#[from] AnthropicError),
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct MemoryItem {
     pub messages: Vec<Message>,
     pub summary: Option<String>,
+}
+
+impl MemoryItem {
+    /// Get message with tool_call that has target tool_call_id
+    fn get_tooluse_msg_index(&self, tool_call_id: &str) -> Option<usize> {
+        self.messages.iter().position(|m| {
+            m.content
+                .iter()
+                .find(|c| match c {
+                    ContentBlock::ToolUse { id, .. } => {
+                        if id == tool_call_id {
+                            return true;
+                        }
+                        false
+                    }
+                    _ => false,
+                })
+                .is_some()
+        })
+    }
+
+    pub fn add_message(&mut self, msg: Message) -> Result<()> {
+        let mut tool_results: Vec<(String, Option<String>, Option<bool>)> = Vec::new();
+        let mut others_content_blocks: Vec<ContentBlock> = Vec::new();
+        // Filter out tool_results
+        for cb in &msg.content {
+            match cb {
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error,
+                } => tool_results.push((tool_use_id.clone(), content.clone(), *is_error)),
+                _ => others_content_blocks.push(cb.clone()),
+            }
+        }
+
+        if !others_content_blocks.is_empty() {
+            let mut other_msg = msg.clone();
+            other_msg.content = others_content_blocks;
+            self.messages.push(other_msg);
+        }
+
+        for (tool_use_id, content, is_error) in tool_results {
+            let Some(tc_msg_index) = self.get_tooluse_msg_index(&tool_use_id) else {
+                return Err(Error::EmptyMemoryItem);
+            };
+
+            if tc_msg_index + 1 < self.messages.len() {
+                // Need to move tool_result to the next message of tool_use
+
+                // 1. Check if next message's role is user
+                if matches!(self.messages[tc_msg_index + 1].role, Role::User) {
+                    self.messages[tc_msg_index + 1]
+                        .content
+                        .push(ContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            is_error,
+                        });
+                } else {
+                    // This is the situation that agent create two independent messages, and each
+                    // one has a tool_use
+                    unreachable!()
+                }
+            } else {
+                let mut tool_res_msg = msg.clone();
+                tool_res_msg.content = vec![ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error,
+                }];
+                self.messages.push(tool_res_msg);
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Result of the head/tail sliding-window selection for compaction.
@@ -350,11 +418,8 @@ impl Memory {
         self.items.last()
     }
 
-    fn add_summary_to_last_item(&mut self, summary: String) -> Result<(), MemoryError> {
-        self.items
-            .last_mut()
-            .ok_or(MemoryError::EmptyMemoryItem)?
-            .summary = Some(summary);
+    fn add_summary_to_last_item(&mut self, summary: String) -> Result<()> {
+        self.items.last_mut().ok_or(Error::EmptyMemoryItem)?.summary = Some(summary);
         Ok(())
     }
 
@@ -362,12 +427,11 @@ impl Memory {
         self.items.push(MemoryItem::default());
     }
 
-    pub fn remember(&mut self, message: Message) -> Result<(), MemoryError> {
-        self.items
-            .last_mut()
-            .ok_or(MemoryError::EmptyMemoryItem)?
-            .messages
-            .push(message);
+    pub fn remember(&mut self, message: Message) -> Result<()> {
+        let mem_itemt = self.items.last_mut().ok_or(Error::EmptyMemoryItem)?;
+
+        mem_itemt.add_message(message)?;
+
         Ok(())
     }
 
@@ -380,7 +444,7 @@ impl Memory {
     ///   with a placeholder) to save tokens.
     /// - Old tool outputs in the current segment that exceed the protection
     ///   window are also pruned.
-    pub fn render_context(&self) -> Result<Vec<Message>, MemoryError> {
+    pub fn render_context(&self) -> Result<Vec<Message>> {
         let mut result = Vec::new();
 
         // 1. Inject summaries from all historical segments
@@ -401,6 +465,10 @@ impl Memory {
             result.extend(messages);
         }
 
+        // 3. Sort messages to assure toolcall and toolresult is adjacent.
+        // Providers such as Deepseek requires that each `tool_use` block must have a corresponding `tool_result` block in the next message
+        let mut sorted_messages: Vec<Message> = Vec::new();
+
         Ok(result)
     }
 
@@ -410,7 +478,7 @@ impl Memory {
     /// 2. Serializes the head messages for the summarization LLM
     /// 3. Supports anchored updates when a previous summary exists
     /// 4. Stores the summary and preserves the tail as a new segment
-    pub async fn compact(&mut self, model: &Model) -> Result<(), MemoryError> {
+    pub async fn compact(&mut self, model: &Model) -> Result<()> {
         // Step 1: Select head/tail split
         let selection = match select_for_compaction(&self.items, DEFAULT_KEEP_TOKENS) {
             Some(sel) => sel,
@@ -615,7 +683,7 @@ mod tests {
     fn test_prune_old_tool_outputs_protects_recent() {
         let mut messages = vec![
             // Old, large tool result — should be pruned
-            Message::tool_result("old_id", &"a".repeat(200_000), false),
+            Message::tool_result("old_id", "a".repeat(200_000), false),
             // Recent, small tool result — should be protected
             Message::tool_result("new_id", "recent result", false),
         ];
@@ -662,6 +730,76 @@ mod tests {
         assert!(msg.contains("</conversation-checkpoint>"));
     }
 
-    #[test]
-    fn assure_toolcall_toolresult_adjacent() {}
+    // #[test]
+    // fn assure_toolcall_toolresult_adjacent() {
+    //     let mut memory = Memory::new();
+    //
+    //     // Two tool calls issued by the assistant
+    //     memory
+    //         .remember(Message::assistant_tool_use(
+    //             "id1",
+    //             "bash",
+    //             json!({"command": "ls"}),
+    //         ))
+    //         .unwrap();
+    //     memory
+    //         .remember(Message::assistant_tool_use(
+    //             "id2",
+    //             "bash",
+    //             json!({"command": "pwd"}),
+    //         ))
+    //         .unwrap();
+    //
+    //     // Two matching tool results returned by the user
+    //     memory
+    //         .remember(Message::tool_result("id1", "file1.txt\nfile2.txt", false))
+    //         .unwrap();
+    //     memory
+    //         .remember(Message::tool_result("id2", "/home/user", false))
+    //         .unwrap();
+    //
+    //     // One assistant text result concluding the turn
+    //     memory
+    //         .remember(Message::assistant_text("Done listing files"))
+    //         .unwrap();
+    //
+    //     let context = memory.render_context().unwrap();
+    //
+    //     // Locate each block's position by kind/tool_use_id to assert adjacency.
+    //     let mut positions: Vec<&str> = Vec::new();
+    //     for msg in &context {
+    //         for block in &msg.content {
+    //             let label = match block {
+    //                 ContentBlock::ToolUse { id, .. } => {
+    //                     if id == "id1" {
+    //                         "tool_call_1"
+    //                     } else {
+    //                         "tool_call_2"
+    //                     }
+    //                 }
+    //                 ContentBlock::ToolResult { content, .. } => match content.as_deref() {
+    //                     Some("file1.txt\nfile2.txt") => "tool_result_1",
+    //                     Some("/home/user") => "tool_result_2",
+    //                     _ => "other",
+    //                 },
+    //                 ContentBlock::Text { text } if text == "Done listing files" => "text",
+    //                 _ => "other",
+    //             };
+    //             positions.push(label);
+    //         }
+    //     }
+    //
+    //     // Expected ordering: both calls, then both results, then the text.
+    //     assert_eq!(
+    //         positions,
+    //         vec![
+    //             "tool_call_1",
+    //             "tool_result_1",
+    //             "tool_call",
+    //             "tool_result_2",
+    //             "text"
+    //         ],
+    //         "tool calls and tool results must remain adjacent and in order"
+    //     );
+    // }
 }

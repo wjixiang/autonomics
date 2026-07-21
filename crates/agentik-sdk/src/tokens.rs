@@ -93,6 +93,16 @@ pub struct ModelPrice {
     pub cache_write_cost_per_million: Option<f64>,
 }
 
+/// Fallback pricing used by [`ModelPricing::get_price`] for unknown models.
+/// Mirrors `claude-3-5-sonnet-latest` so the table lookup need not be repeated
+/// (and cannot panic if that hardcoded entry is ever removed).
+const DEFAULT_FALLBACK_PRICE: ModelPrice = ModelPrice {
+    input_cost_per_million: 3.00,
+    output_cost_per_million: 15.00,
+    cache_read_cost_per_million: Some(0.30),
+    cache_write_cost_per_million: Some(3.75),
+};
+
 /// Cost breakdown for detailed analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostBreakdown {
@@ -385,10 +395,11 @@ impl ModelPricing {
 
     /// Get pricing for a model
     pub fn get_price(&self, model: &str) -> &ModelPrice {
-        self.pricing_table.get(model).unwrap_or_else(|| {
-            // Default to Claude 3.5 Sonnet pricing for unknown models
-            self.pricing_table.get("claude-3-5-sonnet-latest").unwrap()
-        })
+        // Unknown models fall back to Claude 3.5 Sonnet pricing (see
+        // [`DEFAULT_FALLBACK_PRICE`]); no second table lookup or panic.
+        self.pricing_table
+            .get(model)
+            .unwrap_or(&DEFAULT_FALLBACK_PRICE)
     }
 
     /// Set pricing for a model

@@ -10,7 +10,7 @@ use opengwas::OpengwasClient;
 #[tokio::test]
 #[ignore]
 async fn test_download_ieu_a_2() {
-    let client = Arc::new(OpengwasClient::new(None));
+    let client = Arc::new(OpengwasClient::new(None).expect("opengwas client"));
     let storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
     let tool = DownloadFilesTool::new(client, storage.clone());
 

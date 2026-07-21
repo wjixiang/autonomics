@@ -21,6 +21,9 @@ pub enum OpengwasError {
     #[error("invalid parameter: {0}")]
     Param(String),
 
+    #[error("invalid or missing auth token: {0}")]
+    InvalidToken(String),
+
     #[error("unexpected response: {0}")]
     UnexpectedResponse(String),
 

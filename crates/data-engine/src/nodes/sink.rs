@@ -13,6 +13,7 @@ use datafusion::{
     common::HashMap,
     common::config::{CsvOptions, TableParquetOptions},
     dataframe::{DataFrame, DataFrameWriteOptions},
+    error::DataFusionError,
     execution::runtime_env::RuntimeEnv,
 };
 use datalake::Datalake;
@@ -128,7 +129,7 @@ const ICEBERG_RESERVED_BARE_NAMES: &[&str] = &["pos", "file_path"];
 /// projected column names, and nested struct fields are reached by path
 /// (e.g. `info.pos`), not as a scan projection. Emits a `tracing::warn!` per
 /// rename so callers know the read-back schema differs from what they wrote.
-fn rename_iceberg_reserved_columns(mut df: DataFrame) -> DataFrame {
+fn rename_iceberg_reserved_columns(mut df: DataFrame) -> Result<DataFrame, DataFusionError> {
     let mut names: HashSet<String> = df
         .schema()
         .fields()
@@ -146,14 +147,12 @@ fn rename_iceberg_reserved_columns(mut df: DataFrame) -> DataFrame {
                  column, which would make it unreadable after the Iceberg round-trip; \
                  renaming to `{new}`"
             );
-            df = df
-                .with_column_renamed(reserved, new.as_str())
-                .expect("renaming an existing top-level column must succeed");
+            df = df.with_column_renamed(reserved, new.as_str())?;
             names.remove(reserved);
             names.insert(new);
         }
     }
-    df
+    Ok(df)
 }
 
 /// Return `"{base}_col"`, appending extra `_` until it does not collide with
@@ -406,7 +405,7 @@ impl DagNode for SinkNode {
                 // WORKAROUND(iceberg-rust): rename bare reserved metadata
                 // column names (`pos`, `file_path`) so they survive the
                 // round-trip. Remove once upstream fixes the clash.
-                let df = rename_iceberg_reserved_columns(df);
+                let df = rename_iceberg_reserved_columns(df).map_err(DagError::DataFusion)?;
                 let datalake = self.datalake();
 
                 // 1. Parse ident.
@@ -584,7 +583,7 @@ mod tests {
         .unwrap();
         let df = ctx.read_batch(batch).unwrap();
 
-        let renamed = rename_iceberg_reserved_columns(df);
+        let renamed = rename_iceberg_reserved_columns(df).expect("rename reserved columns");
         let names: Vec<String> = renamed
             .schema()
             .fields()
@@ -650,7 +649,7 @@ mod tests {
         .unwrap();
         let df = ctx.read_batch(batch).unwrap();
 
-        let renamed = rename_iceberg_reserved_columns(df);
+        let renamed = rename_iceberg_reserved_columns(df).expect("rename reserved columns");
         let names: Vec<String> = renamed
             .schema()
             .fields()

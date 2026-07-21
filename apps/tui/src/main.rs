@@ -141,7 +141,7 @@ fn opengwas_token() -> color_eyre::Result<String> {
 
 fn run_refresh_opengwas(args: RefreshOpengwasArgs) -> color_eyre::Result<()> {
     let token = opengwas_token()?;
-    let client = OpengwasClient::with_cache_dir(Some(&token), default_opengwas_cache_dir());
+    let client = OpengwasClient::with_cache_dir(Some(&token), default_opengwas_cache_dir())?;
 
     if args.show_cache_path {
         println!(
@@ -164,7 +164,7 @@ fn run_refresh_opengwas(args: RefreshOpengwasArgs) -> color_eyre::Result<()> {
 
 fn run_clear_opengwas(args: ClearOpengwasArgs) -> color_eyre::Result<()> {
     let token = opengwas_token()?;
-    let client = OpengwasClient::with_cache_dir(Some(&token), default_opengwas_cache_dir());
+    let client = OpengwasClient::with_cache_dir(Some(&token), default_opengwas_cache_dir())?;
     let path = client.cache_file_path();
 
     if !args.yes {

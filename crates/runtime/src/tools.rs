@@ -10,12 +10,17 @@ use data_engine::runtime::DataEngineClient;
 use datalake::Datalake;
 use eutils::EutilsClient;
 use fs::OpendalFileStorage;
-use opengwas::OpengwasClient;
+use opengwas::{OpengwasClient, OpengwasError};
 
 /// OpenGWAS tools (GWAS catalog lookup).
-pub fn opengwas_tools(file_storage: Arc<OpendalFileStorage>) -> Vec<ToolRegistration> {
-    let opengwas = Arc::new(OpengwasClient::new(None));
-    opengwas::opengwas_registrations(opengwas, file_storage)
+///
+/// Returns [`OpengwasError`] if the OpenGWAS client cannot be constructed
+/// (typically because `OPENGWAS_TOKEN` is unset).
+pub fn opengwas_tools(
+    file_storage: Arc<OpendalFileStorage>,
+) -> Result<Vec<ToolRegistration>, OpengwasError> {
+    let opengwas = Arc::new(OpengwasClient::new(None)?);
+    Ok(opengwas::opengwas_registrations(opengwas, file_storage))
 }
 
 /// NCBI E-utilities tools (PubMed, Entrez).
@@ -37,11 +42,11 @@ pub fn default_tool_set(
     file_storage: Arc<OpendalFileStorage>,
     datalake: Arc<Datalake>,
     data_engine_client: Arc<DataEngineClient>,
-) -> Vec<ToolRegistration> {
+) -> Result<Vec<ToolRegistration>, OpengwasError> {
     let mut tools = fs::file_base_registrations(file_storage.clone());
-    tools.extend(opengwas_tools(file_storage));
+    tools.extend(opengwas_tools(file_storage)?);
     tools.extend(eutils_tools());
     tools.extend(datalake_tools(datalake.clone()));
     tools.extend(data_engine_tools::registrations(data_engine_client));
-    tools
+    Ok(tools)
 }

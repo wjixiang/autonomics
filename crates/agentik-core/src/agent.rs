@@ -348,82 +348,102 @@ impl Agent {
             }
 
             iteration += 1;
-            tokio::select! {
-                result = self.agent_workflow(None) => {
-                    match result {
-                        Ok(()) => {
-                            consecutive_retries = 0;
-                            self.snapshot().await;
-                            // // Drain control events tools emitted this turn
-                            // // (e.g. `abort_task` sends `Abort`) before deciding
-                            // // whether the session is done.
-                            // let mut new_work = false;
-                            // let mut stop = false;
-                            // while let Ok(event) = rx.try_recv() {
-                            //     let keep_going = self.apply_internal_event(event).await;
-                            //     if keep_going {
-                            //         new_work = true;
-                            //     } else {
-                            //         stop = true;
-                            //     }
-                            // }
-                            // if stop {
-                            //     break;
-                            // }
-                            //
-                            // `agent_workflow` flips the lifecycle to IDLE when
-                            // the LLM produces no tool calls (natural completion).
-                            // That same flip makes `is_running()` false here, so
-                            // we must emit `Done` on this branch — otherwise the
-                            // `Done` below is unreachable and the TUI never leaves
-                            // the Running state.
-                            if !self.lifecycle.is_running() {
-                                self.send_event(agentik_sdk::types::AgentEvent::Done);
-                                break;
-                            }
-                            // if new_work {
-                            //     continue;
-                            // }
-                            // // No tool calls and no pending work → session done.
-                            // self.send_event(agentik_sdk::types::AgentEvent::Done);
-                            // break;
-                        }
-                        Err(AgentError::CompactionRebuild) => {
-                            tracing::info!("compaction rebuild, re-entering workflow");
-                            continue;
-                        }
-                        Err(e) if e.is_retryable() && consecutive_retries < self.config.max_retries => {
-                            consecutive_retries += 1;
-                            tracing::warn!(
-                                "retryable error at iteration {}/{}, retry {}/{}: {e}",
-                                iteration,
-                                self.config.max_iterations,
-                                consecutive_retries,
-                                self.config.max_retries
-                            );
-                            let delay = Duration::from_secs(1) * (1 << (consecutive_retries - 1));
-                            tokio::time::sleep(delay).await;
-                            let _ = self.memory.remember(Message::user(e.retry_message()));
-                            continue;
-                        }
-                        Err(e) => {
-                            tracing::error!("workflow failed at iteration {iteration}: {e}");
-                            self.send_event(AgentEvent::Error(format!("{e}")));
-                            self.snapshot().await;
-                            self.lifecycle.set_idle();
-                            break;
-                        }
-                    }
-                }
-                // ── Event arrived during workflow — process, then restart ──
-                Some(event) = rx.recv() => {
-                    self.apply_internal_event(event).await;
-                }
+
+            // Run one workflow iteration to completion. Only an external
+            // cancellation may interrupt it — we deliberately do NOT select on
+            // `rx.recv()` here.
+            //
+            // `agent_workflow` records the assistant's `tool_use` blocks to
+            // memory *before* executing the tools, and records the matching
+            // `tool_result` blocks only *after* `toolset.execute` returns. If a
+            // `BgTaskComplete` / `MessageInject` event were allowed to preempt
+            // the workflow mid-execution (as the previous `select! { rx.recv() }`
+            // branch did), `tokio::select!` would drop the in-flight
+            // `agent_workflow` future, losing the still-pending tool results.
+            // The result is an orphaned `tool_use` with no following
+            // `tool_result`, which strict providers (Anthropic-compatible /
+            // DeepSeek) reject as a 400 `invalid_request_error`.
+            //
+            // Events that arrive while a workflow is running are buffered in the
+            // unbounded channel and drained below, *between* iterations — by
+            // which point every tool_use of this turn already has its
+            // tool_result safely in memory.
+            let result = tokio::select! {
+                biased; // cancellation always takes priority
                 _ = cancelled.cancelled() => {
                     self.lifecycle.set_aborted();
                     self.snapshot().await;
                     self.send_event(AgentEvent::Error("Task cancelled by user".into()));
+                    break;
                 }
+                result = self.agent_workflow(None) => result,
+            };
+
+            let session_done = match result {
+                Ok(()) => {
+                    consecutive_retries = 0;
+                    self.snapshot().await;
+                    // `agent_workflow` flips the lifecycle to IDLE when the LLM
+                    // produces no tool calls (natural completion). That same flip
+                    // makes `is_running()` false here, so we must emit `Done` on
+                    // this branch — otherwise the TUI never leaves the Running
+                    // state.
+                    if !self.lifecycle.is_running() {
+                        self.send_event(agentik_sdk::types::AgentEvent::Done);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Err(AgentError::CompactionRebuild) => {
+                    tracing::info!("compaction rebuild, re-entering workflow");
+                    continue;
+                }
+                Err(e) if e.is_retryable() && consecutive_retries < self.config.max_retries => {
+                    consecutive_retries += 1;
+                    tracing::warn!(
+                        "retryable error at iteration {}/{}, retry {}/{}: {e}",
+                        iteration,
+                        self.config.max_iterations,
+                        consecutive_retries,
+                        self.config.max_retries
+                    );
+                    let delay = Duration::from_secs(1) * (1 << (consecutive_retries - 1));
+                    tokio::time::sleep(delay).await;
+                    let _ = self.memory.remember(Message::user(e.retry_message()));
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!("workflow failed at iteration {iteration}: {e}");
+                    self.send_event(AgentEvent::Error(format!("{e}")));
+                    self.snapshot().await;
+                    self.lifecycle.set_idle();
+                    true
+                }
+            };
+
+            if session_done {
+                break;
+            }
+
+            // Drain control/notification events that arrived during this
+            // iteration. Non-preempting: the workflow already completed and
+            // recorded all of its tool_results, so injecting a
+            // `BgTaskComplete` or `MessageInject` here cannot orphan a
+            // tool_use. A `BgTaskComplete` whose result was already consumed
+            // by `wait_task` is a no-op: the task entry is reclaimed by the
+            // next `toolset.execute`, so `finished_task_notification` returns
+            // `None` and nothing redundant is injected.
+            let mut terminal = false;
+            while let Ok(event) = rx.try_recv() {
+                if !self.apply_internal_event(event).await {
+                    // Terminal control signal (Abort / Shutdown / Done).
+                    terminal = true;
+                    break;
+                }
+            }
+            if terminal {
+                break;
             }
         }
 

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref (cheap on a slow-building workspace).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The repo's .cargo/config.toml pins a host-local target dir (/mnt/disk2/target)
+  # that does not exist on CI runners. Override it per-runner.
+  CARGO_TARGET_DIR: ${{ runner.temp }}/target
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      # Compiles every test target first; a clean compile is the most common CI
+      # signal and separates link errors from runtime failures.
+      - run: cargo test --workspace --locked --no-run
+      # Runs all non-#[ignore] tests. Live-network tests are #[ignore]d and/or
+      # env-gated, so this stays green without external credentials.
+      - run: cargo test --workspace --locked
