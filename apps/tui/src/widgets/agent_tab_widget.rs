@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Padding, Paragraph},
 };
 
-use crate::state::{AgentTabState, InputMode};
+use crate::state::{AgentStatus, AgentTabState, InputMode};
 use crate::widgets::{
     chat_widget::{ChatWidget, ChatWidgetState},
     input_area::{InputWidget, InputWidgetState, PROMPT_GUTTER},
@@ -28,17 +28,20 @@ impl Widget for AgentTabWidget<'_> {
             Constraint::Length(0)
         };
 
-        // Dynamic input height: the box grows with content (word-wrapped),
-        // capped at MAX_INPUT_ROWS, with a 1-row footer hint beneath it.
+        // Dynamic input height: the boxed composer grows with content
+        // (word-wrapped), capped at MAX_INPUT_ROWS text rows. The widget draws
+        // a rounded border box, so reserve +2 rows (top/bottom) and subtract
+        // the border columns (+ gutter) from the wrap width.
         let running = self.state.status != crate::state::AgentStatus::Idle;
-        let text_width = area.width.saturating_sub(PROMPT_GUTTER);
-        let input_rows = if running && self.state.input.is_empty() {
-            // While the agent runs, keep the composer collapsed to one row.
+        // area.width − 2 (box borders) − 2 (❯ prefix gutter).
+        let text_width = area.width.saturating_sub(PROMPT_GUTTER + 2);
+        let input_text_rows = if running && self.state.input.is_empty() {
+            // While the agent runs, keep the composer collapsed to one text row.
             1
         } else {
             self.state.input.display_height(text_width)
         };
-        let input_constraint = Constraint::Length(input_rows);
+        let input_constraint = Constraint::Length(input_text_rows + 2);
 
         let layout = Layout::default()
             .direction(Direction::Vertical)
@@ -106,7 +109,7 @@ impl Widget for AgentTabWidget<'_> {
             ts.cached_version = ts.messages_version;
         }
 
-        // ── Input area (borderless, › prompt) ──
+        // ── Input area (boxed composer, ❯ prompt) ──
         let placeholder: &str = if running {
             "agent running… (Ctrl+C to cancel)"
         } else {
@@ -115,10 +118,24 @@ impl Widget for AgentTabWidget<'_> {
                 InputMode::Input => "Type a message…",
             }
         };
-        let title = ""; // surfaced by the footer hint line instead
+        // Status label inlined in the top border (top-left), reflecting what
+        // the agent is doing right now.
+        let title: &str = match ts.status {
+            AgentStatus::Requesting => "thinking…",
+            AgentStatus::Streaming => "responding…",
+            AgentStatus::Error => "error",
+            AgentStatus::Idle => match ts.input_mode {
+                InputMode::Browse => "browse",
+                InputMode::Input => "compose",
+            },
+        };
 
         let input_widget = InputWidget {
             disabled: running,
+            // Editable only when composing (Input mode) and the agent is idle.
+            // Browse mode hides the caret and the app routes keys away from the
+            // composer in that mode (see App::handle_key).
+            editable: !running && ts.input_mode == InputMode::Input,
             title,
             placeholder,
         };

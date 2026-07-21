@@ -3,9 +3,11 @@ use ratatui::{
     layout::Rect,
     prelude::{StatefulWidget, Widget},
     style::{Color, Modifier, Style},
+    text::Line,
     widgets::Block,
 };
-use ratatui_textarea::{TextArea, WrapMode};
+use crate::xai_textarea::{TextArea, TextAreaState};
+use ratatui::widgets::StatefulWidgetRef;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -321,17 +323,25 @@ fn next_grapheme_boundary(s: &str, from: usize) -> usize {
 
 // ── Multi-line textarea input (used by the agent chat) ─────────
 
-/// Wrapper around `ratatui_textarea::TextArea` for the chat input area.
+/// Wrapper around `xai_textarea::TextArea` for the chat input area.
 ///
-/// Uses `TextArea<'static>` so the struct carries no lifetime and can be
-/// stored directly in state (e.g. inside `AgentTabState`).
+/// Wraps the xAI TextArea which provides undo/redo, mouse selection,
+/// scrollbar, and full Emacs keybindings out of the box.
 #[derive(Debug)]
 pub struct InputArea {
-    textarea: TextArea<'static>,
+    pub textarea: TextArea,
+    pub textarea_state: TextAreaState,
+    /// Placeholder text stored locally (xAI textarea has no built-in placeholder).
+    placeholder: String,
     /// Maximum grapheme clusters accepted. `None` = no cap. Defaults to
     /// [`InputArea::DEFAULT_MAX_LENGTH`] so an accidental 1 MB paste
     /// cannot produce a 1 MB outbound message.
     max_length: Option<usize>,
+    /// On-screen cursor position computed during the most recent render, or
+    /// `None` when the input is disabled. The host reads this after drawing
+    /// and calls `Frame::set_cursor_position` inside its draw closure so
+    /// ratatui emits the hardware cursor without a hide→show cycle.
+    last_cursor_pos: Option<(u16, u16)>,
 }
 
 impl InputArea {
@@ -341,17 +351,14 @@ impl InputArea {
     pub const DEFAULT_MAX_LENGTH: usize = 16_384;
 
     pub fn new() -> Self {
-        let mut textarea = TextArea::default();
-        textarea.set_placeholder_text("Type a message...");
-        textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
-        // Soft-wrap long lines at word boundaries so the composer grows in
-        // height instead of scrolling horizontally. This lets `display_height`
-        // predict how many terminal rows the buffer will occupy.
-        textarea.set_wrap_mode(WrapMode::Word);
-        // No block set — the InputWidget renders its own borderless prompt.
+        // No placeholder set — the InputWidget renders it directly when empty.
+        // Wrapping is built-in via textwrap (no WrapMode needed).
         Self {
-            textarea,
+            textarea: TextArea::new(),
+            textarea_state: TextAreaState::default(),
             max_length: Some(Self::DEFAULT_MAX_LENGTH),
+            placeholder: String::new(),
+            last_cursor_pos: None,
         }
     }
 
@@ -366,16 +373,10 @@ impl InputArea {
     /// [`MAX_INPUT_ROWS`]. `width` is the *text* width (after any prompt /
     /// gutter), so the caller subtracts the prompt gutter first.
     pub fn display_height(&self, width: u16) -> u16 {
-        let wrap_width = width.max(1) as usize;
-        let mut rows = 0usize;
-        for line in self.textarea.lines() {
-            let w = UnicodeWidthStr::width(line.as_str());
-            // ceil(w / wrap_width); an empty line still takes one row.
-            let r = w.div_ceil(wrap_width);
-            rows += r.max(1);
-        }
-        let rows = rows.max(1) as u16;
-        rows.min(Self::MAX_INPUT_ROWS)
+        self.textarea
+            .desired_height(width)
+            .max(1)
+            .min(Self::MAX_INPUT_ROWS)
     }
 
     /// Insert a newline (Shift+Enter / Alt+Enter). Respects `max_length`.
@@ -385,12 +386,12 @@ impl InputArea {
                 return;
             }
         }
-        self.textarea.insert_newline();
+        self.textarea.insert_str("\n");
     }
 
     /// Get the current text content as a single string.
     pub fn value(&self) -> String {
-        self.textarea.lines().join("\n")
+        self.textarea.text().to_string()
     }
 
     /// Check if the textarea is empty.
@@ -400,7 +401,7 @@ impl InputArea {
 
     /// Clear all content.
     pub fn clear(&mut self) {
-        self.textarea.clear();
+        self.textarea.set_text("");
     }
 
     /// Set or replace the maximum-length cap (grapheme clusters,
@@ -443,7 +444,10 @@ impl InputArea {
         }
         match key.code {
             KeyCode::Enter | KeyCode::Esc => false,
-            _ => self.textarea.input(key),
+            _ => {
+                self.textarea.input(key);
+                true
+            }
         }
     }
 
@@ -467,17 +471,36 @@ impl InputArea {
         if to_insert.is_empty() {
             return false;
         }
-        self.textarea.insert_str(&to_insert)
+        self.textarea.insert_str(&to_insert);
+        true
     }
 
     /// Set placeholder text (used for disabled / running state).
     pub fn set_placeholder(&mut self, text: &str) {
-        self.textarea.set_placeholder_text(text);
+        self.placeholder = text.to_string();
     }
 
     /// Borrow the inner textarea for rendering.
-    pub fn textarea(&self) -> &TextArea<'_> {
+    pub fn textarea(&self) -> &TextArea {
         &self.textarea
+    }
+
+    /// Borrow the textarea state for rendering.
+    pub fn textarea_state(&self) -> &TextAreaState {
+        &self.textarea_state
+    }
+
+    /// Mutable access to textarea state (needed for rendering).
+    pub fn textarea_state_mut(&mut self) -> &mut TextAreaState {
+        &mut self.textarea_state
+    }
+
+    /// On-screen cursor position from the most recent render. The caller
+    /// should call `Frame::set_cursor_position` with this (when `Some`)
+    /// inside its draw closure, so ratatui emits the hardware cursor
+    /// without a hide→show cycle that resets the blink timer.
+    pub fn last_cursor_pos(&self) -> Option<(u16, u16)> {
+        self.last_cursor_pos
     }
 }
 
@@ -495,15 +518,19 @@ pub struct InputWidgetState<'a> {
 /// Width of the borderless prompt gutter ("› " = prompt glyph + space).
 pub const PROMPT_GUTTER: u16 = 2;
 
-/// Composite widget: borderless input area with a `›` prompt, backed by
-/// ratatui-textarea. The textarea renders into the area to the right of the
-/// prompt gutter, so its cursor and word-wrapping line up beneath the prompt.
+/// Composite widget: a boxed prompt backed by the xAI `TextArea`, styled to
+/// match the Grok TUI composer.
 ///
-/// Modeled after codex's composer: no border, a single bold prompt glyph,
-/// and the textarea fills the remaining width. The parent layout passes a
-/// height computed from [`InputArea::display_height`].
+/// Renders a rounded border box (`╭─╮│╰─╯`) with a `❯` prefix on the first
+/// content row, followed by the textarea to the right of a 2-column gutter.
+/// The parent layout passes a height of `display_height(width) + 2` so the
+/// border rows are accounted for.
 pub struct InputWidget<'a> {
     pub disabled: bool,
+    /// Whether the composer is actively editable (Input mode, agent idle).
+    /// Drives hardware-cursor visibility: the caret only shows when the user
+    /// can type. Browse mode and running both hide it.
+    pub editable: bool,
     pub title: &'a str,
     pub placeholder: &'a str,
 }
@@ -512,37 +539,95 @@ impl<'a> StatefulWidget for InputWidget<'a> {
     type State = InputWidgetState<'a>;
 
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer, state: &mut Self::State) {
-        if area.width == 0 || area.height == 0 {
+        if area.width < 2 || area.height < 2 {
             return;
         }
 
-        // Render the `›` prompt at the top-left, dimmed when disabled.
+        // ── Chrome: rounded border box ──
+        // Active (idle) → cyan border; disabled (agent running) → dim gray.
+        let border_color = if self.disabled {
+            Color::DarkGray
+        } else {
+            Color::Cyan
+        };
+        // Title (status label) colour: red on error, yellow while the agent is
+        // active, dim gray when idle.
+        let title_color = if self.title == "error" {
+            Color::Red
+        } else if self.disabled {
+            Color::Yellow
+        } else {
+            Color::DarkGray
+        };
+        let block = Block::bordered()
+            .border_set(ratatui::symbols::border::ROUNDED)
+            .border_style(Style::default().fg(border_color))
+            .title_top(
+                Line::from(format!(" {} ", self.title))
+                    .style(Style::default().fg(if self.title.is_empty() {
+                        border_color
+                    } else {
+                        title_color
+                    })),
+            );
+        let content = block.inner(area);
+        block.render(area, buf);
+
+        if content.width == 0 || content.height == 0 {
+            return;
+        }
+
+        // ── Prefix: ❯ (U+276F) + space, 2 cols, in accent color ──
         let prompt_style = if self.disabled {
             Style::default().fg(Color::DarkGray)
         } else {
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
         };
-        buf.set_string(area.x, area.y, "›", prompt_style);
+        buf.set_string(content.x, content.y, "❯", prompt_style);
 
-        // Leave a 2-column gutter (prompt glyph + space) for the textarea.
-        let inner = if area.width > PROMPT_GUTTER {
+        // Textarea renders into the area right of the prefix gutter.
+        let inner = if content.width > PROMPT_GUTTER {
             Rect {
-                x: area.x + PROMPT_GUTTER,
-                width: area.width - PROMPT_GUTTER,
-                ..area
+                x: content.x + PROMPT_GUTTER,
+                width: content.width - PROMPT_GUTTER,
+                ..content
             }
         } else {
-            area
+            content
         };
 
         state.input.set_placeholder(self.placeholder);
-        state.input.textarea().render(inner, buf);
 
-        // `title` is surfaced by the parent's footer hint line; keep the
-        // field so callers can still annotate the widget without a render.
-        let _ = self.title;
+        // The hardware caret only shows when the composer is actively editable
+        // (Input mode + agent idle). Browse mode and running both hide it.
+        if !self.editable {
+            state.input.last_cursor_pos = None;
+        }
+
+        // Render placeholder directly when textarea is empty (xAI textarea has
+        // no built-in placeholder support). The cursor sits at the start of the
+        // editable row so the hardware caret appears over the first cell.
+        if state.input.is_empty() && !state.input.placeholder.is_empty() {
+            let placeholder_style = Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(ratatui::style::Modifier::ITALIC);
+            let truncated = truncate_to_width(&state.input.placeholder, inner.width as usize);
+            buf.set_string(inner.x, inner.y, &truncated, placeholder_style);
+            if self.editable {
+                state.input.last_cursor_pos = Some((inner.x, inner.y));
+            }
+        } else {
+            // StatefulWidgetRef is implemented for &TextArea, not TextArea.
+            // Split-borrow the two pub fields and call render_ref on the reference.
+            let textarea: &TextArea = &state.input.textarea;
+            let ta_state: &mut TextAreaState = &mut state.input.textarea_state;
+            textarea.render_ref(inner, buf, ta_state);
+            if self.editable {
+                // TextAreaState is Copy — query the cursor against the post-render state.
+                state.input.last_cursor_pos =
+                    textarea.cursor_pos_with_state(inner, state.input.textarea_state);
+            }
+        }
     }
 }
 
@@ -1065,8 +1150,9 @@ mod tests {
         input.insert_str("hello world");
         assert_eq!(input.display_height(40), 1);
 
-        // Force a wrap: at width 5, 11 columns wrap to ceil(11/5)=3 rows.
-        assert_eq!(input.display_height(5), 3);
+        // Force a wrap: "hello world" (11 cols) wraps at word boundaries.
+        // xAI's textwrap puts "hello" (5 cols) on row 1 and "world" on row 2.
+        assert_eq!(input.display_height(5), 2);
 
         // An explicit newline always adds a row.
         input.insert_newline();

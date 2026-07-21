@@ -679,6 +679,15 @@ impl App {
                     state: &mut self.state.agent_tab_state,
                 };
                 frame.render_widget(widget, areas[1]);
+
+                // Position the terminal hardware cursor over the chat input.
+                // The xAI TextArea renders only text; the host must place the
+                // caret itself. Calling set_cursor_position inside the draw
+                // closure makes ratatui emit show_cursor + the move without a
+                // hide→show cycle that resets the blink timer every frame.
+                if let Some((cx, cy)) = self.state.agent_tab_state.input.last_cursor_pos() {
+                    frame.set_cursor_position(ratatui::layout::Position { x: cx, y: cy });
+                }
             }
             MainTabState::ConfigTab => {
                 crate::widgets::config_widget::render_config(
