@@ -64,7 +64,10 @@ impl From<datalake::error::Error> for LdscNodeError {
 ///
 /// This is the single source of truth shared by the node's declared output
 /// port (so the DAG can validate downstream edges) and [`build_result_batch`].
-fn output_schema() -> SchemaRef {
+///
+/// Reused by downstream transform nodes (e.g. [`super::liability`]) as their
+/// typed input port schema, so only an `ldsc` h² summary can feed them.
+pub fn output_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         Field::new("h2", DataType::Float64, false),
         Field::new("h2_se", DataType::Float64, false),
@@ -181,7 +184,10 @@ pub struct LdscHsqConfig {
 impl LdscHsqConfig {
     /// Construct an [`LdscHsqConfig`].
     pub fn new(n_blocks: usize, intercept: Option<f64>) -> Self {
-        Self { n_blocks, intercept }
+        Self {
+            n_blocks,
+            intercept,
+        }
     }
 }
 
@@ -228,11 +234,7 @@ impl NodeFactory for LdscHsqNodeFactory {
         node_ctx: NodeCtx,
     ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
         let config: LdscHsqConfig = serde_json::from_value(spec)?;
-        let node = LdscHsqNode::new(
-            node_ctx.runtime_env,
-            node_ctx.iceberg_catalog,
-            config,
-        );
+        let node = LdscHsqNode::new(node_ctx.runtime_env, node_ctx.iceberg_catalog, config);
         Ok(Box::new(node))
     }
 }
@@ -307,8 +309,7 @@ impl DagNode for LdscHsqNode {
         //    catalog-independent pipeline. Splitting here lets the pipeline
         //    be exercised end-to-end against an in-memory catalog (see
         //    `tests`).
-        let ctx =
-            new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
+        let ctx = new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
 
         // TODO: Auto select LD score panel table by population
         let result = Self::run_with_ctx(&ctx, &input.data, "ukbb_eur", &self.ldsc_hsq).await?;
@@ -346,8 +347,15 @@ impl LdscHsqNode {
 
         // 2. Count the total SNPs in the LD score panel to derive M — the
         //    normalising constant in the LDSC regression.
-        let count_sql = format!(r#"SELECT COUNT(*) AS "n" FROM iceberg.ld_score.{ld_table}"#);
-        let count_df = ctx.sql(&count_sql).await.map_err(LdscNodeError::ReadBatch)?;
+        //
+        // NOTE: Rare SNP need to be filtered out (MAF < 0.05)
+        let count_sql = format!(
+            r#"SELECT COUNT(*) AS "n" FROM iceberg.ld_score.{ld_table} WHERE "AF" BETWEEN 0.05 AND 0.95"#
+        );
+        let count_df = ctx
+            .sql(&count_sql)
+            .await
+            .map_err(LdscNodeError::ReadBatch)?;
         let count_batches = count_df.collect().await.map_err(LdscNodeError::ReadBatch)?;
         let panel_count = extract_scalar_u64(&count_batches, "n")?;
         let m = vec![panel_count as f64];
@@ -413,10 +421,26 @@ fn extract_scalar_u64(batches: &[RecordBatch], col: &str) -> Result<u64, LdscNod
     }
     let dtype = arr.data_type();
     match dtype {
-        DataType::UInt64 => Ok(arr.as_any().downcast_ref::<arrow_array::UInt64Array>().unwrap().value(0)),
-        DataType::Int64 => Ok(arr.as_any().downcast_ref::<arrow_array::Int64Array>().unwrap().value(0) as u64),
-        DataType::UInt32 => Ok(arr.as_any().downcast_ref::<arrow_array::UInt32Array>().unwrap().value(0) as u64),
-        DataType::Int32 => Ok(arr.as_any().downcast_ref::<arrow_array::Int32Array>().unwrap().value(0) as u64),
+        DataType::UInt64 => Ok(arr
+            .as_any()
+            .downcast_ref::<arrow_array::UInt64Array>()
+            .unwrap()
+            .value(0)),
+        DataType::Int64 => Ok(arr
+            .as_any()
+            .downcast_ref::<arrow_array::Int64Array>()
+            .unwrap()
+            .value(0) as u64),
+        DataType::UInt32 => Ok(arr
+            .as_any()
+            .downcast_ref::<arrow_array::UInt32Array>()
+            .unwrap()
+            .value(0) as u64),
+        DataType::Int32 => Ok(arr
+            .as_any()
+            .downcast_ref::<arrow_array::Int32Array>()
+            .unwrap()
+            .value(0) as u64),
         _ => Err(LdscNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
             "extract_scalar_u64: unsupported dtype {dtype} for column '{col}'"
         )))),
@@ -712,13 +736,8 @@ mod tests {
         let z: Vec<f64> = (0..50).map(|i| (i as f64) * 0.1).collect();
         let df = ctx.read_batch(sumstats_batch(&z, &rsids)).unwrap();
 
-        let res = LdscHsqNode::run_with_ctx(
-            &ctx,
-            &df,
-            "ukbb_eur",
-            &LdscHsqConfig::new(20, None),
-        )
-        .await;
+        let res =
+            LdscHsqNode::run_with_ctx(&ctx, &df, "ukbb_eur", &LdscHsqConfig::new(20, None)).await;
         assert!(
             res.is_err(),
             "no rsid overlap must error, not silently return NaN"

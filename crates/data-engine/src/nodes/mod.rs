@@ -7,6 +7,7 @@
 pub mod echo_node;
 pub mod ldsc_hsq;
 pub mod ldsc_rg;
+pub mod liability;
 pub mod linear_regression;
 pub mod meta;
 pub mod mr;
@@ -16,6 +17,7 @@ pub mod sql_node;
 pub mod test_source;
 
 pub use echo_node::{EchoNode, EchoNodeFactory, EchoNodeSpec};
+pub use liability::{LiabilityConfig, LiabilityNode, LiabilityNodeFactory};
 pub use ldsc_hsq::{LdscHsqConfig, LdscHsqNode, LdscHsqNodeFactory};
 pub use ldsc_rg::{LdscRgConfig, LdscRgNode, LdscRgNodeFactory};
 pub use linear_regression::{LinearRegressionNode, LinearRegressionNodeFactory, LinearRegressionNodeSpec};

@@ -430,8 +430,7 @@ impl Memory {
         // Step 3: Build the summarization prompt
         let prompt_text = build_compaction_prompt(&selection.head, previous_summary);
 
-        let mut messages: Vec<Message> = vec![];
-        messages.push(Message::system(prompt_text));
+        let messages: Vec<Message> = vec![Message::system(prompt_text)];
         let response = model
             .request(messages, &Vec::<ToolDefinition>::new())
             .await?;
@@ -662,4 +661,7 @@ mod tests {
         assert!(msg.contains("</summary>"));
         assert!(msg.contains("</conversation-checkpoint>"));
     }
+
+    #[test]
+    fn assure_toolcall_toolresult_adjacent() {}
 }

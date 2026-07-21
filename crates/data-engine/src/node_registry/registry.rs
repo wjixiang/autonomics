@@ -15,8 +15,9 @@ use crate::dag::DagNode;
 use crate::nodes::meta::NodePorts;
 use crate::nodes::{
     echo_node::EchoNodeFactory, ldsc_hsq::LdscHsqNodeFactory, ldsc_rg::LdscRgNodeFactory,
-    linear_regression::LinearRegressionNodeFactory, mr::MrNodeFactory, sink::SinkNodeFactory,
-    source::SourceNodeFactory, sql_node::SqlNodeFactory, test_source::TestSourceFactory,
+    liability::LiabilityNodeFactory, linear_regression::LinearRegressionNodeFactory,
+    mr::MrNodeFactory, sink::SinkNodeFactory, source::SourceNodeFactory, sql_node::SqlNodeFactory,
+    test_source::TestSourceFactory,
 };
 
 /// Build a fresh, isolated [`SessionContext`].
@@ -117,6 +118,7 @@ impl NodeRegistry {
         registry.register(Box::new(SinkNodeFactory {}));
         registry.register(Box::new(LdscHsqNodeFactory {}));
         registry.register(Box::new(LdscRgNodeFactory {}));
+        registry.register(Box::new(LiabilityNodeFactory {}));
         registry.register(Box::new(LinearRegressionNodeFactory {}));
         registry.register(Box::new(EchoNodeFactory {}));
         registry.register(Box::new(TestSourceFactory {}));
@@ -212,6 +214,7 @@ mod tests {
             }
             "ldsc" => serde_json::json!({"n_blocks": 200}),
             "ldsc_rg" => serde_json::json!({"n_blocks": 200}),
+            "liability" => serde_json::json!({"samp_prev": 0.5, "pop_prev": 0.01}),
             "mr" => serde_json::json!({"action": 2, "method_list": ["mr_egger_regression"]}),
             "echo" => serde_json::json!({}),
             "test_source" => serde_json::json!({"dataset": "iris"}),
@@ -297,25 +300,34 @@ mod tests {
     fn node_info_ports_serialize() {
         let registry = test_registry();
 
+        // `list_nodes` deliberately exposes only `kind` + `desc`; the static
+        // port layout is served by the dedicated `get_node_ports` API. So the
+        // serializable port shape is verified there, not on `NodeInfo`.
         let serialized =
             serde_json::to_value(registry.list_nodes()).expect("NodeInfo list must serialize");
         let arr = serialized
             .as_array()
             .expect("list_nodes serializes to an array");
         assert!(!arr.is_empty(), "registry should have registered nodes");
+        for v in arr {
+            assert!(v["kind"].is_string(), "NodeInfo has a kind");
+            assert!(v["desc"].is_string(), "NodeInfo has a desc");
+            assert!(
+                v.get("ports").is_none() && v.get("schema").is_none(),
+                "NodeInfo intentionally omits ports/schema"
+            );
+        }
 
         // ldsc_rg has two typed input ports + one typed output — the strongest
-        // shape to pin down.
-        let rg = arr
-            .iter()
-            .find(|v| v["kind"] == "ldsc_rg")
-            .expect("ldsc_rg kind present");
-        let inputs = rg["ports"]["input_ports"]["ports"]
+        // shape to pin down. Serialize its port layout via get_node_ports.
+        let ports = registry.get_node_ports("ldsc_rg").expect("ldsc_rg kind present");
+        let serialized = serde_json::to_value(&ports).expect("NodePorts must serialize");
+        let inputs = serialized["input_ports"]["ports"]
             .as_array()
             .expect("input ports array");
         assert_eq!(inputs.len(), 2, "ldsc_rg declares two input ports");
         assert!(inputs[0]["schema"].is_array(), "typed port exposes schema");
-        let outputs = rg["ports"]["output_ports"]["ports"]
+        let outputs = serialized["output_ports"]["ports"]
             .as_array()
             .expect("output ports array");
         assert_eq!(outputs.len(), 1, "ldsc_rg declares one output port");
