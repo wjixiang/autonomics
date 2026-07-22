@@ -263,8 +263,8 @@ impl HttpStreamClient {
                                 // Message stop doesn't need data parsing
                                 Ok(Some(MessageStreamEvent::MessageStop))
                             }
-                            // Handle other event types: skip silently
-                            "ping" | _ => Ok(None),
+                            // Handle other event types (incl. "ping"): skip silently
+                            _ => Ok(None),
                         }
                     }
                     Err(e) => Err(AnthropicError::StreamError(
@@ -480,15 +480,16 @@ impl StreamRequestBuilder {
             transfer_encoding = transfer_encoding.as_deref().unwrap_or("(none)"),
             "post_stream: got response headers"
         );
-        if let Some(enc) = &content_encoding {
-            if enc != "identity" && !enc.is_empty() {
-                tracing::error!(
-                    content_encoding = %enc,
-                    "post_stream: server returned a compressed body despite Accept-Encoding: identity. \
-                     bytes_stream() does not auto-decompress, so SSE parsing will fail. \
-                     The upstream proxy/gateway is overriding Accept-Encoding."
-                );
-            }
+        if let Some(enc) = &content_encoding
+            && enc != "identity"
+            && !enc.is_empty()
+        {
+            tracing::error!(
+                content_encoding = %enc,
+                "post_stream: server returned a compressed body despite Accept-Encoding: identity. \
+                 bytes_stream() does not auto-decompress, so SSE parsing will fail. \
+                 The upstream proxy/gateway is overriding Accept-Encoding."
+            );
         }
 
         HttpStreamClient::from_response(response, self.config).await

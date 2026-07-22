@@ -14,6 +14,10 @@ use error::{Error, Result};
 /// Maximum characters per tool output when serializing for summarization.
 const TOOL_OUTPUT_MAX_CHARS: usize = 2_000;
 /// Maximum tokens for the LLM summary output.
+///
+/// Reserved for wiring into the compaction prompt's `max_tokens`; not yet
+/// plumbed through to the model call.
+#[allow(dead_code)]
 const SUMMARY_OUTPUT_TOKENS: u64 = 4_096;
 /// Default buffer tokens before compaction triggers.
 pub const COMPACTION_BUFFER_TOKENS: u64 = 20_000;
@@ -118,6 +122,11 @@ struct CompactionSelection {
     /// Serialized text of old messages to be summarized.
     head: String,
     /// Serialized text of recent messages to be preserved verbatim.
+    ///
+    /// Computed but not currently consumed by the compaction path (the tail
+    /// is rebuilt directly from `tail_message_start`). Kept for the planned
+    /// anchored-summary feature.
+    #[allow(dead_code)]
     recent: String,
     /// Index at which the tail starts within the flat message list.
     tail_message_start: usize,
@@ -210,10 +219,8 @@ fn serialize_messages(messages: &[Message]) -> String {
                             let input_str = serde_json::to_string(input).unwrap_or_default();
                             parts.push(format!("[Assistant tool call]: {name}({input_str})"));
                         }
-                        ContentBlock::Thinking { thinking, .. } => {
-                            if !thinking.is_empty() {
-                                parts.push(format!("[Assistant reasoning]: {thinking}"));
-                            }
+                        ContentBlock::Thinking { thinking, .. } if !thinking.is_empty() => {
+                            parts.push(format!("[Assistant reasoning]: {thinking}"));
                         }
                         _ => {}
                     }
@@ -414,15 +421,18 @@ impl Memory {
         }
     }
 
+    #[allow(dead_code)]
     fn get_last_item(&self) -> Option<&MemoryItem> {
         self.items.last()
     }
 
+    #[allow(dead_code)]
     fn add_summary_to_last_item(&mut self, summary: String) -> Result<()> {
         self.items.last_mut().ok_or(Error::EmptyMemoryItem)?.summary = Some(summary);
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn create_mem_item(&mut self) {
         self.items.push(MemoryItem::default());
     }
@@ -466,8 +476,9 @@ impl Memory {
         }
 
         // 3. Sort messages to assure toolcall and toolresult is adjacent.
-        // Providers such as Deepseek requires that each `tool_use` block must have a corresponding `tool_result` block in the next message
-        let mut sorted_messages: Vec<Message> = Vec::new();
+        // Providers such as Deepseek require that each `tool_use` block must
+        // have a corresponding `tool_result` block in the next message.
+        // TODO: implement tool_use/tool_result adjacency sort here.
 
         Ok(result)
     }
@@ -527,13 +538,6 @@ impl Memory {
         // - The current segment's messages from the tail boundary onward become the new current segment
 
         // Collect the historical messages that fall in the "tail" (recent) portion
-        let historical_count: usize = self
-            .items
-            .iter()
-            .take(self.items.len() - 1)
-            .map(|item| item.messages.len())
-            .sum();
-
         let tail_start = selection.tail_message_start;
         let recent_historical: Vec<Message> = self
             .items

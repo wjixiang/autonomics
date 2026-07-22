@@ -61,10 +61,10 @@ pub enum EventHandler {
     End(std::sync::Arc<UnitHandler>),
 
     /// Handler for connection established
-    Connect(std::sync::Arc<Box<dyn Fn() + Send + Sync>>),
+    Connect(std::sync::Arc<UnitHandler>),
 
     /// Handler for stream abort
-    Abort(std::sync::Arc<Box<dyn Fn(&AnthropicError) + Send + Sync>>),
+    Abort(std::sync::Arc<ErrorHandler>),
 }
 
 impl std::fmt::Debug for EventHandler {

@@ -337,9 +337,11 @@ fn push_numeric(col: &dyn Array, out: &mut Vec<f64>) {
     cast!(col, UInt64Array);
     cast!(col, Float32Array);
     cast!(col, Float64Array);
-    // Non-dispatched slots (e.g. Float16) fall back to NaN defensively.
-    for i in 0..col.len() {
-        out.push(if col.is_null(i) { f64::NAN } else { f64::NAN });
+    // Non-dispatched slots (e.g. Float16) fall back to NaN defensively,
+    // regardless of null state — the null/nonnull distinction is discarded
+    // for unsupported physical types.
+    for _ in 0..col.len() {
+        out.push(f64::NAN);
     }
 }
 

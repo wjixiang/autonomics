@@ -187,15 +187,6 @@ mod tests {
     use datafusion::prelude::{DataFrame, SessionContext};
     use std::sync::Arc;
 
-    /// Helper: build a `NodeCtx` from a bare `SessionContext` for unit tests.
-    fn test_node_ctx(ctx: &SessionContext) -> NodeCtx {
-        NodeCtx {
-            runtime_env: ctx.runtime_env(),
-            iceberg_catalog: None,
-            datalake: std::sync::Arc::new(datalake::Datalake::default()),
-        }
-    }
-
     /// Create a [`SessionContext`] with a simple int32 column `x` (values `[1, 2, 3]`)
     /// registered as table `"src"`, and a [`SqlNode`] wired to the given `sql` query.
     fn setup_test_node(sql: &str) -> (SessionContext, SqlNode, DataFrame) {

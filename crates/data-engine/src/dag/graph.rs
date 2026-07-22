@@ -1494,8 +1494,6 @@ mod tests {
         assert_eq!(dag.successors("a").len(), 1);
         assert_eq!(dag.predecessors("c").len(), 2);
 
-        // Validate input dataframe has been correctly assigned to port_x.
-        let node_c = dag.get_node("c").unwrap();
         dag.run(&SchedulerConfig::default()).await.unwrap();
         let output = dag.output("c").unwrap();
         dbg!(output);

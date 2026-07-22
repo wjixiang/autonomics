@@ -25,7 +25,11 @@ pub use crate::nodes::{
 /// [`DAG`] of nodes executed by an async scheduler.
 pub struct DataEngine {
     ctx: SessionContext,
+    /// Threaded through from the builder; retained for future engine-level
+    /// object-store / catalog reconfiguration but not yet read here.
+    #[allow(dead_code)]
     runtime_env: Arc<RuntimeEnv>,
+    #[allow(dead_code)]
     iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
     datalake: Option<Arc<Datalake>>,
     dag: DAG,

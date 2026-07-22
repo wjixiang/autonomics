@@ -56,14 +56,14 @@ pub fn truncate_tool_output(content: &str, config: &TruncationConfig) -> Truncat
         };
     }
 
-    let head_lines = (config.max_lines + 1) / 2;
+    let head_lines = config.max_lines.div_ceil(2);
     let tail_lines = config.max_lines / 2;
 
     let mut result = String::new();
 
     if lines.len() <= config.max_lines {
         // Only byte limit exceeded — split bytes
-        let byte_head = (config.max_bytes + 1) / 2;
+        let byte_head = config.max_bytes.div_ceil(2);
         let byte_tail = config.max_bytes / 2;
 
         let total = content.len();
@@ -105,7 +105,7 @@ pub fn truncate_tool_output(content: &str, config: &TruncationConfig) -> Truncat
 
         // Also enforce byte limit on the result
         if result.len() > config.max_bytes {
-            let byte_head = (config.max_bytes + 1) / 2;
+            let byte_head = config.max_bytes.div_ceil(2);
             let byte_tail = config.max_bytes / 2;
             let total = result.len();
             let head = &result[..byte_head.min(result.len())];

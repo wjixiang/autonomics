@@ -14,6 +14,9 @@ use crate::storage::{AgentSnapshot, AgentSnapshotStorage, AgentSnapshotStorageEr
 /// dispatched via `tokio::task::spawn_blocking` so the async runtime
 /// is never blocked by I/O.
 pub struct SqliteAgentStorage {
+    /// Path the database was opened at. Retained for diagnostics / future
+    /// path-based operations; not currently read after construction.
+    #[allow(dead_code)]
     db_path: String,
     conn: Arc<Mutex<Connection>>,
 }

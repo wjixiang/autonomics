@@ -303,7 +303,9 @@ impl MessageStream {
                                     Err(e) => {
                                         tracing::error!(error = %e, "reconnect attempt failed");
                                         Self::fire_error(&event_handlers_bg, &errored_bg, &e);
-                                        let _ = completion_sender.take().map(|s| s.send(Err(e)));
+                                        if let Some(s) = completion_sender.take() {
+                                            let _ = s.send(Err(e));
+                                        }
                                         break 'outer;
                                     }
                                 }
@@ -316,7 +318,9 @@ impl MessageStream {
                                 crate::types::AnthropicError::Timeout
                             };
                             Self::fire_error(&event_handlers_bg, &errored_bg, &err);
-                            let _ = completion_sender.take().map(|s| s.send(Err(err)));
+                            if let Some(s) = completion_sender.take() {
+                                let _ = s.send(Err(err));
+                            }
                             break 'outer;
                         }
                         Ok(Some(Ok(event))) => {
@@ -353,7 +357,9 @@ impl MessageStream {
                                         "Stream ended without message".to_string(),
                                     )
                                 });
-                                let _ = completion_sender.take().map(|s| s.send(result));
+                                if let Some(s) = completion_sender.take() {
+                                    let _ = s.send(result);
+                                }
                                 break 'outer;
                             }
                         }
@@ -393,15 +399,17 @@ impl MessageStream {
                                             &errored_bg,
                                             &reconnect_err,
                                         );
-                                        let _ = completion_sender
-                                            .take()
-                                            .map(|s| s.send(Err(reconnect_err)));
+                                        if let Some(s) = completion_sender.take() {
+                                            let _ = s.send(Err(reconnect_err));
+                                        }
                                         break 'outer;
                                     }
                                 }
                             }
                             Self::fire_error(&event_handlers_bg, &errored_bg, &e);
-                            let _ = completion_sender.take().map(|s| s.send(Err(e)));
+                            if let Some(s) = completion_sender.take() {
+                                let _ = s.send(Err(e));
+                            }
                             break 'outer;
                         }
                         Ok(None) => {
@@ -755,12 +763,12 @@ impl MessageStream {
                     // Finalize a streaming tool_use block: convert the
                     // accumulated partial-JSON string into a real Value
                     // so downstream consumers see structured input.
-                    if let Some(ContentBlock::ToolUse { input, .. }) = msg.content.get_mut(*index) {
-                        if let serde_json::Value::String(accumulated) = input {
-                            *input = serde_json::from_str(accumulated).unwrap_or_else(|_| {
-                                serde_json::Value::String(std::mem::take(accumulated))
-                            });
-                        }
+                    if let Some(ContentBlock::ToolUse { input, .. }) = msg.content.get_mut(*index)
+                        && let serde_json::Value::String(accumulated) = input
+                    {
+                        *input = serde_json::from_str(accumulated).unwrap_or_else(|_| {
+                            serde_json::Value::String(std::mem::take(accumulated))
+                        });
                     }
                 }
                 MessageStreamEvent::MessageDelta { delta, usage } => {
@@ -891,24 +899,25 @@ impl MessageStream {
 
         // Every event fans out to raw stream-event subscribers.
         for handler in &stream_handlers {
-            if let EventHandler::StreamEvent(cb) = handler {
-                if let Some(msg) = &current_snapshot {
-                    cb(event, msg);
-                }
+            if let EventHandler::StreamEvent(cb) = handler
+                && let Some(msg) = &current_snapshot
+            {
+                cb(event, msg);
             }
         }
 
         match event {
-            MessageStreamEvent::ContentBlockDelta { delta, .. } => {
-                if let ContentBlockDelta::TextDelta { text } = delta {
-                    let snapshot = current_snapshot
-                        .as_ref()
-                        .map(Self::accumulated_text)
-                        .unwrap_or_default();
-                    for handler in &text_handlers {
-                        if let EventHandler::Text(cb) = handler {
-                            cb(text, &snapshot);
-                        }
+            MessageStreamEvent::ContentBlockDelta {
+                delta: ContentBlockDelta::TextDelta { text },
+                ..
+            } => {
+                let snapshot = current_snapshot
+                    .as_ref()
+                    .map(Self::accumulated_text)
+                    .unwrap_or_default();
+                for handler in &text_handlers {
+                    if let EventHandler::Text(cb) = handler {
+                        cb(text, &snapshot);
                     }
                 }
             }
@@ -1108,12 +1117,11 @@ mod tests {
                 // connection close marks the end of the body, which is
                 // the path we want to exercise (eventsource-stream
                 // converts the close into a clean `None`).
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\n\
+                let response = "HTTP/1.1 200 OK\r\n\
                      content-type: text/event-stream\r\n\
                      connection: close\r\n\
                      \r\n"
-                );
+                    .to_string();
                 let _ = sock.write_all(response.as_bytes()).await;
                 let _ = sock.write_all(reply).await;
                 let _ = sock.shutdown().await;
@@ -1136,12 +1144,11 @@ mod tests {
             if let Ok((mut sock, _)) = listener.accept().await {
                 let mut buf = vec![0u8; 4096];
                 let _ = sock.read(&mut buf).await;
-                let headers = format!(
-                    "HTTP/1.1 200 OK\r\n\
+                let headers = "HTTP/1.1 200 OK\r\n\
                      content-type: text/event-stream\r\n\
                      connection: close\r\n\
                      \r\n"
-                );
+                    .to_string();
                 let _ = sock.write_all(headers.as_bytes()).await;
                 // Sleep "forever" from the test's perspective — the
                 // test's tokio clock is paused, so this would normally
@@ -1269,12 +1276,11 @@ data: {\"type\":\"message_stop\"}\r\n\
             if let Ok((mut sock, _)) = listener.accept().await {
                 let mut buf = vec![0u8; 4096];
                 let _ = sock.read(&mut buf).await;
-                let headers = format!(
-                    "HTTP/1.1 200 OK\r\n\
+                let headers = "HTTP/1.1 200 OK\r\n\
                      content-type: text/event-stream\r\n\
                      connection: close\r\n\
                      \r\n"
-                );
+                    .to_string();
                 let _ = sock.write_all(headers.as_bytes()).await;
                 let _ = sock.write_all(prefix).await;
                 // Hold the socket open without closing; the test's

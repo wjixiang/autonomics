@@ -326,7 +326,7 @@ mod tests {
             .find(|e| {
                 e["name"]
                     .as_str()
-                    .map_or(false, |n| n.contains("sized.txt"))
+                    .is_some_and(|n| n.contains("sized.txt"))
             })
             .expect("expected sized.txt entry");
         assert_eq!(file_entry["size"].as_u64().unwrap(), 11); // "hello world"
@@ -353,9 +353,9 @@ mod tests {
         // File entry — is_dir = false
         let file = entries
             .iter()
-            .find(|e| e["name"].as_str().map_or(false, |n| n.contains("file.txt")))
+            .find(|e| e["name"].as_str().is_some_and(|n| n.contains("file.txt")))
             .expect("expected file.txt entry");
-        assert_eq!(file["is_dir"].as_bool().unwrap(), false);
+        assert!(!file["is_dir"].as_bool().unwrap());
 
         // At least one directory entry (e.g. "with_dir/") — is_dir = true, size = 0.
         let dir = entries
