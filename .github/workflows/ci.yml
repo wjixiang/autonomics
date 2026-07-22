@@ -15,15 +15,18 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # The repo's .cargo/config.toml pins a host-local target dir (/mnt/disk2/target)
-  # that does not exist on CI runners. Override it per-runner.
-  CARGO_TARGET_DIR: ${{ runner.temp }}/target
   RUST_BACKTRACE: 1
+  # NOTE: CARGO_TARGET_DIR is set per-job below, not here. The repo's
+  # .cargo/config.toml pins a host-local target dir (/mnt/disk2/target) that
+  # does not exist on CI runners; overriding with runner.temp must happen at
+  # job scope because the `runner` context is not available at workflow scope.
 
 jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/target
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85
@@ -34,6 +37,8 @@ jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/target
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85
@@ -45,6 +50,8 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/target
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85

@@ -6,7 +6,4 @@ requires-python = ">=3.13"
 dependencies = ["pyiceberg>=0.11.1", "pyarrow>=18.0.0", "boto3>=1.43.52"]
 
 [tool.uv.workspace]
-members = ["1000genome"]
-
-[tool.uv.sources]
-boto3 = { workspace = true }
+members = ["thousand_genomes"]
