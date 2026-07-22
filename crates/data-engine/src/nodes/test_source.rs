@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use datafusion::common::HashMap;
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -114,14 +114,17 @@ impl DagNode for TestSourceNode {
         self
     }
 
-    async fn execute(&mut self, _inputs: &[crate::dag::NodeInput]) -> Result<PortOutputs, DagError> {
+    async fn execute(
+        &mut self,
+        _inputs: &[crate::dag::NodeInput],
+    ) -> Result<PortOutputs, DagError> {
         let builtin = match self.dataset_name.as_str() {
             "iris" => BuiltinDataset::Iris,
             other => {
                 return Err(TestSourceError::UnknownDataset {
                     name: other.to_string(),
                 }
-                .into())
+                .into());
             }
         };
 

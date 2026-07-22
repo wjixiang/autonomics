@@ -212,10 +212,7 @@ fn resolve_ref<'a>(schema: &'a Value, root: &'a Value) -> &'a Value {
 fn schema_type(schema: &Value) -> Option<&str> {
     match schema.get("type")? {
         Value::String(s) => Some(s.as_str()),
-        Value::Array(arr) => arr
-            .iter()
-            .filter_map(|v| v.as_str())
-            .find(|t| *t != "null"),
+        Value::Array(arr) => arr.iter().filter_map(|v| v.as_str()).find(|t| *t != "null"),
         _ => None,
     }
 }
@@ -243,10 +240,16 @@ mod tests {
     /// integer-ness, so `1` and `1.0` must compare equal — both deserialize to
     /// the same `f64`).
     fn assert_num_array(val: &serde_json::Value, expected: &[f64]) {
-        let arr = val.as_array().unwrap_or_else(|| panic!("not an array: {val}"));
+        let arr = val
+            .as_array()
+            .unwrap_or_else(|| panic!("not an array: {val}"));
         assert_eq!(arr.len(), expected.len(), "length mismatch for {val}");
         for (got, want) in arr.iter().zip(expected) {
-            assert_eq!(got.as_f64().unwrap_or_else(|| panic!("not a number: {got}")), *want);
+            assert_eq!(
+                got.as_f64()
+                    .unwrap_or_else(|| panic!("not a number: {got}")),
+                *want
+            );
         }
     }
 

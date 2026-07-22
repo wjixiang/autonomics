@@ -39,10 +39,9 @@ impl ToolFunction for ListNodeFactoriesTool {
             .await
             .map_err(ExecError::from)?;
 
-        let content = serde_json::to_value(&nodes)
-            .map_err(|e| ToolError::ExecutionFailed {
-                source: Box::new(e),
-            })?;
+        let content = serde_json::to_value(&nodes).map_err(|e| ToolError::ExecutionFailed {
+            source: Box::new(e),
+        })?;
 
         Ok(ToolResult::success_json(content))
     }

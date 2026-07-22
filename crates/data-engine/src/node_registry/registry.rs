@@ -320,7 +320,9 @@ mod tests {
 
         // ldsc_rg has two typed input ports + one typed output — the strongest
         // shape to pin down. Serialize its port layout via get_node_ports.
-        let ports = registry.get_node_ports("ldsc_rg").expect("ldsc_rg kind present");
+        let ports = registry
+            .get_node_ports("ldsc_rg")
+            .expect("ldsc_rg kind present");
         let serialized = serde_json::to_value(&ports).expect("NodePorts must serialize");
         let inputs = serialized["input_ports"]["ports"]
             .as_array()

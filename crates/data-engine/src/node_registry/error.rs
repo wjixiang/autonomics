@@ -65,7 +65,8 @@ impl Error {
         schema: &serde_json::Value,
         source: serde_json::Error,
     ) -> Self {
-        let schema_pretty = serde_json::to_string_pretty(schema).unwrap_or_else(|_| schema.to_string());
+        let schema_pretty =
+            serde_json::to_string_pretty(schema).unwrap_or_else(|_| schema.to_string());
         Self::SpecRejection {
             kind: kind.to_string(),
             reason: humanize_serde_error(&source.to_string()),
@@ -171,7 +172,10 @@ mod tests {
         let err = Error::spec_rejection_from("ldsc_rg", &schema, serde_err);
         let msg = format!("{err}");
 
-        assert!(msg.contains("`ldsc_rg`"), "message must name the kind: {msg}");
+        assert!(
+            msg.contains("`ldsc_rg`"),
+            "message must name the kind: {msg}"
+        );
         assert!(
             msg.contains("got a JSON object, expected a JSON array"),
             "message must include the humanized reason: {msg}"

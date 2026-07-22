@@ -162,9 +162,7 @@ impl ToolResult {
     pub fn from_pending_task(tool_use_id: &str) -> Self {
         Self {
             tool_use_id: tool_use_id.to_string(),
-            content: ToolResultContent::Text(format!(
-                "Task '{tool_use_id}' is running in backend"
-            )),
+            content: ToolResultContent::Text(format!("Task '{tool_use_id}' is running in backend")),
             is_error: None,
         }
     }
@@ -368,9 +366,10 @@ pub fn tool_definition_from_schema<T: JsonSchema>(
                 continue;
             };
             if let Some(desc) = &ov.description
-                && !desc.is_empty() {
-                    prop.insert("description".to_string(), Value::String(desc.clone()));
-                }
+                && !desc.is_empty()
+            {
+                prop.insert("description".to_string(), Value::String(desc.clone()));
+            }
             if let Some(default) = &ov.default {
                 prop.insert("default".to_string(), default.clone());
             }

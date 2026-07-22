@@ -1,11 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use datafusion::{
-    catalog::CatalogProvider,
-    common::HashMap,
-    execution::runtime_env::RuntimeEnv,
-};
+use datafusion::{catalog::CatalogProvider, common::HashMap, execution::runtime_env::RuntimeEnv};
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use thiserror::Error;
@@ -60,7 +56,9 @@ pub struct SqlNodeFactory {}
 /// a variadic input (input count not fixed, so the scheduler skips
 /// over/under-connectivity validation).
 fn port_layout() -> NodePorts {
-    NodePorts::new().add_output_port(None).set_fixed_input(false)
+    NodePorts::new()
+        .add_output_port(None)
+        .set_fixed_input(false)
 }
 
 impl NodeFactory for SqlNodeFactory {
@@ -93,7 +91,11 @@ impl NodeFactory for SqlNodeFactory {
         node_ctx: NodeCtx,
     ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
         let node_spec: SqlNodeSpec = serde_json::from_value(spec)?;
-        let sql_node = SqlNode::new(node_spec.sql_query, node_ctx.runtime_env, node_ctx.iceberg_catalog);
+        let sql_node = SqlNode::new(
+            node_spec.sql_query,
+            node_ctx.runtime_env,
+            node_ctx.iceberg_catalog,
+        );
         Ok(Box::new(sql_node))
     }
 }
@@ -161,8 +163,7 @@ impl DagNode for SqlNode {
 
         // Build a fresh, isolated context per execution — no shared CatalogList,
         // so concurrent SqlNodes never collide on `port_N` registrations.
-        let ctx =
-            new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
+        let ctx = new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
 
         for inp in inputs {
             // Register each upstream DataFrame under `port_{port}`.
@@ -350,11 +351,10 @@ mod tests {
         let ctx = SessionContext::new();
 
         // --- upstream node A: produces an `id, name` table ---
-        let a_schema =
-            Arc::new(Schema::new(vec![
-                Field::new("id", DataType::Int32, false),
-                Field::new("name", DataType::Utf8, false),
-            ]));
+        let a_schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("name", DataType::Utf8, false),
+        ]));
         let a_batch = RecordBatch::try_new(
             a_schema,
             vec![
@@ -365,19 +365,25 @@ mod tests {
         .unwrap();
         let a_df = ctx.read_batch(a_batch).unwrap();
 
-        let mut node_a = SqlNode::new("SELECT * FROM port_0 WHERE id <= 2".into(), ctx.runtime_env(), None);
+        let mut node_a = SqlNode::new(
+            "SELECT * FROM port_0 WHERE id <= 2".into(),
+            ctx.runtime_env(),
+            None,
+        );
         let a_out = node_a
-            .execute(&[NodeInput { port: 0, data: a_df }])
+            .execute(&[NodeInput {
+                port: 0,
+                data: a_df,
+            }])
             .await
             .unwrap();
         let a_result: DataFrame = a_out.get(&0).unwrap().clone();
 
         // --- upstream node B: produces an `id, score` table ---
-        let b_schema =
-            Arc::new(Schema::new(vec![
-                Field::new("id", DataType::Int32, false),
-                Field::new("score", DataType::Int32, false),
-            ]));
+        let b_schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, false),
+            Field::new("score", DataType::Int32, false),
+        ]));
         let b_batch = RecordBatch::try_new(
             b_schema,
             vec![
@@ -388,9 +394,16 @@ mod tests {
         .unwrap();
         let b_df = ctx.read_batch(b_batch).unwrap();
 
-        let mut node_b = SqlNode::new("SELECT * FROM port_0 WHERE score > 80".into(), ctx.runtime_env(), None);
+        let mut node_b = SqlNode::new(
+            "SELECT * FROM port_0 WHERE score > 80".into(),
+            ctx.runtime_env(),
+            None,
+        );
         let b_out = node_b
-            .execute(&[NodeInput { port: 0, data: b_df }])
+            .execute(&[NodeInput {
+                port: 0,
+                data: b_df,
+            }])
             .await
             .unwrap();
         let b_result: DataFrame = b_out.get(&0).unwrap().clone();
@@ -426,26 +439,14 @@ mod tests {
         // JOIN on id yields both rows.
         assert_eq!(rb.num_rows(), 2);
 
-        let ids = rb
-            .column(0)
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .unwrap();
+        let ids = rb.column(0).as_any().downcast_ref::<Int32Array>().unwrap();
         assert_eq!(ids.values(), &[1, 2]);
 
-        let names = rb
-            .column(1)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
+        let names = rb.column(1).as_any().downcast_ref::<StringArray>().unwrap();
         assert_eq!(names.value(0), "Alice");
         assert_eq!(names.value(1), "Bob");
 
-        let scores = rb
-            .column(2)
-            .as_any()
-            .downcast_ref::<Int32Array>()
-            .unwrap();
+        let scores = rb.column(2).as_any().downcast_ref::<Int32Array>().unwrap();
         assert_eq!(scores.values(), &[90, 85]);
     }
 }

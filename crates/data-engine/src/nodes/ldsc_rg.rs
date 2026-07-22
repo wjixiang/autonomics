@@ -257,11 +257,7 @@ impl NodeFactory for LdscRgNodeFactory {
         node_ctx: NodeCtx,
     ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
         let config: LdscRgConfig = serde_json::from_value(spec)?;
-        let node = LdscRgNode::new(
-            node_ctx.runtime_env,
-            node_ctx.iceberg_catalog,
-            config,
-        );
+        let node = LdscRgNode::new(node_ctx.runtime_env, node_ctx.iceberg_catalog, config);
         Ok(Box::new(node))
     }
 }
@@ -353,8 +349,7 @@ impl DagNode for LdscRgNode {
         //    catalog-independent pipeline. Splitting here lets the pipeline be
         //    exercised end-to-end against an in-memory catalog (see
         //    `tests::run_with_test_catalog`).
-        let ctx =
-            new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
+        let ctx = new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
 
         // TODO: Auto select LD score panel table by population
         let (rg, n_snp) =
@@ -583,9 +578,11 @@ async fn count_panel_snp(
     let sql = format!(r#"SELECT COUNT(*) AS "n" FROM iceberg.ld_score.{ld_table}"#);
     let df = ctx.sql(&sql).await.map_err(LdscRgNodeError::ReadBatch)?;
     let batches = df.collect().await.map_err(LdscRgNodeError::ReadBatch)?;
-    let batch = batches.first().ok_or(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
-        "count_panel_snp: no batches returned".into(),
-    )))?;
+    let batch = batches
+        .first()
+        .ok_or(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+            "count_panel_snp: no batches returned".into(),
+        )))?;
     let idx = batch.schema().index_of("n").map_err(|_| {
         LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
             "count_panel_snp: missing column 'n'".into(),
@@ -594,13 +591,31 @@ async fn count_panel_snp(
     let col = batch.column(idx);
     let dtype = col.data_type();
     let n = match dtype {
-        DataType::UInt64 => col.as_any().downcast_ref::<arrow_array::UInt64Array>().unwrap().value(0) as usize,
-        DataType::Int64 => col.as_any().downcast_ref::<arrow_array::Int64Array>().unwrap().value(0) as usize,
-        DataType::UInt32 => col.as_any().downcast_ref::<arrow_array::UInt32Array>().unwrap().value(0) as usize,
-        DataType::Int32 => col.as_any().downcast_ref::<arrow_array::Int32Array>().unwrap().value(0) as usize,
-        _ => return Err(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(format!(
-            "count_panel_snp: unsupported dtype {dtype}"
-        )))),
+        DataType::UInt64 => col
+            .as_any()
+            .downcast_ref::<arrow_array::UInt64Array>()
+            .unwrap()
+            .value(0) as usize,
+        DataType::Int64 => col
+            .as_any()
+            .downcast_ref::<arrow_array::Int64Array>()
+            .unwrap()
+            .value(0) as usize,
+        DataType::UInt32 => col
+            .as_any()
+            .downcast_ref::<arrow_array::UInt32Array>()
+            .unwrap()
+            .value(0) as usize,
+        DataType::Int32 => col
+            .as_any()
+            .downcast_ref::<arrow_array::Int32Array>()
+            .unwrap()
+            .value(0) as usize,
+        _ => {
+            return Err(LdscRgNodeError::Ldsc(ldsc::LdscError::InvalidInput(
+                format!("count_panel_snp: unsupported dtype {dtype}"),
+            )));
+        }
     };
     Ok(n)
 }
@@ -1010,11 +1025,8 @@ mod tests {
     /// A missing input port must surface a clear error before any catalog work.
     #[tokio::test]
     async fn e2e_missing_input_yields_error() {
-        let mut node = LdscRgNode::new(
-            SessionContext::new().runtime_env(),
-            None,
-            constrained_cfg(),
-        );
+        let mut node =
+            LdscRgNode::new(SessionContext::new().runtime_env(), None, constrained_cfg());
         let batch = sumstats_batch(
             &[1.0, 2.0, 3.0],
             &["rs1".into(), "rs2".into(), "rs3".into()],

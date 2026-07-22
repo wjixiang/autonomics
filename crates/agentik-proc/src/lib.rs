@@ -1,8 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{ToTokens, quote};
-use syn::{
-    Expr, ExprLit, Fields, Ident, ItemStruct, Lit, LitStr, Meta, Token, parse::Parse,
-};
+use syn::{Expr, ExprLit, Fields, Ident, ItemStruct, Lit, LitStr, Meta, Token, parse::Parse};
 
 /// Per-field metadata collected at macro expansion time.
 struct FieldInfo {
@@ -133,13 +131,16 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
         .map(|a| a.meta.to_token_stream().to_string())
         .collect::<String>();
     if !derives_str.contains("Serialize") {
-        input
-            .attrs
-            .insert(0, syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]));
+        input.attrs.insert(
+            0,
+            syn::parse_quote!(#[derive(serde::Serialize, serde::Deserialize)]),
+        );
     }
     // 注入 JsonSchema（若尚不存在）
     if !derives_str.contains("JsonSchema") {
-        input.attrs.insert(0, syn::parse_quote!(#[derive(schemars::JsonSchema)]));
+        input
+            .attrs
+            .insert(0, syn::parse_quote!(#[derive(schemars::JsonSchema)]));
     }
 
     // 生成 impl ToolInput

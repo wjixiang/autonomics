@@ -1,6 +1,6 @@
-use crate::model::model_info::ModelInfoBuilder;
 use crate::model::ModelInfo;
 use crate::model::ProviderType;
+use crate::model::model_info::ModelInfoBuilder;
 use crate::provider::ProviderPreset;
 
 pub const MODEL_MINIMAX_M2_7: &str = "MiniMax-M2.7";
@@ -30,10 +30,12 @@ impl MinimaxProvider {
     }
 
     fn model_definitions() -> Vec<ModelInfo> {
-        vec![ModelInfoBuilder::new(MODEL_MINIMAX_M2_7)
-            .context(1_000_000, 1000)
-            .capabilities(true, true, true, true)
-            .pricing(4.0, 16.0)
-            .build()]
+        vec![
+            ModelInfoBuilder::new(MODEL_MINIMAX_M2_7)
+                .context(1_000_000, 1000)
+                .capabilities(true, true, true, true)
+                .pricing(4.0, 16.0)
+                .build(),
+        ]
     }
 }

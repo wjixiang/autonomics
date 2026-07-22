@@ -1,6 +1,6 @@
-use crate::model::model_info::ModelInfoBuilder;
 use crate::model::ModelInfo;
 use crate::model::ProviderType;
+use crate::model::model_info::ModelInfoBuilder;
 use crate::provider::ProviderPreset;
 
 pub const MODEL_MIMO_V2_5_PRO: &str = "mimo-v2.5-pro";

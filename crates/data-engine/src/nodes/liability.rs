@@ -80,9 +80,17 @@ const H2_SE_COL: &str = "h2_se";
 /// `h2_liab` and `h2_se_liab` (Float64, non-nullable — `h2`/`h2_se` are
 /// non-nullable upstream and the conversion factor is finite for valid `P`/`K`).
 pub fn output_schema() -> SchemaRef {
-    let mut fields: Vec<Arc<Field>> = super::ldsc_hsq::output_schema().fields().iter().cloned().collect();
+    let mut fields: Vec<Arc<Field>> = super::ldsc_hsq::output_schema()
+        .fields()
+        .iter()
+        .cloned()
+        .collect();
     fields.push(Arc::new(Field::new(H2_LIAB_COL, DataType::Float64, false)));
-    fields.push(Arc::new(Field::new(H2_SE_LIAB_COL, DataType::Float64, false)));
+    fields.push(Arc::new(Field::new(
+        H2_SE_LIAB_COL,
+        DataType::Float64,
+        false,
+    )));
     Arc::new(Schema::new(fields))
 }
 
@@ -342,10 +350,7 @@ mod tests {
         let c = node.conversion_factor().unwrap();
         // Matches the `h2_obs_to_liab_scz` golden value from `ldsc::regress`
         // to within the precision of the ported `norm_isf` / `norm_pdf`.
-        assert!(
-            (c - 0.551907298063).abs() < 1e-6,
-            "c = {c}"
-        );
+        assert!((c - 0.551907298063).abs() < 1e-6, "c = {c}");
     }
 
     /// h² and its SE are both scaled by `c`; every upstream column survives
@@ -377,7 +382,10 @@ mod tests {
             .unwrap()
             .value(0);
         assert!((h2_liab - c * h2_obs).abs() < 1e-12, "h2_liab = {h2_liab}");
-        assert!((h2_se_liab - c * h2_se_obs).abs() < 1e-12, "h2_se_liab = {h2_se_liab}");
+        assert!(
+            (h2_se_liab - c * h2_se_obs).abs() < 1e-12,
+            "h2_se_liab = {h2_se_liab}"
+        );
 
         // Observed-scale h2 / h2_se and the χ²-scale columns are untouched.
         assert_eq!(b.schema(), output_schema());

@@ -17,10 +17,12 @@ pub mod sql_node;
 pub mod test_source;
 
 pub use echo_node::{EchoNode, EchoNodeFactory, EchoNodeSpec};
-pub use liability::{LiabilityConfig, LiabilityNode, LiabilityNodeFactory};
 pub use ldsc_hsq::{LdscHsqConfig, LdscHsqNode, LdscHsqNodeFactory};
 pub use ldsc_rg::{LdscRgConfig, LdscRgNode, LdscRgNodeFactory};
-pub use linear_regression::{LinearRegressionNode, LinearRegressionNodeFactory, LinearRegressionNodeSpec};
+pub use liability::{LiabilityConfig, LiabilityNode, LiabilityNodeFactory};
+pub use linear_regression::{
+    LinearRegressionNode, LinearRegressionNodeFactory, LinearRegressionNodeSpec,
+};
 pub use meta::{DEFAULT_PORT, DagNode, NodeId, NodeInput, NodePorts, Port};
 pub use mr::{MrNode, MrNodeFactory, MrNodeSpec, MrParameters};
 pub use sink::{Sink, SinkMode, SinkNode, SinkNodeFactory, SinkNodeSpec, WriteFormat};

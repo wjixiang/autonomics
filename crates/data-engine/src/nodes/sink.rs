@@ -19,7 +19,7 @@ use datafusion::{
 use datalake::Datalake;
 use iceberg::arrow::arrow_schema_to_schema_auto_assign_ids;
 use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -309,14 +309,16 @@ impl NodeFactory for SinkNodeFactory {
     ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
         let node_spec: SinkNodeSpec = serde_json::from_value(spec)?;
         let (sink, mode) = match node_spec {
-            SinkNodeSpec::File { path, format, mode } => {
-                (Sink::File { path, format }, mode)
-            }
-            SinkNodeSpec::Iceberg { ident, mode } => {
-                (Sink::Iceberg { ident }, mode)
-            }
+            SinkNodeSpec::File { path, format, mode } => (Sink::File { path, format }, mode),
+            SinkNodeSpec::Iceberg { ident, mode } => (Sink::Iceberg { ident }, mode),
         };
-        let node = SinkNode::new(sink, mode, node_ctx.runtime_env, node_ctx.iceberg_catalog, node_ctx.datalake);
+        let node = SinkNode::new(
+            sink,
+            mode,
+            node_ctx.runtime_env,
+            node_ctx.iceberg_catalog,
+            node_ctx.datalake,
+        );
         Ok(Box::new(node))
     }
 }
@@ -471,17 +473,14 @@ impl DagNode for SinkNode {
                     .get_provider()
                     .await
                     .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?;
-                let ctx = new_isolated_ctx(
-                    self.runtime_env.clone(),
-                    Some(Arc::new(fresh_provider)),
-                );
+                let ctx =
+                    new_isolated_ctx(self.runtime_env.clone(), Some(Arc::new(fresh_provider)));
 
                 // 4. Register the upstream DataFrame as a temp view and INSERT.
                 let src_name = format!("__sink_src_{:x}", std::process::id());
                 let _ = ctx.deregister_table(&src_name);
                 let view = df.into_view();
-                ctx
-                    .register_table(&src_name, view)
+                ctx.register_table(&src_name, view)
                     .map_err(|e| SinkError::Write {
                         path: format!("iceberg://{ident}"),
                         source: e,
@@ -496,8 +495,7 @@ impl DagNode for SinkNode {
                 let fqn = parts.join(".");
 
                 let sql = format!("INSERT INTO {fqn} SELECT * FROM {src_name}");
-                ctx
-                    .sql(&sql)
+                ctx.sql(&sql)
                     .await
                     .map_err(|e| SinkError::Write {
                         path: format!("iceberg://{ident}"),

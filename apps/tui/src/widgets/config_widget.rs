@@ -311,16 +311,35 @@ fn yn(b: bool) -> &'static str {
 }
 
 fn render_field_line(row: Rect, label: &str, input: &InputState, focused: bool, buf: &mut Buffer) {
-    let _ = render_field_line_impl(row, label, input.value(), input.cursor(), focused, None, buf);
+    let _ = render_field_line_impl(
+        row,
+        label,
+        input.value(),
+        input.cursor(),
+        focused,
+        None,
+        buf,
+    );
 }
 
 /// Like [`render_field_line`] but replaces the displayed value with bullet characters
 /// to hide sensitive content (e.g. API keys).  The underlying value and cursor are
 /// unchanged — only the visual representation is masked.
-fn render_masked_field_line(row: Rect, label: &str, input: &InputState, focused: bool, buf: &mut Buffer) {
+fn render_masked_field_line(
+    row: Rect,
+    label: &str,
+    input: &InputState,
+    focused: bool,
+    buf: &mut Buffer,
+) {
     let value = input.value();
-    let graphemes_before = unicode_segmentation::UnicodeSegmentation::graphemes(&value[..input.cursor().min(value.len())], true).count();
-    let mask = "•".repeat(unicode_segmentation::UnicodeSegmentation::graphemes(value, true).count());
+    let graphemes_before = unicode_segmentation::UnicodeSegmentation::graphemes(
+        &value[..input.cursor().min(value.len())],
+        true,
+    )
+    .count();
+    let mask =
+        "•".repeat(unicode_segmentation::UnicodeSegmentation::graphemes(value, true).count());
     // Map the grapheme-aligned cursor to a byte offset in the mask string.
     let mask_cursor = graphemes_before * "•".len();
     render_field_line_impl(row, label, value, mask_cursor, focused, Some(&mask), buf);
@@ -371,7 +390,10 @@ fn render_field_line_impl(
                     .add_modifier(Modifier::SLOW_BLINK),
             ));
             if !after.is_empty() {
-                spans.push(Span::styled(after.to_string(), Style::default().fg(Color::White)));
+                spans.push(Span::styled(
+                    after.to_string(),
+                    Style::default().fg(Color::White),
+                ));
             }
         } else {
             spans.push(Span::styled(

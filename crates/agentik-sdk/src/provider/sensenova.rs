@@ -1,6 +1,6 @@
-use crate::model::model_info::ModelInfoBuilder;
 use crate::model::ModelInfo;
 use crate::model::ProviderType;
+use crate::model::model_info::ModelInfoBuilder;
 use crate::provider::ProviderPreset;
 
 pub const MODEL_SENSENOVA_6_7_FLASH_LITE: &str = "sensenova-6.7-flash-lite";

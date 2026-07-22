@@ -1,4 +1,6 @@
+use crate::xai_textarea::{TextArea, TextAreaState};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::widgets::StatefulWidgetRef;
 use ratatui::{
     layout::Rect,
     prelude::{StatefulWidget, Widget},
@@ -6,8 +8,6 @@ use ratatui::{
     text::Line,
     widgets::Block,
 };
-use crate::xai_textarea::{TextArea, TextAreaState};
-use ratatui::widgets::StatefulWidgetRef;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -563,12 +563,13 @@ impl<'a> StatefulWidget for InputWidget<'a> {
             .border_set(ratatui::symbols::border::ROUNDED)
             .border_style(Style::default().fg(border_color))
             .title_top(
-                Line::from(format!(" {} ", self.title))
-                    .style(Style::default().fg(if self.title.is_empty() {
+                Line::from(format!(" {} ", self.title)).style(Style::default().fg(
+                    if self.title.is_empty() {
                         border_color
                     } else {
                         title_color
-                    })),
+                    },
+                )),
             );
         let content = block.inner(area);
         block.render(area, buf);
@@ -581,7 +582,9 @@ impl<'a> StatefulWidget for InputWidget<'a> {
         let prompt_style = if self.disabled {
             Style::default().fg(Color::DarkGray)
         } else {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         };
         buf.set_string(content.x, content.y, "❯", prompt_style);
 

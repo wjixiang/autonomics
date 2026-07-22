@@ -4,12 +4,8 @@
 
 use crate::model::{ModelInfo, ProviderType};
 use crate::provider::{
-    ProviderPreset,
-    deepseek::DeepseekProvider,
-    mimo::MimoProvider,
-    minimax::MinimaxProvider,
-    sensenova::SensenovaProvider,
-    zai::ZaiProvider,
+    ProviderPreset, deepseek::DeepseekProvider, mimo::MimoProvider, minimax::MinimaxProvider,
+    sensenova::SensenovaProvider, zai::ZaiProvider,
 };
 
 /// Returns preset models for a known [`ProviderType`], or `None` for

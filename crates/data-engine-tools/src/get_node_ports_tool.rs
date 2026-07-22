@@ -40,10 +40,9 @@ impl ToolFunction for GetNodePortsTool {
             .await
             .map_err(ExecError::from)?;
 
-        let content = serde_json::to_value(&ports)
-            .map_err(|e| ToolError::ExecutionFailed {
-                source: Box::new(e),
-            })?;
+        let content = serde_json::to_value(&ports).map_err(|e| ToolError::ExecutionFailed {
+            source: Box::new(e),
+        })?;
 
         Ok(ToolResult::success_json(content))
     }

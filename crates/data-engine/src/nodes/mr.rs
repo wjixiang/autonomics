@@ -611,8 +611,8 @@ impl DagNode for MrNode {
         // ---- dispatch mr() ----
         let parameters: mr::Parameters = self.spec.parameters.clone().into();
         let method_refs: Vec<&str> = self.spec.method_list.iter().map(|s| s.as_str()).collect();
-        let rows = mr::dispatch::mr(&harmonised, &parameters, &method_refs)
-            .map_err(MrNodeError::Mr)?;
+        let rows =
+            mr::dispatch::mr(&harmonised, &parameters, &method_refs).map_err(MrNodeError::Mr)?;
 
         // ---- build output batch ----
         let batch = build_result_batch(&rows)?;

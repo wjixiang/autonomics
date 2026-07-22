@@ -125,7 +125,8 @@ impl AgentRuntime {
             // Build and spawn DataEngine actor
             let engine = DataEngine::builder()
                 .register_opendal_fs(file_storage.clone())?
-                .register_iceberg().await?
+                .register_iceberg()
+                .await?
                 .build();
             let (data_engine_client, engine_handle) = spawn_with_engine(engine);
 

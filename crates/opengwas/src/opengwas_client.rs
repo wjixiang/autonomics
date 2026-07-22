@@ -152,9 +152,7 @@ impl OpengwasClient {
             .map_err(|e| OpengwasError::InvalidToken(format!("invalid token: {e}")))?;
         auth.set_sensitive(true);
         headers.insert(header::AUTHORIZATION, auth);
-        let client = Client::builder()
-            .default_headers(headers)
-            .build()?;
+        let client = Client::builder().default_headers(headers).build()?;
         Ok(Self {
             client,
             cache_dir: cache_dir.into(),
@@ -1001,8 +999,8 @@ mod tests {
     /// never touch the real `$HOME/.cache/opengwas` file.
     fn client_with_temp_cache() -> (TempDir, OpengwasClient) {
         let tmp = TempDir::new().expect("tempdir");
-        let client =
-            OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf()).expect("opengwas client");
+        let client = OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf())
+            .expect("opengwas client");
         (tmp, client)
     }
 
@@ -1064,8 +1062,8 @@ mod tests {
         }
 
         // Second "session": brand-new client instance, same cache dir.
-        let client2 =
-            OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf()).expect("opengwas client");
+        let client2 = OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf())
+            .expect("opengwas client");
         let db = client2.init_db().expect("init_db second session");
         let guard = db.lock().unwrap();
         let count: i64 = guard
@@ -1123,8 +1121,8 @@ mod tests {
         );
 
         // Re-opening the client should still work and see an empty cache.
-        let client2 =
-            OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf()).expect("opengwas client");
+        let client2 = OpengwasClient::with_cache_dir_no_auth(tmp.path().to_path_buf())
+            .expect("opengwas client");
         let db2 = client2.init_db().expect("init_db after clear");
         let n: i64 = db2
             .lock()

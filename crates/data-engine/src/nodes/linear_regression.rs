@@ -12,7 +12,7 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -205,11 +205,7 @@ pub struct LinearRegressionNode {
 }
 
 impl LinearRegressionNode {
-    pub fn new(
-        x_columns: Vec<String>,
-        y_column: String,
-        intercept: bool,
-    ) -> Self {
+    pub fn new(x_columns: Vec<String>, y_column: String, intercept: bool) -> Self {
         Self {
             meta: port_layout(),
             x_columns,
@@ -269,11 +265,8 @@ impl NodeFactory for LinearRegressionNodeFactory {
         _node_ctx: NodeCtx,
     ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
         let node_spec: LinearRegressionNodeSpec = serde_json::from_value(spec)?;
-        let node = LinearRegressionNode::new(
-            node_spec.x_columns,
-            node_spec.y_column,
-            node_spec.intercept,
-        );
+        let node =
+            LinearRegressionNode::new(node_spec.x_columns, node_spec.y_column, node_spec.intercept);
         Ok(Box::new(node))
     }
 }
@@ -368,8 +361,7 @@ mod tests {
         let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 1.0).collect();
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
-        let mut node =
-            LinearRegressionNode::new(vec!["x".to_string()], "y".to_string(), true);
+        let mut node = LinearRegressionNode::new(vec!["x".to_string()], "y".to_string(), true);
         let input = super::super::meta::NodeInput {
             port: 0,
             // df_name: "src".to_string(),
@@ -429,8 +421,7 @@ mod tests {
         let y: Vec<f64> = x.iter().map(|v| 3.0 * v).collect();
         let batch = make_batch(vec![("x", x), ("y", y)]);
 
-        let mut node =
-            LinearRegressionNode::new(vec!["x".to_string()], "y".to_string(), false);
+        let mut node = LinearRegressionNode::new(vec!["x".to_string()], "y".to_string(), false);
         let input = super::super::meta::NodeInput {
             port: 0,
             // df_name: "src".to_string(),

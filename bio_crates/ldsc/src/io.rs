@@ -653,8 +653,7 @@ pub fn read_annot(
                     let mut paths = Vec::new();
                     for fh in fh_list {
                         let sub = sub_chr(fh, c);
-                        let (sfx, _c2) =
-                            which_compression(&format!("{sub}{annot_suffix}"))?;
+                        let (sfx, _c2) = which_compression(&format!("{sub}{annot_suffix}"))?;
                         paths.push(format!("{sub}{annot_suffix}{sfx}"));
                     }
                     Ok((c, paths))

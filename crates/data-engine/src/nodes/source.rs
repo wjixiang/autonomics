@@ -18,7 +18,7 @@ use datafusion::{
     execution::runtime_env::RuntimeEnv,
     prelude::{CsvReadOptions, DataFrame, ParquetReadOptions, SessionContext},
 };
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -164,9 +164,7 @@ pub enum SourceNodeSpec {
         format: Option<FileFormat>,
     },
     #[serde(rename = "iceberg")]
-    Iceberg {
-        ident: String,
-    },
+    Iceberg { ident: String },
 }
 
 pub struct SourceNodeFactory {}

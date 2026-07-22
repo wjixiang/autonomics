@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use datafusion::common::HashMap;
-use schemars::{schema_for, JsonSchema};
+use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
 use crate::{
@@ -31,7 +31,9 @@ pub struct EchoNodeFactory {}
 
 /// Static port layout: variadic input + variadic output.
 fn port_layout() -> NodePorts {
-    NodePorts::new().add_output_port(None).set_fixed_input(false)
+    NodePorts::new()
+        .add_output_port(None)
+        .set_fixed_input(false)
 }
 
 impl NodeFactory for EchoNodeFactory {
@@ -102,10 +104,7 @@ impl DagNode for EchoNode {
         self
     }
 
-    async fn execute(
-        &mut self,
-        inputs: &[NodeInput],
-    ) -> Result<PortOutputs, DagError> {
+    async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
         let mut out: PortOutputs = HashMap::new();
         for inp in inputs {
             out.insert(inp.port, inp.data.clone());
@@ -127,14 +126,19 @@ mod tests {
     async fn test_echo_single_input() {
         let ctx = SessionContext::new();
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int32, false)]));
-        let batch =
-            arrow_array::RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![1, 2, 3]))])
-                .unwrap();
+        let batch = arrow_array::RecordBatch::try_new(
+            schema,
+            vec![Arc::new(Int32Array::from(vec![1, 2, 3]))],
+        )
+        .unwrap();
         let df = ctx.read_batch(batch).unwrap();
 
         let mut node = EchoNode::default();
         let outputs = node
-            .execute(&[NodeInput { port: 0, data: df.clone() }])
+            .execute(&[NodeInput {
+                port: 0,
+                data: df.clone(),
+            }])
             .await
             .unwrap();
 
@@ -147,12 +151,16 @@ mod tests {
         let ctx = SessionContext::new();
         let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int32, false)]));
 
-        let batch1 =
-            arrow_array::RecordBatch::try_new(schema.clone(), vec![Arc::new(Int32Array::from(vec![10]))])
-                .unwrap();
-        let batch2 =
-            arrow_array::RecordBatch::try_new(schema, vec![Arc::new(Int32Array::from(vec![20, 30]))])
-                .unwrap();
+        let batch1 = arrow_array::RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int32Array::from(vec![10]))],
+        )
+        .unwrap();
+        let batch2 = arrow_array::RecordBatch::try_new(
+            schema,
+            vec![Arc::new(Int32Array::from(vec![20, 30]))],
+        )
+        .unwrap();
 
         let df1 = ctx.read_batch(batch1).unwrap();
         let df2 = ctx.read_batch(batch2).unwrap();

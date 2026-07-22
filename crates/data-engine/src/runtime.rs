@@ -156,10 +156,7 @@ impl DataEngineClient {
             .await
     }
 
-    pub async fn get_output(
-        &self,
-        id: String,
-    ) -> Result<Option<crate::dag::graph::PortOutputs>> {
+    pub async fn get_output(&self, id: String) -> Result<Option<crate::dag::graph::PortOutputs>> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.request(
             DataEngineCmd::GetOutput {
@@ -191,8 +188,11 @@ impl DataEngineClient {
 
     pub async fn list_node_factories(&self) -> Result<Vec<crate::node_registry::NodeInfo>> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        self.request(DataEngineCmd::ListNodeFactories { reply: reply_tx }, reply_rx)
-            .await
+        self.request(
+            DataEngineCmd::ListNodeFactories { reply: reply_tx },
+            reply_rx,
+        )
+        .await
     }
 
     pub async fn get_node_spec(&self, kind: String) -> Result<schemars::Schema> {
