@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.96
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.96
       - uses: Swatinem/rust-cache@v2
       # Compiles every test target first; a clean compile is the most common CI
       # signal and separates link errors from runtime failures.
