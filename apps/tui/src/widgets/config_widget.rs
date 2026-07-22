@@ -85,6 +85,7 @@ fn render_browsing(state: &ConfigTabState, area: Rect, buf: &mut Buffer) {
 }
 
 /// Render a selectable list pane (providers or models).
+#[allow(clippy::too_many_arguments)]
 fn render_selectable_list<T>(
     title: &str,
     count: usize,
@@ -212,9 +213,9 @@ fn render_provider_form(form: &ProviderForm, message: &str, area: Rect, buf: &mu
     for (i, label) in ProviderForm::FIELDS.iter().enumerate() {
         if i == 3 {
             // API Key field: masked rendering
-            render_masked_field_line(rows[i], label, &form.fields()[i], i == form.focus, buf);
+            render_masked_field_line(rows[i], label, form.fields()[i], i == form.focus, buf);
         } else {
-            render_field_line(rows[i], label, &form.fields()[i], i == form.focus, buf);
+            render_field_line(rows[i], label, form.fields()[i], i == form.focus, buf);
         }
     }
 }
@@ -267,7 +268,7 @@ fn render_model_form(
         render_field_line(
             rows[row_idx],
             labels[row_idx],
-            &form.text_fields()[form_idx],
+            form.text_fields()[form_idx],
             form.focus == form_idx,
             buf,
         );
@@ -311,7 +312,7 @@ fn yn(b: bool) -> &'static str {
 }
 
 fn render_field_line(row: Rect, label: &str, input: &InputState, focused: bool, buf: &mut Buffer) {
-    let _ = render_field_line_impl(
+    render_field_line_impl(
         row,
         label,
         input.value(),
@@ -643,10 +644,8 @@ fn handle_model_form_key(
                             form.provider_index = (form.provider_index + len - 1) % len;
                         }
                     }
-                    KeyCode::Right | KeyCode::Char('l') => {
-                        if !providers.is_empty() {
-                            form.provider_index = (form.provider_index + 1) % providers.len();
-                        }
+                    KeyCode::Right | KeyCode::Char('l') if !providers.is_empty() => {
+                        form.provider_index = (form.provider_index + 1) % providers.len();
                     }
                     _ => {}
                 }

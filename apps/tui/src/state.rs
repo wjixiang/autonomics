@@ -8,7 +8,9 @@ use ratatui::text::Line;
 
 pub const TABS: &[&str] = &["Agent", "Config"];
 
+#[derive(Default)]
 pub enum MainTabState {
+    #[default]
     AgentTab,
     ConfigTab,
 }
@@ -26,12 +28,6 @@ impl MainTabState {
             0 => Self::AgentTab,
             _ => Self::ConfigTab,
         }
-    }
-}
-
-impl Default for MainTabState {
-    fn default() -> Self {
-        Self::AgentTab
     }
 }
 

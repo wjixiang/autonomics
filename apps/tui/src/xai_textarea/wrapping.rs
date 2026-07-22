@@ -572,6 +572,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::single_range_in_vec_init)]
     fn wrap_ranges_trim_empty_text_does_not_panic() {
         let ranges = wrap_ranges_trim("", 1);
         assert!(ranges.is_empty() || ranges == vec![0..0]);

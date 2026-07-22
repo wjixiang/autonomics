@@ -243,7 +243,7 @@ impl App {
             while let Ok(event) = self.app_event_rx.try_recv() {
                 match event {
                     crate::app_event::AppEvent::Agent(e) => {
-                        state::apply_event(&mut self.state.agent_tab_state, e);
+                        state::apply_event(&mut self.state.agent_tab_state, *e);
                     }
                     crate::app_event::AppEvent::Quit => {
                         self.should_quit = true;
@@ -735,6 +735,12 @@ impl App {
 
         // Everything else (navigation, opening forms, typing) goes to the widget.
         crate::widgets::config_widget::handle_config_key(&mut self.state.config_tab_state, *key);
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

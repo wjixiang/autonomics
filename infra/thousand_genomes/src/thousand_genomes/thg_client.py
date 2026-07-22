@@ -9,7 +9,10 @@ S3 REST 操作绑成一个同名方法（``list_objects_v2`` / ``get_object`` /
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import fnmatch
+import os
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import boto3
@@ -23,6 +26,10 @@ BUCKET = "1000genomes"
 REGION = "us-east-1"
 # 显式指定 AWS 官方 S3 端点，绕开 ~/.aws/config 中的全局 endpoint_url 覆盖。
 ENDPOINT_URL = "https://s3.amazonaws.com"
+# 默认下载根目录，取自环境变量 DOWNLOAD_DIR_PATH；未设置时为 None。
+DOWNLOAD_DIR_ENV = "DOWNLOAD_DIR_PATH"
+# Phase 3 最终发布前缀（v5a 主集等全量数据所在目录）。
+RELEASE_20130502 = "release/20130502/"
 
 
 class ThgClient:
@@ -40,15 +47,44 @@ class ThgClient:
         anonymous: bool = True,
         region_name: str = REGION,
         endpoint_url: str | None = ENDPOINT_URL,
+        download_dir: str | Path | None = None,
         **kwargs,
     ) -> None:
         self.bucket = bucket
+        # 默认下载根目录：显式传入优先，否则读环境变量 DOWNLOAD_DIR_PATH。
+        self.download_root: Path | None = self._resolve_download_dir(download_dir)
         self.client: BaseClient = self.create_client(
             anonymous=anonymous,
             region_name=region_name,
             endpoint_url=endpoint_url,
             **kwargs,
         )
+
+    @staticmethod
+    def _resolve_download_dir(download_dir: str | Path | None) -> Path | None:
+        """解析下载根目录：显式参数 > 环境变量 DOWNLOAD_DIR_PATH > None。
+
+        设置时会自动创建该目录（含父目录）。
+        """
+        raw = download_dir if download_dir is not None else os.environ.get(DOWNLOAD_DIR_ENV)
+        if not raw:
+            return None
+        path = Path(raw).expanduser()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _default_local_path(self, key: str) -> Path:
+        """按 key 的相对结构，在下载根目录下拼出本地路径。
+
+        download_dir 未设置时会报错。
+        """
+        if self.download_root is None:
+            raise ValueError(
+                "未指定下载路径：请设置环境变量 "
+                f"{DOWNLOAD_DIR_ENV}，或显式传入 local_path/download_dir。"
+            )
+        # 用 key 的完整相对结构存放，避免不同前缀下重名文件冲突。
+        return self.download_root / key
 
     @staticmethod
     def create_client(
@@ -153,12 +189,20 @@ class ThgClient:
     # ------------------------------------------------------------------ #
     # 下载
     # ------------------------------------------------------------------ #
-    def download_file(self, key: str, local_path: str | Path) -> Path:
-        """把对象完整下载到本地文件（托管式，自动分片/断点续传）。
+    def download_file(self, key: str, local_path: str | Path | None = None) -> Path:
+        """把单个对象完整下载到本地文件（托管式，自动分片）。
 
         底层 ``client.download_file`` —— 适合大文件，不把内容载入内存。
+
+        Parameters
+        ----------
+        key:
+            对象的 S3 key。
+        local_path:
+            本地保存路径。默认 ``None`` 时按 key 的相对结构落到下载根目录
+            （环境变量 ``DOWNLOAD_DIR_PATH`` 指定）。
         """
-        local_path = Path(local_path)
+        local_path = Path(local_path) if local_path is not None else self._default_local_path(key)
         local_path.parent.mkdir(parents=True, exist_ok=True)
         self.client.download_file(self.bucket, key, str(local_path))
         return local_path
@@ -183,32 +227,256 @@ class ThgClient:
         """
         return self.client.get_object(Bucket=self.bucket, Key=key)["Body"]
 
-    def download_dir(
-        self, prefix: str, local_dir: str | Path, *, transfer_config=None
-    ) -> list[Path]:
-        """递归下载某个前缀下的全部对象到本地目录。
+    # ---- 批量下载内部工具 ---- #
+    @staticmethod
+    def _key_matches(key: str, include, exclude) -> bool:
+        """按 include/exclude glob 模式过滤 key。
 
-        用 ``list(prefix)`` 拿到所有 key，逐个 ``download_file``。
+        模式同时尝试匹配**完整 key** 和**文件名（basename）**，所以
+        ``"README_2014*"`` 能命中 ``release/20130502/README_20140912_...``。
         """
+        name = key.rsplit("/", 1)[-1]
+
+        def matches(pats):
+            return any(fnmatch.fnmatch(key, p) or fnmatch.fnmatch(name, p) for p in pats)
+
+        if include and not matches(include):
+            return False
+        if exclude and matches(exclude):
+            return False
+        return True
+
+    def _download_one(
+        self,
+        key: str,
+        remote_size: int,
+        dest: Path,
+        *,
+        skip_existing: bool,
+        transfer_config,
+    ) -> dict:
+        """下载单个对象，返回结果 dict。已下完（大小一致）则跳过。"""
+        if skip_existing and dest.exists() and dest.stat().st_size == remote_size:
+            return {"key": key, "status": "skipped", "size": remote_size, "path": dest}
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            self.client.download_file(self.bucket, key, str(dest), Config=transfer_config)
+            return {"key": key, "status": "downloaded", "size": remote_size, "path": dest}
+        except Exception as e:  # 单个失败不影响整体
+            return {"key": key, "status": "failed", "size": remote_size, "path": dest, "error": str(e)}
+
+    def download_objects(
+        self,
+        objects: Iterable[dict | tuple],
+        local_dir: str | Path | None = None,
+        *,
+        strip_prefix: str = "",
+        concurrency: int = 8,
+        skip_existing: bool = True,
+        transfer_config: TransferConfig | None = None,
+        on_progress: Callable[[dict, int, int], None] | None = None,
+    ) -> dict:
+        """并发下载一批对象，支持断点续传（跳过已下完）与进度回调。
+
+        Parameters
+        ----------
+        objects:
+            对象集合，每个元素是 ``list()`` 返回的 dict（含 ``Key``/``Size``），
+            或 ``(key, size)`` 元组。
+        local_dir:
+            本地目标目录。默认 ``None`` 时用下载根目录（``DOWNLOAD_DIR_PATH``）。
+        strip_prefix:
+            拼本地相对路径时要去掉的前缀（通常等于下载的目录前缀）。
+        concurrency:
+            并发下载数。
+        skip_existing:
+            本地已存在且大小一致时跳过（断点续传）。
+        transfer_config:
+            boto3 传输配置。默认关闭单文件内部多线程（``use_threads=False``），
+            改由 ``concurrency`` 在文件间并行，避免线程爆炸。
+        on_progress:
+            每个文件完成后回调 ``on_progress(result, done, total)``。
+        """
+        if local_dir is None:
+            if self.download_root is None:
+                raise ValueError(
+                    "未指定下载目录：请设置环境变量 "
+                    f"{DOWNLOAD_DIR_ENV}，或显式传入 local_dir。"
+                )
+            local_dir = self.download_root
         local_dir = Path(local_dir)
         local_dir.mkdir(parents=True, exist_ok=True)
-        if transfer_config is None:
-            transfer_config = TransferConfig()
 
-        downloaded: list[Path] = []
-        for obj in self.list(prefix):
-            key = obj["Key"]
-            # 去掉前缀，拼成本地相对路径
-            rel = key[len(prefix) :].lstrip("/")
-            dest = local_dir / rel
-            self.client.download_file(
-                self.bucket, key, str(dest), Config=transfer_config
-            )
-            downloaded.append(dest)
-        return downloaded
+        if transfer_config is None:
+            transfer_config = TransferConfig(use_threads=False)
+
+        # 归一化成 (key, size) 列表
+        tasks: list[tuple[str, int, Path]] = []
+        for obj in objects:
+            if isinstance(obj, dict):
+                key, size = obj["Key"], obj.get("Size", 0)
+            else:
+                key, size = obj
+            rel = key[len(strip_prefix) :].lstrip("/") if strip_prefix else key
+            tasks.append((key, size, local_dir / rel))
+
+        total = len(tasks)
+        results: list[dict] = [None] * total  # type: ignore[list-item]
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            future_to_idx = {
+                pool.submit(
+                    self._download_one, k, s, d,
+                    skip_existing=skip_existing, transfer_config=transfer_config,
+                ): i
+                for i, (k, s, d) in enumerate(tasks)
+            }
+            done = 0
+            for fut in as_completed(future_to_idx):
+                idx = future_to_idx[fut]
+                res = fut.result()
+                results[idx] = res
+                done += 1
+                if on_progress is not None:
+                    on_progress(res, done, total)
+
+        return self._summarize_results(results)
+
+    @staticmethod
+    def _summarize_results(results: list[dict]) -> dict:
+        summary = {"downloaded": 0, "skipped": 0, "failed": 0,
+                   "bytes_downloaded": 0, "details": results}
+        for r in results:
+            summary[r["status"]] += 1
+            if r["status"] == "downloaded":
+                summary["bytes_downloaded"] += r["size"]
+        return summary
+
+    def download_dir(
+        self,
+        prefix: str,
+        local_dir: str | Path | None = None,
+        *,
+        include=None,
+        exclude=None,
+        dry_run: bool = False,
+        concurrency: int = 8,
+        skip_existing: bool = True,
+        transfer_config: TransferConfig | None = None,
+        on_progress: Callable[[dict, int, int], None] | None = None,
+    ) -> dict:
+        """递归下载某个前缀下的全部对象（并发、可过滤、可续传）。
+
+        Parameters
+        ----------
+        prefix:
+            要下载的 S3 前缀（"目录"）。
+        local_dir:
+            本地目标目录。默认 ``None`` 时落到下载根目录（``DOWNLOAD_DIR_PATH``）。
+        include / exclude:
+            对 key 的 glob 过滤模式列表（``fnmatch`` 语法）。例如
+            ``include=["*v5a*.genotypes.vcf.gz*"]`` 只下 v5a 基因型 VCF 及其索引。
+        dry_run:
+            只统计将下载哪些文件及总大小，不真正下载。
+        concurrency / skip_existing / transfer_config / on_progress:
+            见 :meth:`download_objects`。
+        """
+        objs = [
+            o for o in self.list(prefix)
+            if self._key_matches(o["Key"], include, exclude)
+        ]
+        total_bytes = sum(o.get("Size", 0) for o in objs)
+        preview = {
+            "prefix": prefix, "count": len(objs), "total_bytes": total_bytes,
+            "total_gb": total_bytes / 1e9,
+        }
+        if dry_run:
+            return preview
+        if not objs:
+            return {**preview, "downloaded": 0, "skipped": 0, "failed": 0}
+
+        return {
+            **preview,
+            **self.download_objects(
+                objs, local_dir, strip_prefix=prefix,
+                concurrency=concurrency, skip_existing=skip_existing,
+                transfer_config=transfer_config, on_progress=on_progress,
+            ),
+        }
+
+    def download_genotypes(
+        self,
+        local_dir: str | Path | None = None,
+        *,
+        callset: str = "v5a",
+        include_index: bool = True,
+        dry_run: bool = False,
+        **kwargs,
+    ) -> dict:
+        """下载基因型数据（genotype VCF）。
+
+        默认下载 Phase 3 最终发布的 **v5a 主集**——即算 LD / 群体遗传分析
+        通用的那套 phased 基因型（22 条常染色体，~15.5 GB，加索引约 30 GB）。
+
+        Parameters
+        ----------
+        callset:
+            选择哪一套基因型。可选：
+
+            - ``"v5a"``（默认）：主集成集
+              ``ALL.chrN.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz``
+            - ``"all"``：发布目录下**所有** ``*.genotypes.vcf.gz``（含 v5b、
+              related_samples、lobSTR/microsat 等，体积大很多）
+            - 或直接传一个自定义 glob 模式（对文件名匹配）
+        include_index:
+            是否一并下载配套的 ``.tbi`` 索引（默认 ``True``，按区间查询需要）。
+        dry_run:
+            只统计将下载哪些文件及总大小，不真正下载。
+        **kwargs:
+            透传给 :meth:`download_dir`（如 ``concurrency``、``skip_existing``、
+            ``on_progress``）。
+        """
+        presets = {
+            "v5a": "*integrated_v5a.20130502.genotypes.vcf.gz",
+            "all": "*.genotypes.vcf.gz",
+        }
+        pattern = presets.get(callset, callset)
+        if include_index:
+            # 末尾加 * 即可同时命中 .vcf.gz 与 .vcf.gz.tbi
+            pattern = pattern + "*"
+        return self._download_release_20130502(
+            local_dir, include=[pattern], dry_run=dry_run, **kwargs,
+        )
+
+    def _download_release_20130502(
+        self,
+        local_dir: str | Path | None = None,
+        *,
+        include=None,
+        exclude=None,
+        dry_run: bool = False,
+        **kwargs,
+    ) -> dict:
+        """下载 Phase 3 最终发布（``release/20130502/``）的内部实现。
+
+        ⚠️ 全量约 **2.87 TB / 1976 个文件**，含 PSMC、lobSTR、SHAPEIT 等附加产物。
+        对外请优先使用公开的 :meth:`download_genotypes`；确需全量/自定义子集时
+        再用本方法，并建议先用 ``dry_run=True`` 预览，或用 ``include``/``exclude``
+        收窄范围，例如：
+
+        - 排除最大的几类附加数据::
+
+              exclude=["*.haps.gz", "*.tar.gz", "*microsat*", "*lobSTR*"]
+
+        Parameters
+        ----------
+        其余参数同 :meth:`download_dir`。
+        """
+        return self.download_dir(
+            RELEASE_20130502, local_dir,
+            include=include, exclude=exclude, dry_run=dry_run, **kwargs,
+        )
 
 
 # 模块级共享客户端（匿名、连真 AWS、指向 1000genomes bucket）。
 client = ThgClient()
 s3_client: BaseClient = client.client
-print([client.list().__next__() for i in range(10)])

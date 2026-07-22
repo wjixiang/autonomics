@@ -6,10 +6,20 @@
 //! an `AppEventSender` which the main loop drains each tick.
 
 /// Events that can be processed by the main TUI loop.
+///
+/// Currently unused — this is scaffolding for decoupled subsystem→main-loop
+/// communication (file search, plugin watchers, background tasks) modelled
+/// after codex's `AppEvent` pattern. Kept so the channel plumbing in `App`
+/// stays type-checked as it gets wired up.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) enum AppEvent {
     /// An event from the agent runtime (text delta, tool call, etc.).
-    Agent(agentik_sdk::types::AgentEvent),
+    ///
+    /// Boxed because `AgentEvent` is large (it carries a full `Message`),
+    /// which would otherwise dominate the enum size — see
+    /// `clippy::large_enum_variant`.
+    Agent(Box<agentik_sdk::types::AgentEvent>),
     /// Request to exit the application.
     Quit,
     /// Config data changed; the Config tab should reload from the database.

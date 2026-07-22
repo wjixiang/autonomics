@@ -84,6 +84,7 @@ impl WrappedLine {
     /// the table renderer, char-mode yank). Centralising the conversion
     /// here means the shape of `WrappedSpan` can evolve without forcing
     /// every call site to know how to map it.
+    #[allow(dead_code)]
     pub fn to_ratatui_line(&self) -> ratatui::text::Line<'static> {
         ratatui::text::Line::from(
             self.spans
@@ -194,7 +195,7 @@ pub fn measure(spans: &[ratatui::text::Span<'_>]) -> u16 {
         .iter()
         .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
         .sum();
-    (total as usize).min(u16::MAX as usize) as u16
+    total.min(u16::MAX as usize) as u16
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -340,8 +341,9 @@ fn pack_row(pairs: &[(char, ratatui::style::Style)]) -> WrappedLine {
     let mut row_width: u16 = 0;
 
     for &(ch, style) in pairs {
-        let ch_w =
-            (UnicodeWidthChar::width(ch).unwrap_or(0) as usize).min(u16::MAX as usize) as u16;
+        let ch_w = UnicodeWidthChar::width(ch)
+            .unwrap_or(0)
+            .min(u16::MAX as usize) as u16;
         row_width = row_width.saturating_add(ch_w);
 
         if let Some(last) = spans.last_mut()

@@ -154,8 +154,8 @@ fn main() -> color_eyre::Result<()> {
         terminal.draw(|f| ui(f, &messages, &mut widget_state))?;
 
         if let Event::Key(key) = event::read()? {
-            match key.kind {
-                KeyEventKind::Press => match key.code {
+            if key.kind == KeyEventKind::Press {
+                match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => break,
                     KeyCode::Down | KeyCode::Char('j') => {
                         widget_state.scroll_offset = widget_state.scroll_offset.saturating_add(1)
@@ -180,8 +180,7 @@ fn main() -> color_eyre::Result<()> {
                             .saturating_sub(widget_state.viewport_height.into());
                     }
                     _ => {}
-                },
-                _ => {}
+                }
             }
         }
     }

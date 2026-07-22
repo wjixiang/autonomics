@@ -65,7 +65,11 @@ pub(super) fn wrap_table_rows(
         let wrapped_cells: Vec<Vec<WrappedLine>> = (0..num_cols)
             .map(|c| {
                 let cell: &[Span<'static>] = cells.get(c).map_or(&[], |s| s.as_slice());
-                let w = (col_widths.get(c).copied().unwrap_or(1).max(1) as usize)
+                let w = col_widths
+                    .get(c)
+                    .copied()
+                    .unwrap_or(1)
+                    .max(1)
                     .min(u16::MAX as usize) as u16;
                 wrap_spans(cell, w)
             })
@@ -196,8 +200,7 @@ pub(crate) fn layout_table(
     let dim_style = Style::default().fg(tokens.text.muted);
 
     // Too-narrow check: need at least 1 char per cell + 2 padding + borders.
-    let min_width = (num_cols * 3 + num_cols + 1) as usize;
-    let min_width = min_width.min(u16::MAX as usize) as u16;
+    let min_width = (num_cols * 3 + num_cols + 1).min(u16::MAX as usize) as u16;
     if inner_width < min_width {
         let placeholder = Line::from(Span::styled(
             "[ table \u{2014} too narrow, press \u{23ce} to expand ]".to_string(),

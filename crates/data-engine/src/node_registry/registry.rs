@@ -192,10 +192,6 @@ impl NodeRegistry {
     }
 }
 
-pub struct ListNodeFilter {
-    keyword: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

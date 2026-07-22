@@ -7,6 +7,7 @@ use ratatui::style::Color;
 
 /// Surface tiers — backgrounds.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub(crate) struct MdSurface {
     pub base: Color,
     /// Code block / raised surface background.

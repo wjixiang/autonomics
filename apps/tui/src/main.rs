@@ -27,7 +27,9 @@ fn init_logging() -> color_eyre::Result<()> {
         format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"),
     );
 
-    let default = panic::take_hook();
+    // Retain the previously-installed hook so it can be re-invoked once the
+    // TUI's own panic handling is finalised; currently we log only.
+    let _default = panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let bt = std::backtrace::Backtrace::force_capture();
         tracing::error!(
@@ -36,7 +38,7 @@ fn init_logging() -> color_eyre::Result<()> {
             backtrace = %bt,
             "thread panicked"
         );
-        // default(info); // 保留默认行为(打到 stderr)
+        // _default(info); // 保留默认行为(打到 stderr)
     }));
 
     tracing_subscriber::fmt()

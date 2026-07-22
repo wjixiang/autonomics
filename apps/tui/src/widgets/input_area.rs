@@ -20,7 +20,7 @@ use unicode_width::UnicodeWidthStr;
 /// deletion operations walk **grapheme clusters** so combining marks
 /// (e.g. `e` + combining acute `´`) are treated as a single edit unit
 /// instead of as two separate bytes.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct InputState {
     content: String,
     /// Cursor position as a byte offset into `content`; always lies
@@ -30,16 +30,6 @@ pub struct InputState {
     /// `None` means no cap. Config fields default to no cap; chat
     /// `InputArea` defaults to a generous 16 384-char cap.
     max_length: Option<usize>,
-}
-
-impl Default for InputState {
-    fn default() -> Self {
-        Self {
-            content: String::new(),
-            cursor: 0,
-            max_length: None,
-        }
-    }
 }
 
 impl InputState {
@@ -302,7 +292,7 @@ fn previous_grapheme_boundary(s: &str, from: usize) -> usize {
     // Walk clusters before `safe` and take the start of the last one.
     s[..safe]
         .grapheme_indices(true)
-        .last()
+        .next_back()
         .map(|(start, _)| start)
         .unwrap_or(0)
 }
@@ -375,8 +365,7 @@ impl InputArea {
     pub fn display_height(&self, width: u16) -> u16 {
         self.textarea
             .desired_height(width)
-            .max(1)
-            .min(Self::MAX_INPUT_ROWS)
+            .clamp(1, Self::MAX_INPUT_ROWS)
     }
 
     /// Insert a newline (Shift+Enter / Alt+Enter). Respects `max_length`.

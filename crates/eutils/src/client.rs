@@ -87,7 +87,7 @@ impl EutilsClient {
         let body = resp.text().await?;
 
         if !(200..300).contains(&status) {
-            return Err(EutilsError::Status { status, body }.into());
+            return Err(EutilsError::Status { status, body });
         }
         serde_json::from_str(&body).map_err(Into::into)
     }
@@ -103,7 +103,7 @@ impl EutilsClient {
         let body = resp.text().await?;
 
         if !(200..300).contains(&status) {
-            return Err(EutilsError::Status { status, body }.into());
+            return Err(EutilsError::Status { status, body });
         }
         Ok(body)
     }
@@ -123,7 +123,7 @@ impl EutilsClient {
         let body = resp.text().await?;
 
         if !(200..300).contains(&status) {
-            return Err(EutilsError::Status { status, body }.into());
+            return Err(EutilsError::Status { status, body });
         }
         serde_json::from_str(&body).map_err(Into::into)
     }
@@ -143,7 +143,7 @@ impl EutilsClient {
         let body = resp.text().await?;
 
         if !(200..300).contains(&status) {
-            return Err(EutilsError::Status { status, body }.into());
+            return Err(EutilsError::Status { status, body });
         }
         Ok(body)
     }

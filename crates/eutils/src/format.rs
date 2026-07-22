@@ -119,7 +119,7 @@ pub fn format_esummary(data: &Value) -> String {
             if let Some(abs_text) = abstract_val.as_str() {
                 let cleaned = strip_html_tags(abs_text);
                 if !cleaned.is_empty() {
-                    out.push_str("\n");
+                    out.push('\n');
                     out.push_str(&cleaned);
                     out.push_str("\n\n");
                 }
@@ -185,7 +185,7 @@ pub fn format_efetch(data: &Value) -> String {
     // The raw text content from EFetch is already reasonably structured.
     // Just present it as a code block for readability.
     out.push_str("```\n");
-    out.push_str(&content);
+    out.push_str(content);
     out.push_str("\n```\n");
     out
 }
@@ -366,7 +366,7 @@ pub fn format_einfo(data: &Value) -> String {
             out.push_str(&format!("**Last updated:** {update}\n"));
         }
         if !desc.is_empty() {
-            let cleaned = strip_html_tags(&desc);
+            let cleaned = strip_html_tags(desc);
             out.push_str(&format!("**Description:** {cleaned}\n"));
         }
         out.push('\n');
@@ -380,7 +380,7 @@ pub fn format_einfo(data: &Value) -> String {
                 for field in fields.iter().take(30) {
                     let fname = str_field(field, "name");
                     let ffull = str_field(field, "fullname");
-                    let fdesc = truncate_str(&str_field(field, "description"), 60);
+                    let fdesc = truncate_str(str_field(field, "description"), 60);
                     out.push_str(&format!("| {fname} | {ffull} | {fdesc} |\n"));
                 }
                 out.push('\n');
@@ -437,7 +437,7 @@ pub fn format_egquery(data: &Value) -> String {
         })
         .filter(|(_, c)| *c > 0)
         .collect();
-    entries.sort_by(|a, b| b.1.cmp(&a.1));
+    entries.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
 
     out.push_str("| Database | Count |\n");
     out.push_str("|----------|-------|\n");

@@ -23,7 +23,7 @@ async fn esummary_single_pmid_v2() -> TestResult<()> {
         .get("uids")
         .and_then(|v| v.as_array())
         .expect("missing 'uids'");
-    assert!(uids.len() >= 1, "expected at least 1 uid");
+    assert!(!uids.is_empty(), "expected at least 1 uid");
 
     let article = result
         .get(common::PMID_CRISPR)
@@ -78,7 +78,7 @@ async fn esummary_invalid_pmid_returns_empty() -> TestResult<()> {
 
     let has_ids = resp["result"]["uids"]
         .as_array()
-        .map_or(false, |arr| !arr.is_empty());
+        .is_some_and(|arr| !arr.is_empty());
     assert!(!has_ids, "invalid PMID should not return real records");
 
     Ok(())
