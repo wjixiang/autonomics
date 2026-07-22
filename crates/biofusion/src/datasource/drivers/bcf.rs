@@ -6,11 +6,12 @@
 use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
+use async_trait::async_trait;
 use datafusion::error::Result;
 use oxbow::variant::BcfScanner;
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{BioBatchIter, BioDriver, BioInput, byte_reader, map_ext};
+use super::super::core::{BioBatchStream, BioDriver, BioInput, byte_reader, map_ext, sync_stream};
 
 fn scanner(header: noodles::vcf::Header) -> Result<BcfScanner> {
     BcfScanner::new(
@@ -28,23 +29,26 @@ fn scanner(header: noodles::vcf::Header) -> Result<BcfScanner> {
 
 pub struct BcfDriver;
 
+#[async_trait]
 impl BioDriver for BcfDriver {
     const FILE_TYPE: &'static str = "bcf";
 
-    fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
-        let mut reader = noodles::bcf::io::Reader::new(byte_reader(input.bytes.clone()));
+    async fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
+        let bytes = input.fetch_all().await?;
+        let mut reader = noodles::bcf::io::Reader::new(byte_reader(bytes));
         let header = reader.read_header().map_err(map_ext)?;
         let scanner = scanner(header)?;
         Ok(Arc::new(scanner.schema().clone()))
     }
 
-    fn scan(input: BioInput, batch_size: usize) -> Result<BioBatchIter> {
-        let mut reader = noodles::bcf::io::Reader::new(byte_reader(input.bytes));
+    async fn scan(input: BioInput, batch_size: usize, limit: Option<usize>) -> Result<BioBatchStream> {
+        let bytes = input.fetch_all().await?;
+        let mut reader = noodles::bcf::io::Reader::new(byte_reader(bytes));
         let header = reader.read_header().map_err(map_ext)?;
         let scanner = scanner(header)?;
         let batches = scanner
-            .scan(reader, None, Some(batch_size), None)
+            .scan(reader, None, Some(batch_size), limit)
             .map_err(map_ext)?;
-        Ok(Box::new(batches))
+        Ok(sync_stream(batches))
     }
 }

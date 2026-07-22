@@ -1,13 +1,23 @@
 //! VCF driver.
+//!
+//! This is the first format ported to oxbow's async scanner, so — unlike the
+//! other drivers — it **streams** the object from the store instead of fetching
+//! it whole: the scan path never materializes the file, and a downstream limit
+//! that drops the stream stops fetching from the store.
 
 use std::sync::Arc;
 
-use arrow_schema::SchemaRef;
+use arrow_schema::{ArrowError, SchemaRef};
+use async_trait::async_trait;
 use datafusion::error::Result;
+use datafusion::object_store::{ObjectStore, ObjectStoreExt};
+use futures::{StreamExt, TryStreamExt};
+use oxbow::async_scanner::AsyncScanner;
 use oxbow::variant::VcfScanner;
 use oxbow::{CoordSystem, Select};
+use tokio::io::AsyncBufRead;
 
-use super::super::core::{BioBatchIter, BioDriver, BioInput, buf_reader, map_ext};
+use super::super::core::{BioBatchStream, BioDriver, BioInput, map_ext};
 
 /// Build an oxbow [`VcfScanner`] selecting every contig / field / sample
 /// (full schema). Shared by schema inference and the runtime scan so they
@@ -28,81 +38,120 @@ fn scanner(header: noodles::vcf::Header) -> Result<VcfScanner> {
 
 pub struct VcfDriver;
 
+/// Open a streaming, decompressed async reader over the object.
+///
+/// Bytes are pulled from the object store on demand (never the whole object at
+/// once) and gzip/BGZF is decoded as a multi-member stream when `gz` is set.
+/// Dropping the returned reader — e.g. when a downstream limit is reached —
+/// stops the store from being polled further.
+async fn open_reader(
+    input: &BioInput,
+) -> Result<Box<dyn AsyncBufRead + Unpin + Send>> {
+    use async_compression::tokio::bufread::GzipDecoder;
+    use tokio_util::io::StreamReader;
+
+    // `into_stream()` yields chunks lazily; `StreamReader` adapts the chunk
+    // stream into an `AsyncRead` backed by the store's HTTP body.
+    let chunk_stream = input
+        .store
+        .get(&input.location)
+        .await?
+        .into_stream()
+        .map_err(std::io::Error::other);
+    let raw = tokio::io::BufReader::new(StreamReader::new(chunk_stream));
+    if input.gz {
+        let mut decoder = GzipDecoder::new(raw);
+        // BGZF is a stream of concatenated gzip members; decode them all.
+        decoder.multiple_members(true);
+        // GzipDecoder is AsyncRead-only, so wrap it once more for AsyncBufRead.
+        Ok(Box::new(tokio::io::BufReader::new(decoder)))
+    } else {
+        Ok(Box::new(raw))
+    }
+}
+
+#[async_trait]
 impl BioDriver for VcfDriver {
     const FILE_TYPE: &'static str = "vcf";
 
-    fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
-        let mut reader = noodles::vcf::io::Reader::new(buf_reader(input.bytes.clone(), input.gz));
-        let header = reader.read_header().map_err(map_ext)?;
+    async fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
+        // Only the header is needed for the schema, so stream just enough to
+        // read it and drop the reader.
+        let reader = open_reader(input).await?;
+        let mut vcf_reader = noodles::vcf::r#async::io::Reader::new(reader);
+        let header = vcf_reader.read_header().await.map_err(map_ext)?;
         let scanner = scanner(header)?;
         Ok(Arc::new(scanner.schema().clone()))
     }
 
-    fn scan(input: BioInput, batch_size: usize) -> Result<BioBatchIter> {
-        let mut reader = noodles::vcf::io::Reader::new(buf_reader(input.bytes, input.gz));
-        let header = reader.read_header().map_err(map_ext)?;
+    async fn scan(
+        input: BioInput,
+        batch_size: usize,
+        limit: Option<usize>,
+    ) -> Result<BioBatchStream> {
+        // Read the header from a first stream (only header bytes transferred)
+        // to build the scanner — the same path as schema inference.
+        let header_reader = open_reader(&input).await?;
+        let mut vcf_reader = noodles::vcf::r#async::io::Reader::new(header_reader);
+        let header = vcf_reader.read_header().await.map_err(map_ext)?;
         let scanner = scanner(header)?;
-        let batches = scanner
-            .scan(reader, None, Some(batch_size), None)
-            .map_err(map_ext)?;
-        Ok(Box::new(batches))
+
+        // Scan records from a fresh stream from byte 0. The async scanner skips
+        // the embedded header itself; dropping the stream on a limit stops
+        // fetching from the store.
+        let records_reader = open_reader(&input).await?;
+        let stream = AsyncScanner::scan(&scanner, records_reader, Some(batch_size), limit)
+            .map(|res| res.map_err(|e| ArrowError::from_external_error(Box::new(e))));
+        Ok(Box::pin(stream))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
     use arrow::array::Int64Array;
-    use arrow_schema::ArrowError;
     use datafusion::catalog::MemTable;
     use datafusion::prelude::{SessionContext, col, lit};
 
-    use super::*;
-    use std::fs;
-    use std::path::{Path, PathBuf};
+    use crate::datasource::BioReadOptions;
+    use crate::ext::DataFusionReadExt;
 
     /// Path to the bundled `sample.vcf.gz` fixture (workspace root).
     fn fixture_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/sample.vcf.gz")
     }
 
-    /// Read a gzipped VCF from `path` into a [`BioInput`], setting `gz: true`
-    /// so the driver decompresses on the fly.
-    fn load_vcf_gz_input(path: impl AsRef<Path>) -> BioInput {
-        let path = path.as_ref();
-        let raw = fs::read(path).expect("failed to read VCF.gz");
-
-        println!("file: {}", path.display());
-        println!("compressed size: {} bytes", raw.len());
-
-        BioInput {
-            gz: true,
-            bytes: bytes::Bytes::from(raw),
-        }
+    /// Path to the opengwas sample fixture used for the SQL/struct-field regression.
+    fn opengwas_fixture_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/opengwas_gwas_sumstat_sample.vcf.gz")
     }
 
-    /// Parse the fixture VCF.gz file end-to-end and verify row/batch counts.
+    /// Drive the VCF scan through the full DataFusion stack (which now streams
+    /// from the object store on the scan path) and verify it produces rows.
     ///
     /// Run with: cargo test -p biofusion -- vcf::tests::parse_vcf_gz --nocapture
-    #[test]
-    fn parse_vcf_gz() {
-        let input = load_vcf_gz_input(fixture_path());
+    #[tokio::test]
+    async fn parse_vcf_gz() {
+        let path = fixture_path();
+        println!("file: {}", path.display());
 
-        // --- schema inference ---
-        let schema = VcfDriver::infer_schema(&input).expect("infer_schema failed");
+        // --- schema inference (also streaming — only the header is read) ---
+        let ctx = SessionContext::new();
+        let df = ctx
+            .read_vcf(path.to_str().unwrap(), BioReadOptions::default())
+            .await
+            .expect("read_vcf failed");
+        let schema = df.schema();
         println!("schema: {} columns", schema.fields().len());
         assert!(!schema.fields().is_empty(), "schema should have columns");
 
-        // --- full scan ---
-        let batch_size = 8192;
-        let batches = VcfDriver::scan(input, batch_size).expect("scan failed");
-        let mut total_rows = 0usize;
-        let mut total_batches = 0usize;
-        for batch in batches {
-            let batch = batch.expect("batch error");
-            total_rows += batch.num_rows();
-            total_batches += 1;
-        }
-
+        // --- streaming scan + early decode stop ---
+        let batches = df.collect().await.expect("collect failed");
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        let total_batches = batches.len();
         println!("scan: {total_batches} batches, {total_rows} rows");
         assert!(total_rows > 0, "VCF.gz should contain rows");
         assert!(total_batches > 0, "should produce at least one batch");
@@ -110,18 +159,19 @@ mod tests {
 
     #[tokio::test]
     async fn sql_query_vcf() {
-        let input = load_vcf_gz_input("../../fixtures/opengwas_gwas_sumstat_sample.vcf.gz");
-        // --- full scan ---
-        let batch_size = 8192;
-        let batches = VcfDriver::scan(input, batch_size)
-            .expect("scan failed")
-            .collect::<Result<Vec<_>, ArrowError>>()
-            .unwrap();
+        let path = opengwas_fixture_path();
 
+        // Collect the streaming scan into an in-memory table so we can run SQL
+        // (struct-field queries, GROUP BY, LIMIT) on top of the streamed batches.
         let ctx = SessionContext::new();
+        let df = ctx
+            .read_vcf(path.to_str().unwrap(), BioReadOptions::default())
+            .await
+            .expect("read_vcf failed");
+        let batches = df.collect().await.expect("collect failed");
         let schema = batches[0].schema();
-        let provider = Arc::new(MemTable::try_new(schema, vec![batches]).unwrap());
-        ctx.register_table("vcf", provider).unwrap();
+        let provider = MemTable::try_new(Arc::clone(&schema), vec![batches]).unwrap();
+        ctx.register_table("vcf", Arc::new(provider)).unwrap();
 
         // --- inspect schema (handy when picking columns to query) ---
         println!("schema:");
@@ -175,6 +225,5 @@ mod tests {
             .await
             .unwrap();
         sample_field.show().await.unwrap();
-        // panic!()
     }
 }

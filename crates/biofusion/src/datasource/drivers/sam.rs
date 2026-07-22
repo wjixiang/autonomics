@@ -6,11 +6,12 @@
 use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
+use async_trait::async_trait;
 use datafusion::error::Result;
 use oxbow::alignment::SamScanner;
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{BioBatchIter, BioDriver, BioInput, buf_reader, map_ext};
+use super::super::core::{BioBatchStream, BioDriver, BioInput, buf_reader, map_ext, sync_stream};
 
 fn scanner(header: noodles::sam::Header) -> Result<SamScanner> {
     SamScanner::new(header, Select::All, None, CoordSystem::OneClosed).map_err(map_ext)
@@ -18,23 +19,26 @@ fn scanner(header: noodles::sam::Header) -> Result<SamScanner> {
 
 pub struct SamDriver;
 
+#[async_trait]
 impl BioDriver for SamDriver {
     const FILE_TYPE: &'static str = "sam";
 
-    fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
-        let mut reader = noodles::sam::io::Reader::new(buf_reader(input.bytes.clone(), input.gz));
+    async fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
+        let bytes = input.fetch_all().await?;
+        let mut reader = noodles::sam::io::Reader::new(buf_reader(bytes, input.gz));
         let header = reader.read_header().map_err(map_ext)?;
         let scanner = scanner(header)?;
         Ok(Arc::new(scanner.schema().clone()))
     }
 
-    fn scan(input: BioInput, batch_size: usize) -> Result<BioBatchIter> {
-        let mut reader = noodles::sam::io::Reader::new(buf_reader(input.bytes, input.gz));
+    async fn scan(input: BioInput, batch_size: usize, limit: Option<usize>) -> Result<BioBatchStream> {
+        let bytes = input.fetch_all().await?;
+        let mut reader = noodles::sam::io::Reader::new(buf_reader(bytes, input.gz));
         let header = reader.read_header().map_err(map_ext)?;
         let scanner = scanner(header)?;
         let batches = scanner
-            .scan(reader, None, Some(batch_size), None)
+            .scan(reader, None, Some(batch_size), limit)
             .map_err(map_ext)?;
-        Ok(Box::new(batches))
+        Ok(sync_stream(batches))
     }
 }

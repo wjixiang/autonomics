@@ -131,3 +131,50 @@ async fn batch_size_option() {
     // with batch_size 2 we expect more than one batch for a multi-row file
     assert!(!rows.is_empty());
 }
+
+/// Indexed random-access read: only the BGZF blocks overlapping the region
+/// are fetched (no full-file materialization). Verified against the bundled
+/// `sample.vcf.gz` + `sample.vcf.gz.tbi` pair.
+#[tokio::test]
+async fn read_vcf_region_returns_only_matching_rows() {
+    let ctx = SessionContext::new();
+    let path = fixture("sample.vcf.gz");
+
+    // Full scan (baseline).
+    let full_df = ctx
+        .read_vcf(path.to_str().unwrap(), BioReadOptions::default())
+        .await
+        .unwrap();
+    let full_rows: usize = full_df
+        .collect()
+        .await
+        .unwrap()
+        .iter()
+        .map(|b| b.num_rows())
+        .sum();
+
+    // Region query — whole chr1 (the VCF uses `chrN` names). This must be a
+    // strict subset of the full scan (which spans chr1..chr22).
+    let region_df = ctx
+        .read_vcf_region(
+            path.to_str().unwrap(),
+            "1",
+            BioReadOptions::default(),
+        )
+        .await
+        .unwrap();
+    let region_rows: usize = region_df
+        .collect()
+        .await
+        .unwrap()
+        .iter()
+        .map(|b| b.num_rows())
+        .sum();
+
+    assert!(full_rows > 0, "fixture should have rows");
+    assert!(region_rows > 0, "region chr1 should intersect at least one record");
+    assert!(
+        region_rows < full_rows,
+        "region query ({region_rows}) must be a strict subset of full scan ({full_rows})"
+    );
+}

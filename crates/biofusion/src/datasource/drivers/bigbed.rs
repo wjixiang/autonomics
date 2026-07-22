@@ -8,11 +8,12 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
+use async_trait::async_trait;
 use datafusion::error::Result;
 use oxbow::bbi::{BedSchema, BigBedScanner};
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{BioBatchIter, BioDriver, BioInput, map_ext};
+use super::super::core::{BioBatchStream, BioDriver, BioInput, map_ext, sync_stream};
 
 fn bed_schema() -> Result<BedSchema> {
     "bed3".parse::<BedSchema>().map_err(map_ext)
@@ -20,12 +21,13 @@ fn bed_schema() -> Result<BedSchema> {
 
 pub struct BigBedDriver;
 
+#[async_trait]
 impl BioDriver for BigBedDriver {
     const FILE_TYPE: &'static str = "bigbed";
 
-    fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
-        let reader =
-            bigtools::BigBedRead::open(Cursor::new(input.bytes.clone())).map_err(map_ext)?;
+    async fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
+        let bytes = input.fetch_all().await?;
+        let reader = bigtools::BigBedRead::open(Cursor::new(bytes)).map_err(map_ext)?;
         let scanner = BigBedScanner::new(
             bed_schema()?,
             reader.info().clone(),
@@ -36,8 +38,9 @@ impl BioDriver for BigBedDriver {
         Ok(Arc::new(scanner.schema().clone()))
     }
 
-    fn scan(input: BioInput, batch_size: usize) -> Result<BioBatchIter> {
-        let reader = bigtools::BigBedRead::open(Cursor::new(input.bytes)).map_err(map_ext)?;
+    async fn scan(input: BioInput, batch_size: usize, limit: Option<usize>) -> Result<BioBatchStream> {
+        let bytes = input.fetch_all().await?;
+        let reader = bigtools::BigBedRead::open(Cursor::new(bytes)).map_err(map_ext)?;
         let scanner = BigBedScanner::new(
             bed_schema()?,
             reader.info().clone(),
@@ -46,8 +49,8 @@ impl BioDriver for BigBedDriver {
         )
         .map_err(map_ext)?;
         let batches = scanner
-            .scan(reader, None, Some(batch_size), None)
+            .scan(reader, None, Some(batch_size), limit)
             .map_err(map_ext)?;
-        Ok(Box::new(batches))
+        Ok(sync_stream(batches))
     }
 }

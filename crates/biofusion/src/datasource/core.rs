@@ -30,6 +30,7 @@ use datafusion::datasource::table_schema::TableSchema;
 use datafusion::error::{DataFusionError, Result};
 use datafusion::execution::context::DataFilePaths;
 use datafusion::object_store::{ObjectStore, ObjectStoreExt};
+use datafusion::object_store::path::Path as StorePath;
 use datafusion::physical_expr::LexRequirement;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
@@ -39,7 +40,7 @@ use datafusion_datasource::file_scan_config::FileScanConfigBuilder;
 use datafusion_datasource::file_sink_config::FileSinkConfig;
 use datafusion_datasource::projection::{ProjectionOpener, SplitProjection};
 use datafusion_datasource::source::DataSourceExec;
-use futures::stream::{self, StreamExt};
+use futures::stream::{self, BoxStream, StreamExt};
 
 use datafusion::datasource::listing::PartitionedFile;
 use datafusion::datasource::physical_plan::{FileOpenFuture, FileOpener};
@@ -48,43 +49,96 @@ use datafusion::datasource::physical_plan::{FileOpenFuture, FileOpener};
 // BioDriver — the per-format extension point
 // =====================================================================
 
-/// The bytes of a single bioinformatics object plus whether the core detected
-/// gzip/BGZF framing from the magic bytes.
+/// A reference to a single bioinformatics object in an [`ObjectStore`].
 ///
-/// Drivers receive this rather than the raw [`ObjectMeta`] so that schema
-/// inference and the runtime scan share one, location-independent interface.
+/// Drivers receive this rather than materialized bytes so each can decide how
+/// much of the object to read: the VCF driver **streams** from the store
+/// (fetching only what the scan needs, stopping early on a limit), while the
+/// formats that still use oxbow's synchronous scanners fetch the whole object
+/// up front via [`BioInput::fetch_all`].
 #[derive(Debug, Clone)]
 pub struct BioInput {
-    /// Full object bytes.
-    pub bytes: Bytes,
-    /// True when the bytes start with the gzip magic (`1f 8b`), i.e. the file
-    /// is gzip- or BGZF-compressed.
+    /// Object store holding the object.
+    pub store: Arc<dyn ObjectStore>,
+    /// Location of the object within the store.
+    pub location: StorePath,
+    /// True when the object starts with the gzip magic (`1f 8b`), i.e. it is
+    /// gzip- or BGZF-compressed. Detected from the first two bytes at
+    /// construction.
     pub gz: bool,
 }
 
-/// A boxed iterator over decoded record batches.
-///
-/// oxbow's scanners return `impl RecordBatchReader`; since
-/// `RecordBatchReader: Iterator<Item = Result<RecordBatch, ArrowError>>`, any
-/// such reader boxes cleanly into this type.
-pub type BioBatchIter =
-    Box<dyn Iterator<Item = std::result::Result<RecordBatch, ArrowError>> + Send>;
+impl BioInput {
+    /// Build a [`BioInput`] for `location` in `store`, detecting gzip/BGZF
+    /// framing from the leading two bytes via a small range read.
+    pub async fn open(
+        store: Arc<dyn ObjectStore>,
+        location: StorePath,
+    ) -> Result<Self> {
+        let gz = match store.get_range(&location, 0..2).await {
+            Ok(prefix) => is_gzip(&prefix),
+            // Empty / unreadable objects are treated as uncompressed; the scan
+            // will surface the real error.
+            Err(_) => false,
+        };
+        Ok(Self { store, location, gz })
+    }
 
-/// Per-format driver: how to infer the Arrow schema and how to scan bytes into
-/// record batches.
+    /// Fetch the entire object into memory as [`Bytes`].
+    ///
+    /// Used by the synchronous-scanner drivers (and by `infer_schema` for most
+    /// formats). The VCF scan path avoids this and streams instead.
+    pub async fn fetch_all(&self) -> Result<Bytes> {
+        Ok(self.store.get(&self.location).await?.bytes().await?)
+    }
+}
+
+/// An async stream of decoded record batches.
 ///
-/// The methods take [`BioInput`] by value/reference and do not use `&self`, so
-/// a driver is a pure type-level strategy (`FILE_TYPE` + two functions). This
-/// keeps the generic core free of per-format state.
+/// Each driver's [`BioDriver::scan`] produces this. Drivers that still use
+/// oxbow's synchronous scanners wrap their iterator with [`sync_stream`]; the
+/// VCF driver feeds oxbow's `AsyncScanner` directly (and the remaining formats
+/// will follow once their async scanners land in oxbow).
+pub type BioBatchStream =
+    BoxStream<'static, std::result::Result<RecordBatch, ArrowError>>;
+
+/// Wrap a synchronous oxbow batch iterator into an async [`BioBatchStream`].
+///
+/// Used by drivers that still drive a synchronous [`arrow::array::RecordBatch`]
+/// iterator (everything except VCF for now). The iterator is pulled lazily as
+/// the stream is polled, so a downstream limit (e.g. DataFusion's `GlobalLimit`)
+/// that drops the stream stops producing batches.
+pub fn sync_stream(
+    iter: impl Iterator<Item = std::result::Result<RecordBatch, ArrowError>> + Send + 'static,
+) -> BioBatchStream {
+    Box::pin(stream::iter(iter))
+}
+
+/// Per-format driver: how to infer the Arrow schema and how to scan an object
+/// into record batches.
+///
+/// Both methods are async and take a store-backed [`BioInput`] (not materialized
+/// bytes), so each format can read only what it needs. A driver is a pure
+/// type-level strategy (`FILE_TYPE` + two functions); it holds no state.
+#[async_trait]
 pub trait BioDriver: Send + Sync + Unpin + 'static {
     /// Lowercase file type / extension base, e.g. `"vcf"`, `"fasta"`.
     const FILE_TYPE: &'static str;
 
-    /// Infer the Arrow schema from the object's bytes (without scanning).
-    fn infer_schema(input: &BioInput) -> Result<SchemaRef>;
+    /// Infer the Arrow schema from the object (without scanning records).
+    async fn infer_schema(input: &BioInput) -> Result<SchemaRef>;
 
-    /// Scan the object's bytes into a [`Send`] batch iterator.
-    fn scan(input: BioInput, batch_size: usize) -> Result<BioBatchIter>;
+    /// Scan the object into an async batch stream.
+    ///
+    /// `limit`, when set, is pushed down into the oxbow scanner so that
+    /// decoding stops after that many records — not (as before) at the next
+    /// `batch_size` boundary. DataFusion populates it from `LIMIT n` via its
+    /// `LimitPushdown` physical rule.
+    async fn scan(
+        input: BioInput,
+        batch_size: usize,
+        limit: Option<usize>,
+    ) -> Result<BioBatchStream>;
 }
 
 /// Detect gzip / BGZF framing from the leading magic bytes (`1f 8b`).
@@ -303,7 +357,7 @@ impl<D: BioDriver + 'static> FileSource for BioSource<D> {
     fn create_file_opener(
         &self,
         object_store: Arc<dyn ObjectStore>,
-        _base_config: &FileScanConfig,
+        base_config: &FileScanConfig,
         _partition: usize,
     ) -> Result<Arc<dyn FileOpener>> {
         let mut options = self.options.clone();
@@ -311,8 +365,15 @@ impl<D: BioDriver + 'static> FileSource for BioSource<D> {
             options.batch_size = batch_size;
         }
         let file_indices = self.projection.file_indices.clone();
-        let opener: Arc<dyn FileOpener> =
-            Arc::new(BioOpener::<D>::new(object_store, options, file_indices));
+        // `FileScanConfig.limit` is populated by DataFusion's `LimitPushdown`
+        // rule for `LIMIT n` queries; thread it into the scanner so decoding
+        // stops early.
+        let opener: Arc<dyn FileOpener> = Arc::new(BioOpener::<D>::new(
+            object_store,
+            options,
+            file_indices,
+            base_config.limit,
+        ));
         // The opener yields the full file schema; ProjectionOpener applies the
         // column projection (and resolves partition-column references).
         ProjectionOpener::try_new(
@@ -373,6 +434,7 @@ pub struct BioOpener<D: BioDriver> {
     object_store: Arc<dyn ObjectStore>,
     options: BioOptions,
     file_indices: Vec<usize>,
+    limit: Option<usize>,
     _driver: PhantomData<D>,
 }
 
@@ -381,12 +443,14 @@ impl<D: BioDriver> BioOpener<D> {
         object_store: Arc<dyn ObjectStore>,
         options: BioOptions,
         file_indices: Vec<usize>,
+        limit: Option<usize>,
     ) -> Self {
         Self {
             object_store,
             options,
             _driver: PhantomData,
             file_indices,
+            limit,
         }
     }
 }
@@ -396,17 +460,16 @@ impl<D: BioDriver + 'static> FileOpener for BioOpener<D> {
         let store = Arc::clone(&self.object_store);
         let batch_size = self.options.batch_size;
         let indices = self.file_indices.clone();
+        let limit = self.limit;
 
         Ok(Box::pin(async move {
             let location = partitioned_file.object_meta.location.clone();
-            let bytes = store.get(&location).await?.bytes().await?;
-            let input = BioInput {
-                gz: is_gzip(&bytes),
-                bytes,
-            };
-            // scan returns a synchronous iterator over Result<RecordBatch, _>.
-            let batches = D::scan(input, batch_size)?;
-            let stream = stream::iter(batches)
+            // Build a store-backed input: the opener no longer materializes the
+            // whole object — each driver reads what it needs (VCF streams; the
+            // rest fetch_all internally).
+            let input = BioInput::open(store, location).await?;
+            let stream = D::scan(input, batch_size, limit).await?;
+            let stream = stream
                 .map(move |r| {
                     let batch = r?;
                     if indices.len() < batch.num_columns() {
@@ -501,12 +564,8 @@ impl<D: BioDriver + 'static> FileFormat for BioFormat<D> {
                 D::FILE_TYPE
             ))
         })?;
-        let bytes = store.get(&object.location).await?.bytes().await?;
-        let input = BioInput {
-            gz: is_gzip(&bytes),
-            bytes,
-        };
-        D::infer_schema(&input)
+        let input = BioInput::open(Arc::clone(store), object.location.clone()).await?;
+        D::infer_schema(&input).await
     }
 
     async fn infer_stats(

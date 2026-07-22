@@ -58,7 +58,7 @@ arrow-ord = "58.3.0"
 parquet = "58.3.0"
 datafusion = { version = "53" }
 noodles = { version = "0.107.0", features = ["vcf"] }
-oxbow = "0.8.0"
+oxbow = { git = "https://github.com/wjixiang/oxbow.git" }
 
 faer = "0.24.4"
 

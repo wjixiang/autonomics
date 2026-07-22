@@ -8,20 +8,22 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
+use async_trait::async_trait;
 use datafusion::error::Result;
 use oxbow::bbi::BigWigScanner;
 use oxbow::{CoordSystem, Select};
 
-use super::super::core::{BioBatchIter, BioDriver, BioInput, map_ext};
+use super::super::core::{BioBatchStream, BioDriver, BioInput, map_ext, sync_stream};
 
 pub struct BigWigDriver;
 
+#[async_trait]
 impl BioDriver for BigWigDriver {
     const FILE_TYPE: &'static str = "bigwig";
 
-    fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
-        let reader =
-            bigtools::BigWigRead::open(Cursor::new(input.bytes.clone())).map_err(map_ext)?;
+    async fn infer_schema(input: &BioInput) -> Result<SchemaRef> {
+        let bytes = input.fetch_all().await?;
+        let reader = bigtools::BigWigRead::open(Cursor::new(bytes)).map_err(map_ext)?;
         let scanner = BigWigScanner::new(
             reader.info().clone(),
             Select::All,
@@ -31,8 +33,9 @@ impl BioDriver for BigWigDriver {
         Ok(Arc::new(scanner.schema().clone()))
     }
 
-    fn scan(input: BioInput, batch_size: usize) -> Result<BioBatchIter> {
-        let reader = bigtools::BigWigRead::open(Cursor::new(input.bytes)).map_err(map_ext)?;
+    async fn scan(input: BioInput, batch_size: usize, limit: Option<usize>) -> Result<BioBatchStream> {
+        let bytes = input.fetch_all().await?;
+        let reader = bigtools::BigWigRead::open(Cursor::new(bytes)).map_err(map_ext)?;
         let scanner = BigWigScanner::new(
             reader.info().clone(),
             Select::All,
@@ -40,8 +43,8 @@ impl BioDriver for BigWigDriver {
         )
         .map_err(map_ext)?;
         let batches = scanner
-            .scan(reader, None, Some(batch_size), None)
+            .scan(reader, None, Some(batch_size), limit)
             .map_err(map_ext)?;
-        Ok(Box::new(batches))
+        Ok(sync_stream(batches))
     }
 }

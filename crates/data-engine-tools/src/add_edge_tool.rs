@@ -13,7 +13,9 @@ use crate::ExecError;
     name = "add_edge",
     description = "Connect two DAG nodes port-to-port: data flows from the \
                   'from' node's output port to the 'to' node's input port. \
-                  Omit from_port/to_port for single-port nodes (default ports). \
+                  All four arguments are required — there is no default-port \
+                  fallback. Use `get_node_ports` to discover the correct \
+                  output/input port indices before calling. \
                   \
                   WARNING — DO NOT call `add_edge` in the same response turn as \
                   `add_node`. Both endpoints (`from` and `to`) must already exist \
@@ -27,12 +29,12 @@ use crate::ExecError;
 pub struct AddEdgeInput {
     #[desc = "ID of the upstream (source) node"]
     pub from: String,
-    #[desc = "Optional output port name on the 'from' node. Omit for single-output nodes."]
-    pub from_port: Option<u8>,
+    #[desc = "Output port index on the 'from' node (use `get_node_ports` to look it up)"]
+    pub from_port: u8,
     #[desc = "ID of the downstream (target) node"]
     pub to: String,
-    #[desc = "Optional input port name on the 'to' node. Omit for single-input nodes."]
-    pub to_port: Option<u8>,
+    #[desc = "Input port index on the 'to' node (use `get_node_ports` to look it up)"]
+    pub to_port: u8,
 }
 
 pub struct AddEdgeTool {
@@ -50,28 +52,15 @@ impl ToolFunction for AddEdgeTool {
     type Input = AddEdgeInput;
 
     async fn run(&self, input: Self::Input) -> Result<ToolResult, ToolError> {
-        let msg = match (&input.from_port, &input.to_port) {
-            (Some(fp), Some(tp)) => {
-                format!("edge added: {}.{} -> {}.{}", input.from, fp, input.to, tp)
-            }
-            _ => format!("edge added: {} -> {}", input.from, input.to),
-        };
+        let msg = format!(
+            "edge added: {}.{} -> {}.{}",
+            input.from, input.from_port, input.to, input.to_port
+        );
 
-        let res = match (input.from_port, input.to_port) {
-            (Some(fp), Some(tp)) => {
-                // let fp: u8 = fp;
-                // .parse()
-                // .map_err(|_| ExecError::Format(format!("invalid from_port: {fp}")))?;
-                // let tp: u8 = tp
-                //     .parse()
-                //     .map_err(|_| ExecError::Format(format!("invalid to_port: {tp}")))?;
-                self.client
-                    .add_edge_port(input.from, fp, input.to, tp)
-                    .await
-            }
-            _ => self.client.add_edge(input.from, input.to).await,
-        };
-        res.map_err(ExecError::from)?;
+        self.client
+            .add_edge_port(input.from, input.from_port, input.to, input.to_port)
+            .await
+            .map_err(ExecError::from)?;
 
         Ok(ToolResult::success(msg))
     }
