@@ -22,6 +22,7 @@ members = [
   "crates/biofusion-cache",
   "bio_crates/ldsc",
   "bio_crates/mr",
+  "infra/sink_ld_matrix",
 ]
 
 [workspace.package]
