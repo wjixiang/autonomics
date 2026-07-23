@@ -17,7 +17,7 @@ use crate::nodes::{
     echo_node::EchoNodeFactory, ldsc_hsq::LdscHsqNodeFactory, ldsc_rg::LdscRgNodeFactory,
     liability::LiabilityNodeFactory, linear_regression::LinearRegressionNodeFactory,
     mr::MrNodeFactory, sink::SinkNodeFactory, source::SourceNodeFactory, sql_node::SqlNodeFactory,
-    test_source::TestSourceFactory,
+    test_source::TestSourceFactory, viz::VizNodeFactory,
 };
 
 /// Build a fresh, isolated [`SessionContext`].
@@ -123,6 +123,7 @@ impl NodeRegistry {
         registry.register(Box::new(EchoNodeFactory {}));
         registry.register(Box::new(TestSourceFactory {}));
         registry.register(Box::new(MrNodeFactory {}));
+        registry.register(Box::new(VizNodeFactory {}));
         registry
     }
 
@@ -212,6 +213,10 @@ mod tests {
             "ldsc_rg" => serde_json::json!({"n_blocks": 200}),
             "liability" => serde_json::json!({"samp_prev": 0.5, "pop_prev": 0.01}),
             "mr" => serde_json::json!({"action": 2, "method_list": ["mr_egger_regression"]}),
+            "visualization" => serde_json::json!({
+                "output_path": "/tmp/dummy_viz.png",
+                "r_code": "p <- ggplot(df, aes(x = x, y = y)) + geom_point()"
+            }),
             "echo" => serde_json::json!({}),
             "test_source" => serde_json::json!({"dataset": "iris"}),
             other => panic!("no fixture spec for kind '{other}'"),

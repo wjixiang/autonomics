@@ -89,6 +89,9 @@ pub struct NodeReport {
     pub elapsed_ms: Option<u64>,
     /// For `SinkNode`: the file path data was written to.
     pub sink_path: Option<String>,
+    /// For `VizNode` (and future artifact-producing nodes): the path of the
+    /// rendered/produced artifact (e.g. a PNG).
+    pub artifact_path: Option<String>,
     /// Structured error info when `status` is `Failed`.
     pub error: Option<DagErrorReport>,
     /// For `Skipped` nodes: the id of the root-cause failed node.

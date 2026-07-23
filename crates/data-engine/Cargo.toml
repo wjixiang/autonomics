@@ -30,6 +30,7 @@ ldsc = { path = "../../bio_crates/ldsc" }
 mr = { path = "../../bio_crates/mr" }
 faer.workspace = true
 schemars.workspace = true
+visualization = { path = "../visualization" }
 
 [dev-dependencies]
 datalake = { path = "../datalake" }

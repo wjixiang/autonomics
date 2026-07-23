@@ -434,6 +434,132 @@ async fn test_get_output_surfaces_collect_error_instead_of_swallowing() {
     );
 }
 
+/// The `viz` tool plots an executed node's output to a PNG without any DAG
+/// edit. End-to-end through the full tool dispatch: build a source + sql DAG,
+/// run it, then call `viz` on the sql node and check the rendered PNG exists.
+///
+/// Requires `Rscript` (with `arrow`/`ggplot2`) on PATH — i.e. the r45 conda
+/// env. Skipped (not failed) when Rscript is unavailable so this test does not
+/// break CI/hosts without R.
+#[tokio::test]
+async fn test_viz_tool_renders_executed_node_output() {
+    if std::process::Command::new("Rscript")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("skipping viz e2e: Rscript not on PATH");
+        return;
+    }
+
+    let file_storage = Arc::new(OpendalFileStorage::new("/mnt/disk3/test"));
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let csv_path =
+        std::path::Path::new(&manifest_dir).join("../data-engine/test_datasets/insurance.csv");
+    let csv_data = std::fs::read(csv_path).unwrap();
+    file_storage
+        .op
+        .write("/insurance.csv", csv_data)
+        .await
+        .unwrap();
+
+    let engine = DataEngine::builder()
+        .register_opendal_fs(file_storage)
+        .unwrap()
+        .build();
+    let (client, _handle) = spawn_with_engine(engine);
+    let tools = data_engine_tools::registrations(Arc::new(client.clone()));
+    let mut toolset = Toolset::new(None);
+    toolset.register_all(tools).unwrap();
+
+    // source -> sql(age, charges) -> run.
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "z1",
+                "add_node",
+                json!({"id": "src", "kind": "source", "spec": {"type": "file", "path": "/insurance.csv"}}),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_node source");
+
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "z2",
+                "add_node",
+                json!({
+                    "id": "scatter",
+                    "kind": "sql",
+                    "spec": {"sql_query": "SELECT age, charges FROM port_0 WHERE age > 30 LIMIT 20"}
+                }),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_node sql (scatter)");
+
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "z3",
+                "add_edge",
+                json!({"from": "src", "from_port": 0, "to": "scatter", "to_port": 0}),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "add_edge src->scatter");
+
+    let res = toolset
+        .execute(&[build_tooluse("z4", "run_dag", json!({}))], None, None)
+        .await
+        .unwrap();
+    check_ok(&res[0], "run_dag");
+
+    // Plot the sql node's output on demand via the viz tool.
+    let out = format!("/tmp/viz_tool_e2e_{}.png", std::process::id());
+    let res = toolset
+        .execute(
+            &[build_tooluse(
+                "z5",
+                "viz",
+                json!({
+                    "id": "scatter",
+                    "r_code": "p <- ggplot(df, aes(x = age, y = charges)) + geom_point()",
+                    "output_path": out,
+                    "width": 6.0,
+                    "height": 4.0,
+                    "dpi": 100.0
+                }),
+            )],
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    check_ok(&res[0], "viz tool");
+
+    // The artifact should be a real PNG.
+    let bytes = std::fs::read(&out).expect("viz tool should have written the PNG");
+    assert!(bytes.len() > 100, "PNG too small");
+    assert_eq!(&bytes[0..4], &[0x89, b'P', b'N', b'G'], "not a PNG signature");
+
+    let parsed = parse_tool_json(&res[0].content);
+    assert_eq!(parsed["artifact_path"], serde_json::json!(out));
+    assert!(parsed["rows_plotted"].as_u64().unwrap_or(0) > 0, "rows_plotted > 0");
+    eprintln!("viz tool e2e OK: {} bytes at {out}", bytes.len());
+    let _ = std::fs::remove_file(&out);
+}
+
 /// Synthetic baseline: a hand-built Struct column (via `named_struct`) does
 /// NOT trigger obstacle #2 — `returned_rows` matches `total_rows`. This
 /// narrows the VCF bug to the Dictionary/List-encoded INFO subfields, not to

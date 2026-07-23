@@ -10,6 +10,7 @@ mod remove_node_tool;
 mod run_dag_tool;
 mod update_node_tool;
 mod view_dag_tool;
+mod viz_tool;
 
 use std::sync::Arc;
 
@@ -82,6 +83,7 @@ pub fn registrations(client: Arc<DataEngineClient>) -> Vec<ToolRegistration> {
         ToolRegistration::from(get_output_tool::GetOutputTool::new(client.clone())),
         ToolRegistration::from(remove_node_tool::RemoveNodeTool::new(client.clone())),
         ToolRegistration::from(view_dag_tool::ViewDagTool::new(client.clone())),
+        ToolRegistration::from(viz_tool::VizTool::new(client.clone())),
         ToolRegistration::from(clear_dag_tool::ClearDagTool::new(client)),
     ]
 }
