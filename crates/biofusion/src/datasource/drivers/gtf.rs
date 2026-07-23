@@ -28,7 +28,11 @@ impl BioDriver for GtfDriver {
         Ok(Arc::new(scanner.schema().clone()))
     }
 
-    async fn scan(input: BioInput, batch_size: usize, limit: Option<usize>) -> Result<BioBatchStream> {
+    async fn scan(
+        input: BioInput,
+        batch_size: usize,
+        limit: Option<usize>,
+    ) -> Result<BioBatchStream> {
         let bytes = input.fetch_all().await?;
         let reader = noodles::gtf::io::Reader::new(buf_reader(bytes, input.gz));
         let scanner = scanner()?;

@@ -16,8 +16,8 @@ use datalake::Datalake;
 pub mod error;
 
 pub use crate::nodes::{
-    FileFormat, FileSinkNode, IcebergSinkNode, LdscHsqConfig, LdscHsqNode,
-    LinearRegressionNode, SinkMode, Source, SourceNode, SqlNode, WriteFormat,
+    FileFormat, FileSinkNode, IcebergSinkNode, LdscHsqConfig, LdscHsqNode, LinearRegressionNode,
+    SinkMode, Source, SourceNode, SqlNode, WriteFormat,
 };
 
 /// `DataEngine` is the core object that implements the data analysis engine.

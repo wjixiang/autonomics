@@ -9,10 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use datafusion::{
-    catalog::CatalogProvider,
-    common::HashMap,
-    dataframe::DataFrame,
-    error::DataFusionError,
+    catalog::CatalogProvider, common::HashMap, dataframe::DataFrame, error::DataFusionError,
     execution::runtime_env::RuntimeEnv,
 };
 use datalake::Datalake;

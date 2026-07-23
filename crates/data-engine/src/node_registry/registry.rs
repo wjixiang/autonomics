@@ -16,9 +16,8 @@ use crate::nodes::meta::NodePorts;
 use crate::nodes::{
     echo_node::EchoNodeFactory, ldsc_hsq::LdscHsqNodeFactory, ldsc_rg::LdscRgNodeFactory,
     liability::LiabilityNodeFactory, linear_regression::LinearRegressionNodeFactory,
-    mr::MrNodeFactory, sink_file::FileSinkNodeFactory,
-    sink_iceberg::IcebergSinkNodeFactory, source::SourceNodeFactory, sql_node::SqlNodeFactory,
-    test_source::TestSourceFactory,
+    mr::MrNodeFactory, sink_file::FileSinkNodeFactory, sink_iceberg::IcebergSinkNodeFactory,
+    source::SourceNodeFactory, sql_node::SqlNodeFactory, test_source::TestSourceFactory,
 };
 
 /// Build a fresh, isolated [`SessionContext`].

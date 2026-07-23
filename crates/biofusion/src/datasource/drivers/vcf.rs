@@ -44,9 +44,7 @@ pub struct VcfDriver;
 /// once) and gzip/BGZF is decoded as a multi-member stream when `gz` is set.
 /// Dropping the returned reader — e.g. when a downstream limit is reached —
 /// stops the store from being polled further.
-async fn open_reader(
-    input: &BioInput,
-) -> Result<Box<dyn AsyncBufRead + Unpin + Send>> {
+async fn open_reader(input: &BioInput) -> Result<Box<dyn AsyncBufRead + Unpin + Send>> {
     use async_compression::tokio::bufread::GzipDecoder;
     use tokio_util::io::StreamReader;
 

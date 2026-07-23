@@ -1,6 +1,6 @@
 //! Read-only verification: per-chromosome row counts + grand total.
-use datalake::Datalake;
 use datafusion::arrow::array::Int64Array;
+use datalake::Datalake;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

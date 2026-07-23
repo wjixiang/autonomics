@@ -33,7 +33,11 @@ impl BioDriver for BigWigDriver {
         Ok(Arc::new(scanner.schema().clone()))
     }
 
-    async fn scan(input: BioInput, batch_size: usize, limit: Option<usize>) -> Result<BioBatchStream> {
+    async fn scan(
+        input: BioInput,
+        batch_size: usize,
+        limit: Option<usize>,
+    ) -> Result<BioBatchStream> {
         let bytes = input.fetch_all().await?;
         let reader = bigtools::BigWigRead::open(Cursor::new(bytes)).map_err(map_ext)?;
         let scanner = BigWigScanner::new(

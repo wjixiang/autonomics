@@ -31,7 +31,11 @@ impl BioDriver for SamDriver {
         Ok(Arc::new(scanner.schema().clone()))
     }
 
-    async fn scan(input: BioInput, batch_size: usize, limit: Option<usize>) -> Result<BioBatchStream> {
+    async fn scan(
+        input: BioInput,
+        batch_size: usize,
+        limit: Option<usize>,
+    ) -> Result<BioBatchStream> {
         let bytes = input.fetch_all().await?;
         let mut reader = noodles::sam::io::Reader::new(buf_reader(bytes, input.gz));
         let header = reader.read_header().map_err(map_ext)?;
