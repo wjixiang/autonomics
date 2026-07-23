@@ -3,14 +3,17 @@
 //!
 //! Mirrors [`crate::nodes::SinkNode`]: a [`VizNode`] has exactly one input and
 //! produces no output. It collects the upstream `RecordBatch`es, hands them to
-//! the `visualization` crate (Arrow IPC → `Rscript` ggplot2), and writes a PNG
-//! to `output_path`. The rendered path is surfaced to the agent via
+//! the `visualization` crate (Arrow IPC → `Rscript` ggplot2), and writes the
+//! PNG **into the engine's opendal-virtualized filesystem** (not the host
+//! filesystem), so the artifact lives in the same isolated space as source/
+//! sink data. The rendered virtual path is surfaced to the agent via
 //! `NodeReport.artifact_path` (see [`crate::dag::graph`]).
 
-use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use datafusion::common::HashMap;
+use fs::OpendalFileStorage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -29,15 +32,21 @@ pub enum VizError {
         #[source]
         source: visualization::error::VizError,
     },
+    #[error("no opendal filesystem registered with the engine — \
+             the visualization node needs one to write the PNG")]
+    NoOpendalFs,
+    #[error("writing the PNG into the opendal filesystem failed: {0}")]
+    OpendalWrite(String),
 }
 
 impl From<VizError> for DagError {
     fn from(e: VizError) -> Self {
+        let msg = e.to_string();
         match e {
             VizError::InvalidInput { message } => DagError::Schedule(message),
-            VizError::Render { source } => DagError::NodeError {
+            _ => DagError::NodeError {
                 node_type: "visualization".to_string(),
-                msg: source.to_string(),
+                msg,
             },
         }
     }
@@ -46,8 +55,9 @@ impl From<VizError> for DagError {
 /// Spec for a [`VizNode`].
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct VizNodeSpec {
-    /// Path the rendered PNG is written to. Its parent directory must exist
-    /// and be writable.
+    /// Virtual path (in the engine's opendal filesystem) the rendered PNG is
+    /// written to — e.g. `"/plots/scatter.png"`. Resolved relative to the
+    /// opendal root, just like sink/source paths.
     pub output_path: String,
     /// ggplot2 R code that runs with a `data.frame` named `df` already bound
     /// to the input data. Must build a ggplot object and assign it to a
@@ -67,11 +77,15 @@ pub struct VizNodeSpec {
 
 pub struct VizNode {
     meta: NodePorts,
+    /// Virtual path the PNG is written to (reported as `artifact_path`).
     output_path: String,
     r_code: String,
     width: Option<f64>,
     height: Option<f64>,
     dpi: Option<f64>,
+    /// The opendal handle the PNG is uploaded through. Required at execute
+    /// time; the factory pulls it out of the [`NodeCtx`].
+    opendal: Option<Arc<OpendalFileStorage>>,
 }
 
 /// Static port layout for every [`VizNode`]: a single untyped input port and
@@ -81,7 +95,7 @@ fn port_layout() -> NodePorts {
 }
 
 impl VizNode {
-    pub fn new(spec: VizNodeSpec) -> Self {
+    pub fn new(spec: VizNodeSpec, opendal: Option<Arc<OpendalFileStorage>>) -> Self {
         Self {
             meta: port_layout(),
             output_path: spec.output_path,
@@ -89,10 +103,12 @@ impl VizNode {
             width: spec.width,
             height: spec.height,
             dpi: spec.dpi,
+            opendal,
         }
     }
 
-    /// The path the PNG is rendered to (used to populate the node report).
+    /// The virtual path the PNG is written to (used to populate the node
+    /// report's `artifact_path`).
     pub fn output_path(&self) -> &str {
         &self.output_path
     }
@@ -130,10 +146,10 @@ impl crate::node_registry::registry::NodeFactory for VizNodeFactory {
     fn build(
         &self,
         spec: serde_json::Value,
-        _node_ctx: crate::node_registry::registry::NodeCtx,
+        node_ctx: crate::node_registry::registry::NodeCtx,
     ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
         let node_spec: VizNodeSpec = serde_json::from_value(spec)?;
-        Ok(Box::new(VizNode::new(node_spec)))
+        Ok(Box::new(VizNode::new(node_spec, node_ctx.opendal.clone())))
     }
 }
 
@@ -151,6 +167,7 @@ impl DagNode for VizNode {
             width: self.width,
             height: self.height,
             dpi: self.dpi,
+            opendal: self.opendal.clone(),
         };
         Box::new(cp)
     }
@@ -164,6 +181,8 @@ impl DagNode for VizNode {
     }
 
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
+        let storage = self.opendal.clone().ok_or(VizError::NoOpendalFs)?;
+
         let input = inputs.first().ok_or(VizError::InvalidInput {
             message: "VizNode requires exactly one upstream input".to_string(),
         })?;
@@ -181,17 +200,25 @@ impl DagNode for VizNode {
                 msg: format!("collecting input failed: {e}"),
             })?;
 
-        let path = PathBuf::from(&self.output_path);
-        visualization::render::render_png(
+        // Render the PNG to bytes in a private tempdir (R writes to scratch,
+        // never to the caller's filesystem), then upload the bytes into the
+        // engine's opendal-virtualized filesystem at the requested path.
+        let png_bytes = visualization::render::render_png_bytes(
             &batches,
             &self.r_code,
-            &path,
             self.width,
             self.height,
             self.dpi,
         )
         .await
         .map_err(|source| VizError::Render { source })?;
+
+        let virtual_path = OpendalFileStorage::normalize_path(&self.output_path);
+        storage
+            .op
+            .write(&virtual_path, png_bytes)
+            .await
+            .map_err(|e| VizError::OpendalWrite(e.to_string()))?;
 
         // No DataFrame output — like SinkNode.
         Ok(HashMap::new())
@@ -224,18 +251,27 @@ mod tests {
         ctx.read_batch(batch).expect("ctx reads batch")
     }
 
-    /// The node renders its input to a real PNG and reports the output path.
-    /// Requires `Rscript` (with `arrow`/`ggplot2`) on PATH.
+    /// The node renders its input to a PNG written **through opendal** (into
+    /// the virtualized root), not the host filesystem. We point opendal at a
+    /// tempdir, render, then read the PNG back via the operator to confirm it
+    /// landed in the virtual space. Requires `Rscript` + arrow/ggplot2 on PATH.
     #[tokio::test]
-    async fn test_viz_node_renders_png() {
-        let out = format!("/tmp/viz_node_{}.png", std::process::id());
-        let mut node = VizNode::new(VizNodeSpec {
-            output_path: out.clone(),
-            r_code: "p <- ggplot(df, aes(x = x, y = y)) + geom_point() + geom_line()".to_string(),
-            width: Some(6.0),
-            height: Some(4.0),
-            dpi: Some(100.0),
-        });
+    async fn test_viz_node_renders_png_via_opendal() {
+        let root = tempfile::tempdir().expect("tempdir for opendal root");
+        let storage = Arc::new(OpendalFileStorage::new(root.path()));
+
+        let virtual_out = format!("/viz_node_{}.png", std::process::id());
+        let mut node = VizNode::new(
+            VizNodeSpec {
+                output_path: virtual_out.clone(),
+                r_code: "p <- ggplot(df, aes(x = x, y = y)) + geom_point() + geom_line()"
+                    .to_string(),
+                width: Some(6.0),
+                height: Some(4.0),
+                dpi: Some(100.0),
+            },
+            Some(storage.clone()),
+        );
 
         let df = sample_dataframe();
         let res = node
@@ -244,11 +280,15 @@ mod tests {
             .expect("execute should succeed");
         assert!(res.is_empty(), "viz node has no output ports");
 
-        let bytes = std::fs::read(&out).expect("read rendered png");
+        // The opendal Fs backend is rooted at `root`. The render tempdir is a
+        // *separate* tempdir (deleted when render_png_bytes returns), so a PNG
+        // appearing under `root` proves it was written through opendal — not
+        // directly to the host filesystem.
+        let host_path = root.path().join(virtual_out.trim_start_matches('/'));
+        let bytes = std::fs::read(&host_path).expect("png landed under opendal root");
         assert!(bytes.len() > 100);
         assert_eq!(&bytes[0..4], &[0x89, b'P', b'N', b'G']);
-        assert_eq!(node.output_path(), out);
-        eprintln!("VizNode OK: {} bytes at {out}", bytes.len());
-        let _ = std::fs::remove_file(&out);
+        assert_eq!(node.output_path(), virtual_out);
+        eprintln!("VizNode OK: {} bytes via opendal at {virtual_out}", bytes.len());
     }
 }

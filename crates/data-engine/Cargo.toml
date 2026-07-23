@@ -36,3 +36,4 @@ visualization = { path = "../visualization" }
 datalake = { path = "../datalake" }
 iceberg.workspace = true
 arrow-buffer.workspace = true
+tempfile = "3"

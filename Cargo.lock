@@ -1719,6 +1719,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stat-primitives",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -1743,7 +1744,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "visualization",
 ]
 
 [[package]]

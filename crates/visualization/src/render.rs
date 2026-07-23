@@ -28,6 +28,23 @@ const DEFAULT_DPI: f64 = 150.0;
 /// Hard cap on a single render before the subprocess is killed.
 const DEFAULT_TIMEOUT_SECS: u64 = 300;
 
+/// Render `batches` to a PNG and return the **bytes**, using the supplied
+/// ggplot2 code. The PNG is produced in a private tempdir and never touches a
+/// caller-chosen path — use this when you want to forward the bytes elsewhere
+/// (e.g. upload into a virtualized object store) rather than write to disk.
+///
+/// See [`render_png`] for the `r_code` contract (`df` bound, must assign `p`).
+pub async fn render_png_bytes(
+    batches: &[RecordBatch],
+    r_code: &str,
+    width: Option<f64>,
+    height: Option<f64>,
+    dpi: Option<f64>,
+) -> Result<Vec<u8>> {
+    let (ipc, width, height, dpi) = prepare(batches, r_code, width, height, dpi)?;
+    run_rscript(&ipc, r_code, width, height, dpi).await
+}
+
 /// Render `batches` to a PNG at `output_path` using the supplied ggplot2 code.
 ///
 /// # The `r_code` contract
@@ -43,7 +60,9 @@ const DEFAULT_TIMEOUT_SECS: u64 = 300;
 /// The wrapper then calls `ggsave(output_path, plot = p, ...)` with the given
 /// `width`/`height`/`dpi`.
 ///
-/// `output_path`'s parent directory must exist and be writable.
+/// `output_path`'s parent directory must exist and be writable. This is a
+/// thin wrapper over [`render_png_bytes`] that writes the returned bytes to
+/// `output_path`.
 pub async fn render_png(
     batches: &[RecordBatch],
     r_code: &str,
@@ -52,6 +71,20 @@ pub async fn render_png(
     height: Option<f64>,
     dpi: Option<f64>,
 ) -> Result<()> {
+    let bytes = render_png_bytes(batches, r_code, width, height, dpi).await?;
+    std::fs::write(output_path, bytes)?;
+    Ok(())
+}
+
+/// Shared front-end: validate input, derive the schema, serialize the IPC
+/// stream, and resolve default dimensions.
+fn prepare(
+    batches: &[RecordBatch],
+    r_code: &str,
+    width: Option<f64>,
+    height: Option<f64>,
+    dpi: Option<f64>,
+) -> Result<(Vec<u8>, f64, f64, f64)> {
     let r_code = r_code.trim();
     if r_code.is_empty() {
         return Err(VizError::InvalidPlotCode(
@@ -68,12 +101,10 @@ pub async fn render_png(
         .unwrap_or_else(|| arrow::datatypes::SchemaRef::new(arrow::datatypes::Schema::empty()));
 
     let ipc = batches_to_ipc_stream(&schema, batches)?;
-
     let width = width.unwrap_or(DEFAULT_WIDTH);
     let height = height.unwrap_or(DEFAULT_HEIGHT);
     let dpi = dpi.unwrap_or(DEFAULT_DPI);
-
-    run_rscript(&ipc, r_code, output_path, width, height, dpi).await
+    Ok((ipc, width, height, dpi))
 }
 
 /// Serialize `RecordBatch`es (sharing one schema) into Arrow **IPC stream**
@@ -103,28 +134,30 @@ fn resolve_rscript() -> Result<PathBuf> {
 }
 
 /// Write the IPC bytes + a generated R script to a fresh tempdir, invoke
-/// `Rscript`, and verify the PNG was produced.
+/// `Rscript`, and return the rendered PNG bytes. The output PNG lives inside
+/// the tempdir (a private scratch path), so the caller's filesystem layout is
+/// never touched — only the returned bytes leave this function.
 async fn run_rscript(
     ipc: &[u8],
     r_code: &str,
-    output_path: &Path,
     width: f64,
     height: f64,
     dpi: f64,
-) -> Result<()> {
+) -> Result<Vec<u8>> {
     let rscript = resolve_rscript()?;
 
     let tmp = tempfile::tempdir()?;
     let data_path = tmp.path().join("data.arrow_stream");
+    let out_path = tmp.path().join("out.png");
     let script_path = tmp.path().join("plot.R");
 
     std::fs::write(&data_path, ipc)?;
 
     // The R wrapper: load libs, read the IPC stream into `df`, run the
     // caller's code (which must assign `p`), then save. Paths are injected as
-    // quoted literals to avoid shell/quote injection from `output_path`.
+    // quoted literals to avoid shell/quote injection.
     let data_lit = r_escape(&data_path.to_string_lossy());
-    let out_lit = r_escape(&output_path.to_string_lossy());
+    let out_lit = r_escape(&out_path.to_string_lossy());
     // `{{` / `}}` are literal braces inside the format string.
     let script = format!(
         r#"library(arrow)
@@ -173,17 +206,17 @@ ggsave("{out_lit}", plot = p, device = png,
         });
     }
 
-    // Verify the artifact landed where expected.
-    let meta = std::fs::metadata(output_path)?;
-    if meta.len() == 0 {
+    // Read the rendered PNG back as bytes.
+    let bytes = std::fs::read(&out_path)?;
+    if bytes.is_empty() {
         return Err(VizError::InvalidPlotCode(
             "ggsave produced an empty file".to_string(),
         ));
     }
 
-    // The tempdir (IPC + script) is removed when `tmp` drops.
+    // The tempdir (IPC + script + PNG) is removed when `tmp` drops.
     drop(tmp);
-    Ok(())
+    Ok(bytes)
 }
 
 /// Escape a path for safe interpolation into a double-quoted R string literal:
