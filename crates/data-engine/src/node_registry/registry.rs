@@ -16,7 +16,8 @@ use crate::nodes::meta::NodePorts;
 use crate::nodes::{
     echo_node::EchoNodeFactory, ldsc_hsq::LdscHsqNodeFactory, ldsc_rg::LdscRgNodeFactory,
     liability::LiabilityNodeFactory, linear_regression::LinearRegressionNodeFactory,
-    mr::MrNodeFactory, sink::SinkNodeFactory, source::SourceNodeFactory, sql_node::SqlNodeFactory,
+    mr::MrNodeFactory, sink_file::FileSinkNodeFactory,
+    sink_iceberg::IcebergSinkNodeFactory, source::SourceNodeFactory, sql_node::SqlNodeFactory,
     test_source::TestSourceFactory,
 };
 
@@ -115,7 +116,8 @@ impl NodeRegistry {
         };
         registry.register(Box::new(SqlNodeFactory {}));
         registry.register(Box::new(SourceNodeFactory {}));
-        registry.register(Box::new(SinkNodeFactory {}));
+        registry.register(Box::new(FileSinkNodeFactory {}));
+        registry.register(Box::new(IcebergSinkNodeFactory {}));
         registry.register(Box::new(LdscHsqNodeFactory {}));
         registry.register(Box::new(LdscRgNodeFactory {}));
         registry.register(Box::new(LiabilityNodeFactory {}));
@@ -202,9 +204,10 @@ mod tests {
         match kind {
             "sql" => serde_json::json!({"sql_query": "SELECT 1"}),
             "source" => serde_json::json!({"type": "file", "path": "/tmp/dummy.csv"}),
-            "sink" => {
-                serde_json::json!({"type": "file", "path": "/tmp/dummy_out.csv", "format": "csv"})
+            "sink_file" => {
+                serde_json::json!({"path": "/tmp/dummy_out.csv", "format": "csv"})
             }
+            "sink_iceberg" => serde_json::json!({"ident": "gwas.dummy"}),
             "linear_regression" => {
                 serde_json::json!({"x_columns": ["x"], "y_column": "y"})
             }

@@ -114,13 +114,13 @@ async fn sink_chromosome(
 
     // Refresh the provider so the planner sees the just-created table.
     let fresh_provider = datalake.get_provider().await?;
-    ctx.register_catalog("iceberg", Arc::new(fresh_provider) as Arc<dyn CatalogProvider>);
+    ctx.register_catalog(
+        "iceberg",
+        Arc::new(fresh_provider) as Arc<dyn CatalogProvider>,
+    );
 
     // Register the source as a temp view and INSERT.
-    let src_name = format!(
-        "__sink_src_{:x}_{table_name}",
-        std::process::id()
-    );
+    let src_name = format!("__sink_src_{:x}_{table_name}", std::process::id());
     ctx.register_table(&src_name, df.into_view())?;
     let fqn = format!("iceberg.{LD_NAMESPACE}.{table_name}");
     let sql = format!("INSERT INTO {fqn} SELECT * FROM {src_name}");

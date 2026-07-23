@@ -16,8 +16,8 @@ use datalake::Datalake;
 pub mod error;
 
 pub use crate::nodes::{
-    FileFormat, LdscHsqConfig, LdscHsqNode, LinearRegressionNode, Sink, SinkMode, SinkNode, Source,
-    SourceNode, SqlNode, WriteFormat,
+    FileFormat, FileSinkNode, IcebergSinkNode, LdscHsqConfig, LdscHsqNode,
+    LinearRegressionNode, SinkMode, Source, SourceNode, SqlNode, WriteFormat,
 };
 
 /// `DataEngine` is the core object that implements the data analysis engine.
@@ -357,8 +357,8 @@ mod tests {
         engine
             .add_node_from_registry(
                 "out",
-                "sink",
-                serde_json::json!({"type": "file", "path": out_path, "format": "csv"}),
+                "sink_file",
+                serde_json::json!({"path": out_path, "format": "csv"}),
             )
             .unwrap();
         // Default edges: each node has a single relevant port, resolved automatically.
@@ -505,8 +505,8 @@ mod tests {
         engine
             .add_node_from_registry(
                 "out",
-                "sink",
-                serde_json::json!({"type": "file", "path": "/tmp/dag_join_out.csv", "format": "csv"}),
+                "sink_file",
+                serde_json::json!({"path": "/tmp/dag_join_out.csv", "format": "csv"}),
             )
             .unwrap();
         engine
@@ -839,7 +839,8 @@ mod tests {
         for expected in [
             "sql",
             "source",
-            "sink",
+            "sink_file",
+            "sink_iceberg",
             "ldsc",
             "linear_regression",
             "echo",
@@ -860,7 +861,8 @@ mod tests {
         for kind in [
             "sql",
             "source",
-            "sink",
+            "sink_file",
+            "sink_iceberg",
             "ldsc",
             "linear_regression",
             "echo",
@@ -987,8 +989,8 @@ mod tests {
         engine
             .add_node_from_registry(
                 "out",
-                "sink",
-                serde_json::json!({"type": "file", "path": out, "format": "csv"}),
+                "sink_file",
+                serde_json::json!({"path": out, "format": "csv"}),
             )
             .unwrap();
 
@@ -1108,8 +1110,8 @@ mod tests {
         engine
             .add_node_from_registry(
                 "out",
-                "sink",
-                serde_json::json!({"type": "file", "path": out, "format": "csv"}),
+                "sink_file",
+                serde_json::json!({"path": out, "format": "csv"}),
             )
             .unwrap();
 
@@ -1158,8 +1160,8 @@ mod tests {
         engine
             .add_node_from_registry(
                 "out",
-                "sink",
-                serde_json::json!({"type": "file", "path": out, "format": "csv"}),
+                "sink_file",
+                serde_json::json!({"path": out, "format": "csv"}),
             )
             .unwrap();
         engine.add_edge("src", "agg", 0, 0).unwrap();
