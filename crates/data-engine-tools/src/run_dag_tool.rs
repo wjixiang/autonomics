@@ -57,6 +57,9 @@ impl ToolFunction for RunDagTool {
                 if let Some(path) = nr.file_path {
                     obj.insert("file_path".into(), serde_json::json!(path));
                 }
+                if let Some(path) = nr.artifact_path {
+                    obj.insert("artifact_path".into(), serde_json::json!(path));
+                }
                 if let Some(err) = nr.error {
                     obj.insert("error".into(), serde_json::json!(err));
                 }

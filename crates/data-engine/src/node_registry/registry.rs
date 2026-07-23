@@ -16,8 +16,9 @@ use crate::nodes::meta::NodePorts;
 use crate::nodes::{
     echo_node::EchoNodeFactory, ldsc_hsq::LdscHsqNodeFactory, ldsc_rg::LdscRgNodeFactory,
     liability::LiabilityNodeFactory, linear_regression::LinearRegressionNodeFactory,
+
     mr::MrNodeFactory, sink_file::FileSinkNodeFactory, sink_iceberg::IcebergSinkNodeFactory,
-    source::SourceNodeFactory, sql_node::SqlNodeFactory, test_source::TestSourceFactory,
+    source::SourceNodeFactory, sql_node::SqlNodeFactory, test_source::TestSourceFactory, viz::VizNodeFactory
 };
 
 /// Build a fresh, isolated [`SessionContext`].
@@ -75,6 +76,11 @@ pub struct NodeCtx {
     /// operations (create/drop/load) that go through the Iceberg API
     /// directly rather than DataFusion SQL.
     pub datalake: Arc<Datalake>,
+    /// The opendal-backed file storage registered with the engine, used by
+    /// artifact-producing nodes (e.g. `VizNode`) to write outputs into the
+    /// engine's virtualized filesystem rather than the host filesystem.
+    /// `None` when no opendal fs was registered.
+    pub opendal: Option<Arc<fs::OpendalFileStorage>>,
 }
 
 /// Summary of a registered node kind returned by [`NodeRegistry::list_nodes`].
@@ -102,11 +108,13 @@ impl NodeRegistry {
         runtime_env: Arc<RuntimeEnv>,
         iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
         datalake: Arc<Datalake>,
+        opendal: Option<Arc<fs::OpendalFileStorage>>,
     ) -> Self {
         let node_ctx = NodeCtx {
             runtime_env,
             iceberg_catalog,
             datalake,
+            opendal,
         };
 
         let mut registry = Self {
@@ -124,6 +132,7 @@ impl NodeRegistry {
         registry.register(Box::new(EchoNodeFactory {}));
         registry.register(Box::new(TestSourceFactory {}));
         registry.register(Box::new(MrNodeFactory {}));
+        registry.register(Box::new(VizNodeFactory {}));
         registry
     }
 
@@ -214,6 +223,10 @@ mod tests {
             "ldsc_rg" => serde_json::json!({"n_blocks": 200}),
             "liability" => serde_json::json!({"samp_prev": 0.5, "pop_prev": 0.01}),
             "mr" => serde_json::json!({"action": 2, "method_list": ["mr_egger_regression"]}),
+            "visualization" => serde_json::json!({
+                "output_path": "/tmp/dummy_viz.png",
+                "r_code": "p <- ggplot(df, aes(x = x, y = y)) + geom_point()"
+            }),
             "echo" => serde_json::json!({}),
             "test_source" => serde_json::json!({"dataset": "iris"}),
             other => panic!("no fixture spec for kind '{other}'"),
@@ -224,7 +237,7 @@ mod tests {
     fn test_registry() -> NodeRegistry {
         let ctx = SessionContext::new();
         let runtime_env = ctx.runtime_env();
-        NodeRegistry::new(runtime_env, None, Arc::new(Datalake::default()))
+        NodeRegistry::new(runtime_env, None, Arc::new(Datalake::default()), None)
     }
 
     /// Invariant: every registered factory's `kind()` matches the

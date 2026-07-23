@@ -19,6 +19,7 @@ tui
               └── data-engine (DataFusion DAG scheduler)
                     ├── biofusion (genomics file readers)
                     ├── datalake (Iceberg catalog and storage)
+                    ├── visualization (R/ggplot2 rendering)
                     └── bio_crates (ldsc, mr — statistical genetics)
 ```
 
@@ -29,7 +30,7 @@ An agent receives tools from `agentik-core`. The data-engine tools communicate w
 | Area                         | Members                                                                                                                   | Responsibility                                                                                                                            |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | Agent platform               | `agentik-types`, `agentik-sdk`, `agentik-proc`, `agentik-core`, `agentik-tools`, `runtime`                                | API types and clients, declarative tool schemas, agent lifecycle/memory, tool implementations, and sync-to-async hosting.                 |
-| Data analysis                | `data-engine`, `data-engine-tools`, `stat-primitives`, `fs`, `datalake`, `datalake-tools`, `biofusion`, `biofusion-cache` | DAG execution, Agent-exposed DAG operations, statistics, OpenDAL files, Iceberg storage and query tools, and biological-format ingestion. |
+| Data analysis                | `data-engine`, `data-engine-tools`, `stat-primitives`, `fs`, `datalake`, `datalake-tools`, `biofusion`, `biofusion-cache`, `visualization` | DAG execution, Agent-exposed DAG operations, statistics, OpenDAL files, Iceberg storage and query tools, biological-format ingestion, and R/ggplot2 visualization. |
 | Statistical genetics         | `ldsc`, `mr`                                                                                                              | Pure-Rust ports of LD Score Regression (h²/rg/cts) and TwoSampleMR (Mendelian randomization), built on `faer`.                            |
 | Scientific data clients      | `eutils`, `opengwas`, `gwascatalog-sdk`                                                                                   | Clients for NCBI E-utilities, OpenGWAS, and the GWAS Catalog.                                                                             |
 | User interface and rendering | `tui`                                                                                                                     | Terminal Agent UI.                                                                                                                        |
@@ -98,6 +99,22 @@ For direct SDK use, copy `.env.example` to `.env` and provide only the credentia
 
 - **`ldsc`** — A faithful, library-only pure-Rust port of [LD Score Regression](https://github.com/bulik/ldsc) (Bulik-Sullivan & Finucane): SNP-heritability (h²), genetic correlation (rg), cell-type-specific analysis, LD-score computation from PLINK genotypes, summary-statistic munging, and annotation building. Numerics run on [`faer`](https://github.com/sarah-ek/faer) (no LAPACK/MKL). Point estimates are cross-checked against the Python reference's own test suite and golden fixtures. The `estimate_h2` DataFrame entry point is wired into the data-engine (`data-engine/nodes/ldsc_hsq.rs`).
 - **`mr`** — A pure-Rust port of [TwoSampleMR](https://github.com/MRCIEU/TwoSampleMR)'s algorithm API (no IO/plotting) for the DAG engine: Wald ratio, the IVW family, MR-Egger, median and mode estimators, `harmonise_data`, Steiger filtering, and heterogeneity/pleiotropy tests. Built on `faer` + `statrs`, with point estimates validated bit-for-bit against R golden fixtures.
+
+### Visualization (`visualization`)
+
+- **R/ggplot2 rendering** — Render a DataFusion `DataFrame` to a PNG via R's ggplot2. Data crosses the Rust→R boundary as an **Arrow IPC stream** (`arrow::ipc::writer::StreamWriter` → `arrow::read_ipc_stream`), so column types are preserved exactly — no CSV re-inference, no row-wise JSON.
+- **Subprocess, not in-process R** — The renderer shells out to `Rscript` rather than linking `libR` in-process. R is therefore a *runtime-only, optional* dependency: the workspace compiles and the core pipeline (LDSC, MR, …) runs without R installed. A missing or misconfigured R surfaces as a typed `VizError::RscriptNotFound` / `RscriptFailed` at render time, never as a build failure.
+- **DAG node** — Exposed as the `visualization` node kind (`data-engine/nodes/viz.rs`), reached by the agent through the generic `add_node` / `run_dag` tools — no dedicated tool. It mirrors `SinkNode`: one untyped input port, no output ports. The rendered path is reported back via `NodeReport.artifact_path`.
+- **opendal output** — The PNG is written into the engine's **opendal-virtualized filesystem** (the same isolated space as source/sink data), not the host filesystem. `output_path` is a virtual path (e.g. `/plots/scatter.png`); the opendal handle is threaded from the builder through `NodeCtx.opendal`.
+- **Plot spec** — The `r_code` field is ggplot2 R code that runs with a `data.frame` named `df` already bound to the input; it must build a plot and assign it to a variable named `p`. Example: `p <- ggplot(df, aes(x = bp, y = pval)) + geom_point()`. Dimensions (`width`/`height`/`dpi`) are optional.
+
+```text
+DataFrame → collect() → Arrow IPC stream bytes → tempdir → Rscript
+   (arrow::read_ipc_stream → df → <r_code> → ggsave) → PNG bytes
+   → opendal op.write(virtual_path) → NodeReport.artifact_path
+```
+
+- **R requirement (optional)** — Rendering needs `Rscript` on `PATH` with the `arrow` and `ggplot2` packages installed. Override the binary with the `VISUALIZATION_RSCRIPT` env var. The engine does **not** detect or pin an R version — whichever `Rscript` the launching process resolves wins. A conda env is the cleanest way to provision a known-good R (see the crate's tests for the expected packages).
 
 ## Quick Start
 
@@ -313,6 +330,7 @@ autonomics/
 │   ├── datalake/            # Iceberg REST catalog and DataFusion integration
 │   ├── datalake-tools/      # Agent tools for querying and describing Iceberg tables
 │   ├── fs/                  # OpenDAL-backed file storage and file tools
+│   ├── visualization/       # DataFusion → PNG rendering via R/ggplot2 (VizNode)
 │   ├── eutils/              # NCBI E-utilities client
 │   ├── opengwas/            # OpenGWAS client
 │   ├── gwascatalog-sdk/     # GWAS Catalog client
@@ -343,6 +361,7 @@ Some integration tests call external public APIs or require provider credentials
 ## Requirements
 
 - Rust 1.85+ (edition 2024)
+- **R (optional)** — only needed for the `visualization` node. Install R with the `arrow` and `ggplot2` packages and ensure `Rscript` is on `PATH` (or set `VISUALIZATION_RSCRIPT`). Without R, the rest of the workspace builds and runs unchanged.
 
 ## License
 

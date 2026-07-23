@@ -32,6 +32,8 @@ pub struct DataEngine {
     #[allow(dead_code)]
     iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
     datalake: Option<Arc<Datalake>>,
+    #[allow(dead_code)]
+    opendal: Option<Arc<OpendalFileStorage>>,
     dag: DAG,
     node_registry: NodeRegistry,
     config: SchedulerConfig,
@@ -43,6 +45,7 @@ impl DataEngine {
         runtime_env: Arc<RuntimeEnv>,
         iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
         datalake: Option<Arc<Datalake>>,
+        opendal: Option<Arc<OpendalFileStorage>>,
     ) -> Self {
         let node_registry = NodeRegistry::new(
             runtime_env.clone(),
@@ -50,12 +53,14 @@ impl DataEngine {
             datalake
                 .clone()
                 .unwrap_or_else(|| Arc::new(Datalake::default())),
+            opendal.clone(),
         );
         Self {
             ctx,
             runtime_env,
             iceberg_catalog,
             datalake,
+            opendal,
             dag: DAG::default(),
             node_registry,
             config: SchedulerConfig::default(),
@@ -239,6 +244,7 @@ pub struct DataEngineBuilder {
     runtime_env: Arc<RuntimeEnv>,
     iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
     datalake: Option<Arc<Datalake>>,
+    opendal: Option<Arc<OpendalFileStorage>>,
 }
 
 impl Default for DataEngineBuilder {
@@ -249,6 +255,7 @@ impl Default for DataEngineBuilder {
             runtime_env,
             iceberg_catalog: None,
             datalake: None,
+            opendal: None,
         }
     }
 }
@@ -259,7 +266,12 @@ impl DataEngineBuilder {
             .map_err(|e| Error::Custom(format!("cannot parse datafusion url: {e}")))?;
         self.runtime_env
             .register_object_store(object_url.as_ref(), file_session.clone());
-        Ok(self)
+        // Keep the handle so artifact-producing nodes (e.g. VizNode) can write
+        // into the virtualized filesystem instead of the host filesystem.
+        Ok(Self {
+            opendal: Some(file_session),
+            ..self
+        })
     }
 
     pub async fn register_iceberg(mut self) -> Result<Self> {
@@ -277,7 +289,13 @@ impl DataEngineBuilder {
             self.runtime_env.clone(),
             self.iceberg_catalog.clone(),
         );
-        DataEngine::new_from_parts(ctx, self.runtime_env, self.iceberg_catalog, self.datalake)
+        DataEngine::new_from_parts(
+            ctx,
+            self.runtime_env,
+            self.iceberg_catalog,
+            self.datalake,
+            self.opendal,
+        )
     }
 }
 

@@ -22,7 +22,9 @@ members = [
   "crates/biofusion-cache",
   "bio_crates/ldsc",
   "bio_crates/mr",
-  "infra/sink_ld_matrix", "infra/sink_af",
+  "infra/sink_ld_matrix",
+  "crates/visualization",
+   "infra/sink_af",
 ]
 
 [workspace.package]
@@ -62,6 +64,9 @@ noodles = { version = "0.107.0", features = ["vcf"] }
 oxbow = { git = "https://github.com/wjixiang/oxbow.git" }
 
 faer = "0.24.4"
+
+extendr-api = "0.9.0"
+extendr-engine = "0.9.0"
 
 # Suppress unused-warnings for the public-API workspace.dependencies that
 # the umbrella doesn't directly import. Keep this list as a hint for

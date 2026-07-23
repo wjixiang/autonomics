@@ -353,6 +353,13 @@ impl DAG {
                     .and_then(|n| n.as_any().downcast_ref::<FileSinkNode>())
                     .map(|sn| sn.sink_path().to_string());
 
+                // Extract rendered-artifact path from a VizNode via downcast.
+                let artifact_path = self
+                    .nodes
+                    .get(id)
+                    .and_then(|n| n.as_any().downcast_ref::<crate::nodes::VizNode>())
+                    .map(|vn| vn.output_path().to_string());
+
                 let error = self.errors.get(id).map(|e| e.to_report());
                 let skipped_because = skipped_because.get(id).cloned();
 
@@ -363,6 +370,7 @@ impl DAG {
                     output_schema,
                     output_rows,
                     elapsed_ms,
+                    artifact_path,
                     file_path,
                     error,
                     skipped_because,

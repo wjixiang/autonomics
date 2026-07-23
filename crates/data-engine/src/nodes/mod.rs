@@ -17,6 +17,7 @@ pub mod sink_iceberg;
 pub mod source;
 pub mod sql_node;
 pub mod test_source;
+pub mod viz;
 
 pub use echo_node::{EchoNode, EchoNodeFactory, EchoNodeSpec};
 pub use ldsc_hsq::{LdscHsqConfig, LdscHsqNode, LdscHsqNodeFactory};
@@ -33,3 +34,4 @@ pub use sink_iceberg::{IcebergSinkNode, IcebergSinkNodeFactory, IcebergSinkNodeS
 pub use source::{FileFormat, Source, SourceNode, SourceNodeFactory, SourceNodeSpec};
 pub use sql_node::{SqlNode, SqlNodeFactory, SqlNodeSpec};
 pub use test_source::{TestSourceFactory, TestSourceNode, TestSourceSpec};
+pub use viz::{VizNode, VizNodeFactory, VizNodeSpec};

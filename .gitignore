@@ -6,6 +6,7 @@ target
 # TUI logs and runtime artefacts
 apps/phloem-tui/logs/
 logs/
+results/
 
 # Config
 phloem.json
