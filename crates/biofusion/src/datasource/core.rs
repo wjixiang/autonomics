@@ -29,8 +29,8 @@ use datafusion::datasource::physical_plan::{FileScanConfig, FileSource};
 use datafusion::datasource::table_schema::TableSchema;
 use datafusion::error::{DataFusionError, Result};
 use datafusion::execution::context::DataFilePaths;
-use datafusion::object_store::{ObjectStore, ObjectStoreExt};
 use datafusion::object_store::path::Path as StorePath;
+use datafusion::object_store::{ObjectStore, ObjectStoreExt};
 use datafusion::physical_expr::LexRequirement;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
@@ -71,17 +71,18 @@ pub struct BioInput {
 impl BioInput {
     /// Build a [`BioInput`] for `location` in `store`, detecting gzip/BGZF
     /// framing from the leading two bytes via a small range read.
-    pub async fn open(
-        store: Arc<dyn ObjectStore>,
-        location: StorePath,
-    ) -> Result<Self> {
+    pub async fn open(store: Arc<dyn ObjectStore>, location: StorePath) -> Result<Self> {
         let gz = match store.get_range(&location, 0..2).await {
             Ok(prefix) => is_gzip(&prefix),
             // Empty / unreadable objects are treated as uncompressed; the scan
             // will surface the real error.
             Err(_) => false,
         };
-        Ok(Self { store, location, gz })
+        Ok(Self {
+            store,
+            location,
+            gz,
+        })
     }
 
     /// Fetch the entire object into memory as [`Bytes`].
@@ -99,8 +100,7 @@ impl BioInput {
 /// oxbow's synchronous scanners wrap their iterator with [`sync_stream`]; the
 /// VCF driver feeds oxbow's `AsyncScanner` directly (and the remaining formats
 /// will follow once their async scanners land in oxbow).
-pub type BioBatchStream =
-    BoxStream<'static, std::result::Result<RecordBatch, ArrowError>>;
+pub type BioBatchStream = BoxStream<'static, std::result::Result<RecordBatch, ArrowError>>;
 
 /// Wrap a synchronous oxbow batch iterator into an async [`BioBatchStream`].
 ///

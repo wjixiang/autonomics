@@ -1,65 +1,34 @@
-//! Unified sink node: consumes an upstream `DataFrame` and writes it out.
+//! Iceberg sink node: consumes an upstream `DataFrame` and writes it to an
+//! Iceberg table via the catalog's `INSERT INTO` path.
 //!
-//! Symmetric to [`crate::nodes::SourceNode`]: a [`SinkNode`] has
-//! exactly one input and produces no output. The destination is described by
-//! [`Sink`] — a file (CSV / Parquet) or an Iceberg table.
+//! One untyped input port; no output ports. Symmetric to [`crate::nodes::SourceNode`]
+//! for the Iceberg case.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use datafusion::{
-    catalog::CatalogProvider,
-    common::HashMap,
-    common::config::{CsvOptions, TableParquetOptions},
-    dataframe::{DataFrame, DataFrameWriteOptions},
-    error::DataFusionError,
+    catalog::CatalogProvider, common::HashMap, dataframe::DataFrame, error::DataFusionError,
     execution::runtime_env::RuntimeEnv,
 };
 use datalake::Datalake;
 use iceberg::arrow::arrow_schema_to_schema_auto_assign_ids;
 use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
 use schemars::{JsonSchema, schema_for};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodePorts};
-use super::source::normalize_path;
+use super::sink_common::SinkMode;
 use crate::{
     dag::DagError,
     dag::graph::PortOutputs,
     node_registry::registry::{NodeCtx, NodeFactory, new_isolated_ctx},
 };
 
-/// Where a [`SinkNode`] writes to.
-#[derive(Debug, Clone)]
-pub enum Sink {
-    /// Write to a file path or URL.
-    File { path: String, format: WriteFormat },
-    /// Write to an Iceberg table (catalog write path must be available).
-    Iceberg { ident: String },
-}
-
-/// Supported on-disk write formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum WriteFormat {
-    Csv,
-    Parquet,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum SinkMode {
-    /// Add the new rows after whatever is already at the destination.
-    Append,
-    /// Replace whatever is at the destination with the new rows.
-    #[default]
-    Overwrite,
-}
-
 #[derive(Debug, Error)]
-pub enum SinkError {
+pub enum IcebergSinkError {
     #[error("Invalid input: {message}")]
     InvalidInput { message: String },
     #[error("write sink '{path}' failed")]
@@ -72,26 +41,17 @@ pub enum SinkError {
     Iceberg { msg: String },
 }
 
-impl From<SinkError> for DagError {
-    fn from(e: SinkError) -> Self {
+impl From<IcebergSinkError> for DagError {
+    fn from(e: IcebergSinkError) -> Self {
         match e {
-            SinkError::Write { source, .. } => DagError::DataFusion(source),
-            SinkError::InvalidInput { message } => DagError::Schedule(message),
-            SinkError::Iceberg { msg } => DagError::NodeError {
-                node_type: "sink".to_string(),
+            IcebergSinkError::Write { source, .. } => DagError::DataFusion(source),
+            IcebergSinkError::InvalidInput { message } => DagError::Schedule(message),
+            IcebergSinkError::Iceberg { msg } => DagError::NodeError {
+                node_type: "sink_iceberg".to_string(),
                 msg,
             },
         }
     }
-}
-
-pub struct SinkNode {
-    meta: NodePorts,
-    sink: Sink,
-    mode: SinkMode,
-    runtime_env: Arc<RuntimeEnv>,
-    iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
-    datalake: Arc<Datalake>,
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -114,8 +74,7 @@ pub struct SinkNode {
 // shadowed by reserved metadata name).
 //
 // >>> Remove `ICEBERG_RESERVED_BARE_NAMES` and `rename_iceberg_reserved_columns`
-// >>> (and the call site in `execute`'s `Sink::Iceberg` arm) once upstream
-// >>> fixes the name clash.
+// >>> (and the call site in `execute`) once upstream fixes the name clash.
 // ─────────────────────────────────────────────────────────────────────
 
 /// Top-level column names iceberg-rust reserves *without* a `_` prefix and
@@ -165,9 +124,18 @@ fn unique_column_name(base: &str, taken: &HashSet<String>) -> String {
     candidate
 }
 
-impl SinkNode {
+pub struct IcebergSinkNode {
+    meta: NodePorts,
+    ident: String,
+    mode: SinkMode,
+    runtime_env: Arc<RuntimeEnv>,
+    iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
+    datalake: Arc<Datalake>,
+}
+
+impl IcebergSinkNode {
     pub fn new(
-        sink: Sink,
+        ident: String,
         mode: SinkMode,
         runtime_env: Arc<RuntimeEnv>,
         iceberg_catalog: Option<Arc<dyn CatalogProvider>>,
@@ -175,7 +143,7 @@ impl SinkNode {
     ) -> Self {
         Self {
             meta: port_layout(),
-            sink,
+            ident,
             mode,
             runtime_env,
             iceberg_catalog,
@@ -183,9 +151,9 @@ impl SinkNode {
         }
     }
 
-    /// The destination this sink writes to.
-    pub fn sink(&self) -> &Sink {
-        &self.sink
+    /// The Iceberg table identifier this sink writes to.
+    pub fn ident(&self) -> &str {
+        &self.ident
     }
 
     /// Whether this sink appends to, or overwrites, the destination.
@@ -193,109 +161,56 @@ impl SinkNode {
         self.mode
     }
 
-    /// Return the rows already stored at `path` concatenated with `new`, used
-    /// to implement true single-file append.
-    ///
-    /// DataFusion's single-file sink always replaces the target file, so an
-    /// append is realized by reading the current contents back, casting each
-    /// column to `new`'s schema (so the schemas line up for `union`), and
-    /// emitting one combined [`DataFrame`] that is then written with
-    /// [`InsertOp::Overwrite`]. If the destination does not yet exist, `new`
-    /// is returned unchanged.
-    async fn append_existing(
-        &self,
-        path: &str,
-        format: WriteFormat,
-        new: DataFrame,
-    ) -> Result<DataFrame, SinkError> {
-        use datafusion::logical_expr::cast;
-        use datafusion::prelude::{CsvReadOptions, ParquetReadOptions, col};
-
-        if !std::path::Path::new(path).exists() {
-            return Ok(new);
-        }
-
-        let read_err = |e: datafusion::error::DataFusionError| SinkError::Write {
-            path: path.to_string(),
-            source: e,
-        };
-        let ctx = new_isolated_ctx(self.runtime_env.clone(), self.iceberg_catalog.clone());
-        let existing = match format {
-            WriteFormat::Csv => ctx
-                .read_csv(path, CsvReadOptions::default())
-                .await
-                .map_err(read_err)?,
-            WriteFormat::Parquet => ctx
-                .read_parquet(path, ParquetReadOptions::default())
-                .await
-                .map_err(read_err)?,
-        };
-
-        // Cast each existing column to the new DataFrame's field type so the
-        // two schemas are union-compatible. This matters most for CSV, where
-        // integers re-read back as `Int64` regardless of how they were
-        // written.
-        let target = new.schema().inner();
-        let cast_exprs: Vec<_> = target
-            .fields()
-            .iter()
-            .map(|f| cast(col(f.name()), f.data_type().clone()))
-            .collect();
-        let existing = existing.select(cast_exprs).map_err(read_err)?;
-        existing.union(new).map_err(read_err)
-    }
-
-    /// Handle to the Iceberg data lake; used by the Iceberg write path
-    /// once that branch is wired up.
+    /// Handle to the Iceberg data lake; used by the Iceberg write path.
     pub fn datalake(&self) -> Arc<Datalake> {
         self.datalake.clone()
+    }
+
+    /// Best-effort read-back of existing rows, used to implement append when
+    /// the table already holds data. Currently unused: Iceberg append relies
+    /// on `INSERT INTO` semantics. Kept for symmetry with the file sink.
+    #[allow(dead_code)]
+    async fn _append_existing(
+        &self,
+        _ident: &str,
+        new: DataFrame,
+    ) -> Result<DataFrame, IcebergSinkError> {
+        Ok(new)
     }
 }
 
 #[derive(Debug, JsonSchema, Deserialize)]
-#[serde(tag = "type")]
-pub enum SinkNodeSpec {
-    #[serde(rename = "file")]
-    File {
-        path: String,
-        format: WriteFormat,
-        #[serde(default)]
-        mode: SinkMode,
-    },
-    #[serde(rename = "iceberg")]
-    Iceberg {
-        ident: String,
-        #[serde(default)]
-        mode: SinkMode,
-    },
+pub struct IcebergSinkNodeSpec {
+    pub ident: String,
+    #[serde(default)]
+    pub mode: SinkMode,
 }
 
-pub struct SinkNodeFactory {}
+pub struct IcebergSinkNodeFactory {}
 
-/// Static port layout for every [`SinkNode`]: a single untyped input port and
-/// no outputs.
+/// Static port layout for every [`IcebergSinkNode`]: a single untyped input
+/// port and no outputs.
 fn port_layout() -> NodePorts {
     NodePorts::new().add_input_port(None)
 }
 
-impl NodeFactory for SinkNodeFactory {
+impl NodeFactory for IcebergSinkNodeFactory {
     fn kind(&self) -> &'static str {
-        "sink"
+        "sink_iceberg"
     }
 
     fn desc(&self) -> &'static str {
-        "Writes an upstream DataFrame to a file (CSV/Parquet) or Iceberg table."
+        "Writes an upstream DataFrame to an Iceberg table."
     }
 
     fn doc(&self) -> &'static str {
-        "A data sink node that consumes an upstream DataFrame and writes it to \
-        an external destination: local/remote files (CSV or Parquet) or Iceberg \
-        tables via the catalog. Supports both append and overwrite modes. \
-        One untyped input port; no output ports."
+        "An Iceberg sink node that consumes an upstream DataFrame and writes it \
+        to an Iceberg table via the catalog using INSERT INTO. Supports both \
+        append and overwrite modes. One untyped input port; no output ports."
     }
 
     fn spec_schema(&self) -> schemars::Schema {
-        schema_for!(SinkNodeSpec)
+        schema_for!(IcebergSinkNodeSpec)
     }
 
     fn ports(&self) -> NodePorts {
@@ -307,14 +222,10 @@ impl NodeFactory for SinkNodeFactory {
         spec: serde_json::Value,
         node_ctx: NodeCtx,
     ) -> crate::node_registry::error::Result<Box<dyn DagNode>> {
-        let node_spec: SinkNodeSpec = serde_json::from_value(spec)?;
-        let (sink, mode) = match node_spec {
-            SinkNodeSpec::File { path, format, mode } => (Sink::File { path, format }, mode),
-            SinkNodeSpec::Iceberg { ident, mode } => (Sink::Iceberg { ident }, mode),
-        };
-        let node = SinkNode::new(
-            sink,
-            mode,
+        let node_spec: IcebergSinkNodeSpec = serde_json::from_value(spec)?;
+        let node = IcebergSinkNode::new(
+            node_spec.ident,
+            node_spec.mode,
             node_ctx.runtime_env,
             node_ctx.iceberg_catalog,
             node_ctx.datalake,
@@ -324,7 +235,7 @@ impl NodeFactory for SinkNodeFactory {
 }
 
 #[async_trait]
-impl DagNode for SinkNode {
+impl DagNode for IcebergSinkNode {
     fn ports(&self) -> &NodePorts {
         &self.meta
     }
@@ -332,7 +243,7 @@ impl DagNode for SinkNode {
     fn clone_box(&self) -> Box<dyn DagNode> {
         let cp_node = Self {
             meta: self.meta.clone(),
-            sink: self.sink.clone(),
+            ident: self.ident.clone(),
             mode: self.mode,
             runtime_env: self.runtime_env.clone(),
             iceberg_catalog: self.iceberg_catalog.clone(),
@@ -343,7 +254,7 @@ impl DagNode for SinkNode {
     }
 
     fn kind(&self) -> &'static str {
-        "sink"
+        "sink_iceberg"
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -351,166 +262,128 @@ impl DagNode for SinkNode {
     }
 
     async fn execute(&mut self, inputs: &[NodeInput]) -> Result<PortOutputs, DagError> {
-        let input = inputs.first().ok_or(SinkError::InvalidInput {
-            message: "SinkNode requires exactly one upstream input".to_string(),
+        let input = inputs.first().ok_or(IcebergSinkError::InvalidInput {
+            message: "IcebergSinkNode requires exactly one upstream input".to_string(),
         })?;
 
-        match &self.sink {
-            Sink::File { path, format } => {
-                let path = normalize_path(path);
-                let df = input.data.clone();
+        // Write through DataFusion's `INSERT INTO` which delegates to the
+        // registered `IcebergCatalogProvider` (handles parquet writing,
+        // file-I/O, and the append commit).
+        //
+        // Steps:
+        // 1. Parse `ident` ("ns1.ns2...table") into namespace + table name.
+        // 2. Derive the Iceberg schema from the incoming Arrow schema.
+        // 3. For `Overwrite`: drop the table, recreate it empty.
+        //    For `Append`:  create the table if it does not exist.
+        // 4. Register the upstream DataFrame as a temp view, then
+        //    `INSERT INTO iceberg.<ns>.<table> SELECT * FROM <view>`.
+        let df = input.data.clone();
+        // WORKAROUND(iceberg-rust): rename bare reserved metadata
+        // column names (`pos`, `file_path`) so they survive the
+        // round-trip. Remove once upstream fixes the clash.
+        let df = rename_iceberg_reserved_columns(df).map_err(DagError::DataFusion)?;
+        let datalake = self.datalake();
+        let ident = &self.ident;
 
-                // Resolve the DataFrame to actually write. DataFusion's
-                // `write_csv`/`write_parquet` do not implement
-                // `InsertOp::Overwrite` and their single-file sink always
-                // *replaces* the target — so an overwrite is "drop the
-                // existing file then write", and an append is "read the
-                // existing rows back, merge them, then write".
-                let to_write = match self.mode {
-                    SinkMode::Overwrite => {
-                        let _ = std::fs::remove_file(&path);
-                        df
-                    }
-                    SinkMode::Append => self.append_existing(&path, *format, df).await?,
-                };
+        // 1. Parse ident.
+        let mut ns_vec: Vec<String> = ident.split('.').map(|e| e.to_string()).collect();
+        let table_name = ns_vec.pop().ok_or(IcebergSinkError::Iceberg {
+            msg: "Illegal table ident - table name is empty".to_string(),
+        })?;
+        let namespace = NamespaceIdent::from_vec(ns_vec)
+            .map_err(|e| IcebergSinkError::Iceberg { msg: e.to_string() })?;
 
-                let options = DataFrameWriteOptions::new().with_single_file_output(true);
+        // 2. Derive Iceberg schema from the upstream Arrow schema.
+        let arrow_schema = df.schema().inner();
+        let iceberg_schema = arrow_schema_to_schema_auto_assign_ids(arrow_schema)
+            .map_err(|e| IcebergSinkError::Iceberg { msg: e.to_string() })?;
 
-                let res = match format {
-                    WriteFormat::Csv => {
-                        to_write.write_csv(&path, options, None::<CsvOptions>).await
-                    }
-                    WriteFormat::Parquet => {
-                        to_write
-                            .write_parquet(&path, options, None::<TableParquetOptions>)
-                            .await
-                    }
-                };
-                res.map_err(|e| SinkError::Write {
-                    path: path.clone(),
-                    source: e,
-                })?;
+        // 3. Ensure the table exists with the correct (empty) state.
+        let catalog = datalake
+            .get_catalog()
+            .await
+            .map_err(|e| IcebergSinkError::Iceberg { msg: e.to_string() })?;
+
+        let table_ident = TableIdent::new(namespace.clone(), table_name.clone());
+        match self.mode {
+            SinkMode::Overwrite => {
+                // Drop any pre-existing table so the write starts from
+                // an empty table. Best-effort: a missing table is
+                // expected on first write.
+                let _ = catalog.drop_table(&table_ident).await;
+                let creation = TableCreation::builder()
+                    .name(table_name.clone())
+                    .schema(iceberg_schema)
+                    .build();
+                datalake
+                    .create_table_if_not_exist(&namespace, creation)
+                    .await
+                    .map_err(|e| IcebergSinkError::Iceberg { msg: e.to_string() })?;
             }
-            Sink::Iceberg { ident } => {
-                // Write through DataFusion's `INSERT INTO` which delegates to the
-                // registered `IcebergCatalogProvider` (handles parquet writing,
-                // file-I/O, and the append commit).
-                //
-                // Steps:
-                // 1. Parse `ident` ("ns1.ns2...table") into namespace + table name.
-                // 2. Derive the Iceberg schema from the incoming Arrow schema.
-                // 3. For `Overwrite`: drop the table, recreate it empty.
-                //    For `Append`:  create the table if it does not exist.
-                // 4. Register the upstream DataFrame as a temp view, then
-                //    `INSERT INTO iceberg.<ns>.<table> SELECT * FROM <view>`.
-                let df = input.data.clone();
-                // WORKAROUND(iceberg-rust): rename bare reserved metadata
-                // column names (`pos`, `file_path`) so they survive the
-                // round-trip. Remove once upstream fixes the clash.
-                let df = rename_iceberg_reserved_columns(df).map_err(DagError::DataFusion)?;
-                let datalake = self.datalake();
-
-                // 1. Parse ident.
-                let mut ns_vec: Vec<String> = ident.split('.').map(|e| e.to_string()).collect();
-                let table_name = ns_vec.pop().ok_or(SinkError::Iceberg {
-                    msg: "Illegal table ident - table name is empty".to_string(),
-                })?;
-                let namespace = NamespaceIdent::from_vec(ns_vec)
-                    .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?;
-
-                // 2. Derive Iceberg schema from the upstream Arrow schema.
-                let arrow_schema = df.schema().inner();
-                let iceberg_schema = arrow_schema_to_schema_auto_assign_ids(arrow_schema)
-                    .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?;
-
-                // 3. Ensure the table exists with the correct (empty) state.
-                let catalog = datalake
-                    .get_catalog()
+            SinkMode::Append => {
+                // If the table already exists with data, skip creation
+                // — the INSERT will append rows.
+                if !catalog
+                    .table_exists(&table_ident)
                     .await
-                    .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?;
-
-                let table_ident = TableIdent::new(namespace.clone(), table_name.clone());
-                match self.mode {
-                    SinkMode::Overwrite => {
-                        // Drop any pre-existing table so the write starts from
-                        // an empty table. Best-effort: a missing table is
-                        // expected on first write.
-                        let _ = catalog.drop_table(&table_ident).await;
-                        let creation = TableCreation::builder()
-                            .name(table_name.clone())
-                            .schema(iceberg_schema)
-                            .build();
-                        datalake
-                            .create_table_if_not_exist(&namespace, creation)
-                            .await
-                            .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?;
-                    }
-                    SinkMode::Append => {
-                        // If the table already exists with data, skip creation
-                        // — the INSERT will append rows.
-                        if !catalog
-                            .table_exists(&table_ident)
-                            .await
-                            .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?
-                        {
-                            let creation = TableCreation::builder()
-                                .name(table_name.clone())
-                                .schema(iceberg_schema)
-                                .build();
-                            datalake
-                                .create_table_if_not_exist(&namespace, creation)
-                                .await
-                                .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?;
-                        }
-                    }
+                    .map_err(|e| IcebergSinkError::Iceberg { msg: e.to_string() })?
+                {
+                    let creation = TableCreation::builder()
+                        .name(table_name.clone())
+                        .schema(iceberg_schema)
+                        .build();
+                    datalake
+                        .create_table_if_not_exist(&namespace, creation)
+                        .await
+                        .map_err(|e| IcebergSinkError::Iceberg { msg: e.to_string() })?;
                 }
-
-                // Build a fresh context with the fresh iceberg provider so the
-                // planner discovers the table we just created through the REST
-                // API. The previous provider cached its table list at
-                // creation time, so a freshly-created table is invisible to it.
-                let fresh_provider = datalake
-                    .get_provider()
-                    .await
-                    .map_err(|e| SinkError::Iceberg { msg: e.to_string() })?;
-                let ctx =
-                    new_isolated_ctx(self.runtime_env.clone(), Some(Arc::new(fresh_provider)));
-
-                // 4. Register the upstream DataFrame as a temp view and INSERT.
-                let src_name = format!("__sink_src_{:x}", std::process::id());
-                let _ = ctx.deregister_table(&src_name);
-                let view = df.into_view();
-                ctx.register_table(&src_name, view)
-                    .map_err(|e| SinkError::Write {
-                        path: format!("iceberg://{ident}"),
-                        source: e,
-                    })?;
-
-                // Build a fully-qualified `iceberg.<ns>.<table>` reference.
-                // DataFusion's SQL parser handles multi-part identifiers with
-                // up to 4 segments, which covers typical nested namespaces.
-                let mut parts = vec!["iceberg".to_string()];
-                parts.extend(namespace.inner().iter().cloned());
-                parts.push(table_name);
-                let fqn = parts.join(".");
-
-                let sql = format!("INSERT INTO {fqn} SELECT * FROM {src_name}");
-                ctx.sql(&sql)
-                    .await
-                    .map_err(|e| SinkError::Write {
-                        path: format!("iceberg://{ident}"),
-                        source: e,
-                    })?
-                    .collect()
-                    .await
-                    .map_err(|e| SinkError::Write {
-                        path: format!("iceberg://{ident}"),
-                        source: e,
-                    })?;
-
-                ctx.deregister_table(&src_name).ok();
             }
         }
+
+        // Build a fresh context with the fresh iceberg provider so the
+        // planner discovers the table we just created through the REST
+        // API. The previous provider cached its table list at
+        // creation time, so a freshly-created table is invisible to it.
+        let fresh_provider = datalake
+            .get_provider()
+            .await
+            .map_err(|e| IcebergSinkError::Iceberg { msg: e.to_string() })?;
+        let ctx = new_isolated_ctx(self.runtime_env.clone(), Some(Arc::new(fresh_provider)));
+
+        // 4. Register the upstream DataFrame as a temp view and INSERT.
+        let src_name = format!("__sink_src_{:x}", std::process::id());
+        let _ = ctx.deregister_table(&src_name);
+        let view = df.into_view();
+        ctx.register_table(&src_name, view)
+            .map_err(|e| IcebergSinkError::Write {
+                path: format!("iceberg://{ident}"),
+                source: e,
+            })?;
+
+        // Build a fully-qualified `iceberg.<ns>.<table>` reference.
+        // DataFusion's SQL parser handles multi-part identifiers with
+        // up to 4 segments, which covers typical nested namespaces.
+        let mut parts = vec!["iceberg".to_string()];
+        parts.extend(namespace.inner().iter().cloned());
+        parts.push(table_name);
+        let fqn = parts.join(".");
+
+        let sql = format!("INSERT INTO {fqn} SELECT * FROM {src_name}");
+        ctx.sql(&sql)
+            .await
+            .map_err(|e| IcebergSinkError::Write {
+                path: format!("iceberg://{ident}"),
+                source: e,
+            })?
+            .collect()
+            .await
+            .map_err(|e| IcebergSinkError::Write {
+                path: format!("iceberg://{ident}"),
+                source: e,
+            })?;
+
+        ctx.deregister_table(&src_name).ok();
+
         Ok(HashMap::new())
     }
 }
@@ -525,15 +398,15 @@ mod tests {
     use datalake::Datalake;
 
     use crate::nodes::{
-        Sink, SinkMode, SinkNode, WriteFormat,
+        IcebergSinkNode,
         meta::{DagNode, NodeInput},
     };
 
     /// Build a small in-memory [`DataFrame`] for sink tests.
     ///
-    /// Two columns, three rows — enough to round-trip through both CSV and
-    /// Parquet writers without bloating the test runtime. Mirrors the helper
-    /// style used in `sql_node::tests::setup_test_node`.
+    /// Two columns, three rows — enough to round-trip through the iceberg
+    /// writer without bloating the test runtime. Mirrors the helper style
+    /// used in `sql_node::tests::setup_test_node`.
     #[allow(dead_code)]
     fn sample_dataframe() -> (SessionContext, DataFrame) {
         let ctx = SessionContext::new();
@@ -663,11 +536,9 @@ mod tests {
         let ctx = Datalake::default().get_ctx().await.unwrap();
         let provider = Datalake::default().get_provider().await.unwrap();
         let datalake = Arc::new(Datalake::default());
-        let mut node = SinkNode::new(
-            Sink::Iceberg {
-                ident: "gwas.test4".to_string(),
-            },
-            crate::nodes::sink::SinkMode::Overwrite,
+        let mut node = IcebergSinkNode::new(
+            "gwas.test4".to_string(),
+            crate::nodes::sink_common::SinkMode::Overwrite,
             ctx.runtime_env(),
             Some(Arc::new(provider)),
             datalake,
@@ -678,127 +549,6 @@ mod tests {
         let _res = node.execute(&[input]).await.unwrap();
         // let df = res.get(&0).unwrap();
         // df.clone().show().await.unwrap();
-    }
-
-    /// A fresh DataFrame whose rows differ from [`sample_dataframe`] so that
-    /// append vs. overwrite is distinguishable by reading the file back.
-    fn second_dataframe() -> (SessionContext, DataFrame) {
-        let ctx = SessionContext::new();
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int32, false),
-            Field::new("name", DataType::Utf8, false),
-        ]));
-        let batch = RecordBatch::try_new(
-            schema,
-            vec![
-                Arc::new(Int32Array::from(vec![4, 5])),
-                Arc::new(StringArray::from(vec!["dave", "eve"])),
-            ],
-        )
-        .expect("second RecordBatch should construct");
-        let df = ctx
-            .read_batch(batch)
-            .expect("ctx should accept second batch");
-        (ctx, df)
-    }
-
-    /// Read the `id` column of a CSV file back as a sorted `Vec<i32>`.
-    ///
-    /// DataFusion infers integer CSV columns as `Int64`, so we downcast to
-    /// `Int64Array` regardless of how the value was originally typed.
-    async fn read_csv_ids(ctx: &SessionContext, path: &str) -> Vec<i32> {
-        use arrow_array::Int64Array;
-        use datafusion::prelude::CsvReadOptions;
-        let mut ids: Vec<i32> = ctx
-            .read_csv(path, CsvReadOptions::default())
-            .await
-            .expect("read back sink output")
-            .select(vec![datafusion::prelude::col("id")])
-            .expect("select id")
-            .collect()
-            .await
-            .expect("collect ids")
-            .into_iter()
-            .flat_map(|b| {
-                b.column(0)
-                    .as_any()
-                    .downcast_ref::<Int64Array>()
-                    .expect("id is Int64")
-                    .iter()
-                    .map(|v| v.expect("non-null id") as i32)
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        ids.sort();
-        ids
-    }
-
-    /// `Overwrite` replaces the destination file entirely.
-    #[tokio::test]
-    async fn test_sink_file_overwrite_replaces() {
-        let ctx = SessionContext::new();
-        let datalake = Arc::new(Datalake::default());
-        let runtime_env = ctx.runtime_env();
-        let path = format!("/tmp/sink_overwrite_{}.csv", std::process::id(),);
-
-        let sink = |df: DataFrame, mode| {
-            let mut node = SinkNode::new(
-                Sink::File {
-                    path: path.clone(),
-                    format: WriteFormat::Csv,
-                },
-                mode,
-                runtime_env.clone(),
-                None,
-                datalake.clone(),
-            );
-            async move { node.execute(&[NodeInput { port: 0, data: df }]).await }
-        };
-
-        sink(sample_dataframe().1, SinkMode::Overwrite)
-            .await
-            .unwrap();
-        sink(second_dataframe().1, SinkMode::Overwrite)
-            .await
-            .unwrap();
-
-        let ids = read_csv_ids(&ctx, &path).await;
-        assert_eq!(ids, vec![4, 5], "overwrite must keep only the second write");
-        let _ = std::fs::remove_file(&path);
-    }
-
-    /// `Append` stacks successive writes onto the destination file.
-    #[tokio::test]
-    async fn test_sink_file_append_accumulates() {
-        let ctx = SessionContext::new();
-        let datalake = Arc::new(Datalake::default());
-        let runtime_env = ctx.runtime_env();
-        let path = format!("/tmp/sink_append_{}.csv", std::process::id());
-
-        let write = |df: DataFrame| {
-            let mut node = SinkNode::new(
-                Sink::File {
-                    path: path.clone(),
-                    format: WriteFormat::Csv,
-                },
-                SinkMode::Append,
-                runtime_env.clone(),
-                None,
-                datalake.clone(),
-            );
-            async move { node.execute(&[NodeInput { port: 0, data: df }]).await }
-        };
-
-        write(sample_dataframe().1).await.unwrap();
-        write(second_dataframe().1).await.unwrap();
-
-        let ids = read_csv_ids(&ctx, &path).await;
-        assert_eq!(
-            ids,
-            vec![1, 2, 3, 4, 5],
-            "append must keep rows from both writes"
-        );
-        let _ = std::fs::remove_file(&path);
     }
 
     /// Regression: when an upstream SqlNode produces a `List(Utf8)` column

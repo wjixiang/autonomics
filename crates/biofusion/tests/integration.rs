@@ -156,11 +156,7 @@ async fn read_vcf_region_returns_only_matching_rows() {
     // Region query — whole chr1 (the VCF uses `chrN` names). This must be a
     // strict subset of the full scan (which spans chr1..chr22).
     let region_df = ctx
-        .read_vcf_region(
-            path.to_str().unwrap(),
-            "1",
-            BioReadOptions::default(),
-        )
+        .read_vcf_region(path.to_str().unwrap(), "1", BioReadOptions::default())
         .await
         .unwrap();
     let region_rows: usize = region_df
@@ -172,7 +168,10 @@ async fn read_vcf_region_returns_only_matching_rows() {
         .sum();
 
     assert!(full_rows > 0, "fixture should have rows");
-    assert!(region_rows > 0, "region chr1 should intersect at least one record");
+    assert!(
+        region_rows > 0,
+        "region chr1 should intersect at least one record"
+    );
     assert!(
         region_rows < full_rows,
         "region query ({region_rows}) must be a strict subset of full scan ({full_rows})"

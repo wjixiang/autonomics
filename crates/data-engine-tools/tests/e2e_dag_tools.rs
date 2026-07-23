@@ -109,8 +109,8 @@ async fn test_add_source_sql_run_dag() {
                 "add_node",
                 json!({
                     "id": "sink",
-                    "kind": "sink",
-                    "spec": {"type": "file", "path": "/output.csv", "format": "csv", "mode": "overwrite"}
+                    "kind": "sink_file",
+                    "spec": {"path": "/output.csv", "format": "csv", "mode": "overwrite"}
                 }),
             )],
             None,
@@ -146,8 +146,8 @@ async fn test_add_source_sql_run_dag() {
                 "add_node",
                 json!({
                     "id": "sink_lake",
-                    "kind": "sink",
-                    "spec": {"type": "iceberg", "ident": "gwas.iris_test", "mode": "overwrite"}
+                    "kind": "sink_iceberg",
+                    "spec": {"ident": "gwas.iris_test", "mode": "overwrite"}
                 }),
             )],
             None,

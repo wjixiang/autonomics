@@ -291,7 +291,7 @@ pub trait DagNode: Send + Sync {
     fn clone_box(&self) -> Box<dyn DagNode>;
 
     /// The kind string identifying this node type (e.g. `"source"`,
-    /// `"sql"`, `"sink"`). This MUST match the [`NodeFactory::kind`] that
+    /// `"sql"`, `"sink_file"`). This MUST match the [`NodeFactory::kind`] that
     /// builds this node type.
     fn kind(&self) -> &'static str;
 

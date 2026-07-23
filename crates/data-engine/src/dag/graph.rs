@@ -18,7 +18,7 @@ use super::utils::{build_inputs, cascade_skip};
 use super::error::DagError;
 use super::runtime::{NodeReport, RunReport, RuntimeStatus, SchedulerConfig};
 use super::{DagNode, NodeId};
-use crate::nodes::sink::SinkNode;
+use crate::nodes::sink_file::FileSinkNode;
 
 /// Output DataFrames keyed by output port index.
 pub type PortOutputs = HashMap<u8, DataFrame>;
@@ -346,15 +346,12 @@ impl DAG {
                 let output_rows = counts.get(id).copied();
                 let elapsed_ms = durations.get(id).map(|d| d.as_millis() as u64);
 
-                // Extract sink path via downcast.
-                let sink_path = self
+                // Extract file sink path via downcast.
+                let file_path = self
                     .nodes
                     .get(id)
-                    .and_then(|n| n.as_any().downcast_ref::<SinkNode>())
-                    .and_then(|sn| match sn.sink() {
-                        crate::nodes::Sink::File { path, .. } => Some(path.clone()),
-                        _ => None,
-                    });
+                    .and_then(|n| n.as_any().downcast_ref::<FileSinkNode>())
+                    .map(|sn| sn.sink_path().to_string());
 
                 // Extract rendered-artifact path from a VizNode via downcast.
                 let artifact_path = self
@@ -373,8 +370,8 @@ impl DAG {
                     output_schema,
                     output_rows,
                     elapsed_ms,
-                    sink_path,
                     artifact_path,
+                    file_path,
                     error,
                     skipped_because,
                 }

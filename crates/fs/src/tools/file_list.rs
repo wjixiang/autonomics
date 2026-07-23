@@ -323,11 +323,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .find(|e| {
-                e["name"]
-                    .as_str()
-                    .is_some_and(|n| n.contains("sized.txt"))
-            })
+            .find(|e| e["name"].as_str().is_some_and(|n| n.contains("sized.txt")))
             .expect("expected sized.txt entry");
         assert_eq!(file_entry["size"].as_u64().unwrap(), 11); // "hello world"
     }

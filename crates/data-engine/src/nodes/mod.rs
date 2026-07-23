@@ -2,7 +2,7 @@
 //!
 //! [`meta`] defines the [`DagNode`] trait, [`NodePorts`], and [`NodeInput`] —
 //! the contract every node fulfils. Concrete implementations live in
-//! [`source`], [`sql_node`], and [`sink`].
+//! [`source`], [`sql_node`], [`sink_file`], and [`sink_iceberg`].
 
 pub mod echo_node;
 pub mod ldsc_hsq;
@@ -11,7 +11,9 @@ pub mod liability;
 pub mod linear_regression;
 pub mod meta;
 pub mod mr;
-pub mod sink;
+pub mod sink_common;
+pub mod sink_file;
+pub mod sink_iceberg;
 pub mod source;
 pub mod sql_node;
 pub mod test_source;
@@ -26,7 +28,9 @@ pub use linear_regression::{
 };
 pub use meta::{DEFAULT_PORT, DagNode, NodeId, NodeInput, NodePorts, Port};
 pub use mr::{MrNode, MrNodeFactory, MrNodeSpec, MrParameters};
-pub use sink::{Sink, SinkMode, SinkNode, SinkNodeFactory, SinkNodeSpec, WriteFormat};
+pub use sink_common::SinkMode;
+pub use sink_file::{FileSinkNode, FileSinkNodeFactory, FileSinkNodeSpec, WriteFormat};
+pub use sink_iceberg::{IcebergSinkNode, IcebergSinkNodeFactory, IcebergSinkNodeSpec};
 pub use source::{FileFormat, Source, SourceNode, SourceNodeFactory, SourceNodeSpec};
 pub use sql_node::{SqlNode, SqlNodeFactory, SqlNodeSpec};
 pub use test_source::{TestSourceFactory, TestSourceNode, TestSourceSpec};

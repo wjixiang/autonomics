@@ -24,11 +24,11 @@
 //! Note this is *not* a DataFusion reserved word — `pos` parses fine as a
 //! column reference. It is purely an iceberg-rust metadata-column name clash.
 //!
-//! ## Workaround (built into `SinkNode`)
+//! ## Workaround (built into `IcebergSinkNode`)
 //!
-//! `SinkNode`'s Iceberg arm now calls `rename_iceberg_reserved_columns`, which
+//! `IcebergSinkNode`'s execute now calls `rename_iceberg_reserved_columns`, which
 //! renames top-level `pos`/`file_path` to `pos_col`/`file_path_col` before
-//! writing (see `sink.rs`, tagged `WORKAROUND(iceberg-rust)`). So a DataFrame
+//! writing (see `sink_iceberg.rs`, tagged `WORKAROUND(iceberg-rust)`). So a DataFrame
 //! with a `pos` column round-trips as `pos_col`.
 //!
 //! ## Tests
@@ -37,14 +37,14 @@
 //!   repro via the public `iceberg` API (no catalog needed). Pins the upstream
 //!   bug; will fail (as a regression alarm) once upstream fixes it.
 //! * [`sink_auto_renames_reserved_columns`] — end-to-end: writing a `pos`
-//!   column through `SinkNode` yields a readable `pos_col` (needs a catalog).
+//!   column through `IcebergSinkNode` yields a readable `pos_col` (needs a catalog).
 
 use std::sync::Arc;
 
 use arrow_array::{ArrayRef, Int32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
 use data_engine::dag::DagNode;
-use data_engine::nodes::{NodeInput, Sink, SinkMode, SinkNode};
+use data_engine::nodes::{NodeInput, SinkMode, sink_iceberg::IcebergSinkNode};
 use datafusion::prelude::SessionContext;
 use datalake::Datalake;
 use iceberg::metadata_columns::{
@@ -111,10 +111,8 @@ async fn write_to_iceberg(
     df: datafusion::prelude::DataFrame,
 ) {
     let provider = datalake.get_provider().await.unwrap();
-    let mut sink_node = SinkNode::new(
-        Sink::Iceberg {
-            ident: ident.to_string(),
-        },
+    let mut sink_node = IcebergSinkNode::new(
+        ident.to_string(),
         SinkMode::Overwrite,
         ctx.runtime_env(),
         Some(std::sync::Arc::new(provider)),
@@ -146,9 +144,9 @@ async fn can_select(
     }
 }
 
-/// End-to-end: `SinkNode` auto-renames the reserved `pos` column to `pos_col`
+/// End-to-end: `IcebergSinkNode` auto-renames the reserved `pos` column to `pos_col`
 /// on the Iceberg write path, so the data survives the round-trip readable.
-/// Without the workaround (in `sink.rs`, tagged `WORKAROUND(iceberg-rust)`),
+/// Without the workaround (in `sink_iceberg.rs`, tagged `WORKAROUND(iceberg-rust)`),
 /// `SELECT pos` would fail with "field not found" and no `pos_col` would exist.
 #[tokio::test]
 // #[ignore] // requires a running Iceberg REST catalog

@@ -24,6 +24,7 @@ members = [
   "bio_crates/mr",
   "infra/sink_ld_matrix",
   "crates/visualization",
+   "infra/sink_af",
 ]
 
 [workspace.package]

@@ -23,7 +23,7 @@ use crate::ExecError;
                   Common update examples: \
                   - sql node:  {\"sql_query\": \"SELECT COUNT(*) FROM port_0\"} \
                   - source:    {\"type\": \"file\", \"path\": \"/new/data.csv\"} \
-                  - sink:      {\"type\": \"file\", \"path\": \"/out/new.csv\", \"format\": \"parquet\", \"mode\": \"overwrite\"} \
+                  - sink_file: {\"path\": \"/out/new.csv\", \"format\": \"parquet\", \"mode\": \"overwrite\"} \
                   - linear_regression: {\"x_columns\": [\"age\"], \"y_column\": \"charges\", \"intercept\": true}"
 )]
 pub struct UpdateNodeInput {
