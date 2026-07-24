@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::meta::{DagNode, NodeInput, NodePorts};
-use crate::dag::graph::PortOutputs;
 use crate::dag::DagError;
+use crate::dag::graph::PortOutputs;
 
 /// Errors raised by the visualization node.
 #[derive(Debug, Error)]
@@ -32,8 +32,10 @@ pub enum VizError {
         #[source]
         source: visualization::error::VizError,
     },
-    #[error("no opendal filesystem registered with the engine — \
-             the visualization node needs one to write the PNG")]
+    #[error(
+        "no opendal filesystem registered with the engine — \
+             the visualization node needs one to write the PNG"
+    )]
     NoOpendalFs,
     #[error("writing the PNG into the opendal filesystem failed: {0}")]
     OpendalWrite(String),
@@ -289,6 +291,9 @@ mod tests {
         assert!(bytes.len() > 100);
         assert_eq!(&bytes[0..4], &[0x89, b'P', b'N', b'G']);
         assert_eq!(node.output_path(), virtual_out);
-        eprintln!("VizNode OK: {} bytes via opendal at {virtual_out}", bytes.len());
+        eprintln!(
+            "VizNode OK: {} bytes via opendal at {virtual_out}",
+            bytes.len()
+        );
     }
 }

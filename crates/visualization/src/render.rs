@@ -87,9 +87,7 @@ fn prepare(
 ) -> Result<(Vec<u8>, f64, f64, f64)> {
     let r_code = r_code.trim();
     if r_code.is_empty() {
-        return Err(VizError::InvalidPlotCode(
-            "plot code is empty".to_string(),
-        ));
+        return Err(VizError::InvalidPlotCode("plot code is empty".to_string()));
     }
 
     // All batches share one schema; take it from the first non-empty batch,
@@ -256,13 +254,24 @@ mod tests {
         let out = tempfile::NamedTempFile::new().unwrap().keep().unwrap().1;
         let code = "p <- ggplot(df, aes(x = x, y = y)) + geom_point() + geom_line()";
 
-        render_png(&sample_batches(), code, &out, Some(6.0), Some(4.0), Some(100.0))
-            .await
-            .expect("render should succeed");
+        render_png(
+            &sample_batches(),
+            code,
+            &out,
+            Some(6.0),
+            Some(4.0),
+            Some(100.0),
+        )
+        .await
+        .expect("render should succeed");
 
         let bytes = std::fs::read(&out).expect("read output png");
         assert!(bytes.len() > 100, "PNG too small");
-        assert_eq!(&bytes[0..4], &[0x89, b'P', b'N', b'G'], "not a PNG signature");
+        assert_eq!(
+            &bytes[0..4],
+            &[0x89, b'P', b'N', b'G'],
+            "not a PNG signature"
+        );
         eprintln!("render_png OK: {} bytes", bytes.len());
         let _ = std::fs::remove_file(&out);
     }
