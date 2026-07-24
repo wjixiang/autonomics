@@ -65,9 +65,6 @@ oxbow = { git = "https://github.com/wjixiang/oxbow.git" }
 
 faer = "0.24.4"
 
-extendr-api = "0.9.0"
-extendr-engine = "0.9.0"
-
 # Suppress unused-warnings for the public-API workspace.dependencies that
 # the umbrella doesn't directly import. Keep this list as a hint for
 # future members; do not delete entries just because a single member

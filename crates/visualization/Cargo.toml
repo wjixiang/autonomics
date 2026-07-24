@@ -17,8 +17,6 @@ tempfile = "3"
 
 [dev-dependencies]
 datafusion.workspace = true
-extendr-api.workspace = true
-extendr-engine.workspace = true
 thiserror.workspace = true
 
 [lints]
